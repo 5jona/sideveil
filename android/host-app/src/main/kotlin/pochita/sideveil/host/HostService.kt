@@ -16,14 +16,13 @@ import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import kotlinx.serialization.json.encodeToJsonElement
-import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import pochita.sideveil.shared.ConfigUpdatedPayload
+import pochita.sideveil.shared.DaemonEndpoint
 import pochita.sideveil.shared.GestureDragEndPayload
 import pochita.sideveil.shared.GestureDragMovePayload
 import pochita.sideveil.shared.HostEventEnvelope
 import pochita.sideveil.shared.HostHelloPayload
+import pochita.sideveil.shared.PanelCommand
 import pochita.sideveil.shared.PanelCommandPayload
 import pochita.sideveil.shared.PanelState
 import pochita.sideveil.shared.PanelStateChangedPayload
@@ -119,11 +118,9 @@ class HostService : LifecycleService() {
                         override fun syncAppearance(
                             themeId: String,
                             colorScheme: String,
-                            wantsNativeBlur: Boolean,
-                            cornerRadiusPx: Int,
                         ) {
                             latestDarkSurface = colorScheme != "light"
-                            panelWindow.syncRuntimeAppearance(themeId, colorScheme, wantsNativeBlur, cornerRadiusPx)
+                            panelWindow.syncRuntimeAppearance(themeId, colorScheme)
                             edgeIndicator.update(
                                 latestConfig.edge,
                                 latestScopeActive,
@@ -258,9 +255,9 @@ class HostService : LifecycleService() {
                         runCatching { SideveilWireJson.decodeFromJsonElement(PanelCommandPayload.serializer(), it) }.getOrNull()
                     } ?: return
                 when (decoded.command) {
-                    "open" -> panelWindow.open()
-                    "close" -> panelWindow.close()
-                    "toggle" -> panelWindow.toggle()
+                    PanelCommand.OPEN -> panelWindow.open()
+                    PanelCommand.CLOSE -> panelWindow.close()
+                    PanelCommand.TOGGLE -> panelWindow.toggle()
                 }
             }
 
@@ -303,11 +300,9 @@ class HostService : LifecycleService() {
         val endpointFile = File(noBackupFilesDir, ENDPOINT_FILE_NAME)
         if (!endpointFile.isFile || !endpointFile.canRead()) return
         runCatching {
-            val root = SideveilWireJson.parseToJsonElement(endpointFile.readText(Charsets.UTF_8)).jsonObject
-            val port = root["port"]?.jsonPrimitive?.intOrNull ?: 0
-            val token = root["token"]?.jsonPrimitive?.content.orEmpty()
-            if (port in 1..65535 && TOKEN_REGEX.matches(token)) {
-                daemonClient.updateEndpoint(port, token)
+            val endpoint = SideveilWireJson.decodeFromString<DaemonEndpoint>(endpointFile.readText(Charsets.UTF_8))
+            if (endpoint.port in 1..65535 && TOKEN_REGEX.matches(endpoint.token)) {
+                daemonClient.updateEndpoint(endpoint.port, endpoint.token)
             } else {
                 Log.w(TAG, "Ignored malformed daemon endpoint file")
             }

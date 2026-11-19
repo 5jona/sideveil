@@ -20,18 +20,15 @@ import androidx.webkit.WebViewCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.decodeFromJsonElement
 import org.json.JSONObject
+import pochita.sideveil.shared.ContainerActionPayload
 import pochita.sideveil.shared.HostEventEnvelope
-import pochita.sideveil.shared.RpcError
 import pochita.sideveil.shared.RpcRequest
 import pochita.sideveil.shared.RpcResponse
+import pochita.sideveil.shared.SideveilMethods
 import pochita.sideveil.shared.SideveilWireJson
 import java.io.ByteArrayInputStream
 import java.io.IOException
@@ -44,8 +41,6 @@ interface PanelContainerDelegate {
     fun syncAppearance(
         themeId: String,
         colorScheme: String,
-        wantsNativeBlur: Boolean,
-        cornerRadiusPx: Int,
     )
 }
 
@@ -207,7 +202,7 @@ class PanelWebViewBridge(
             runCatching { SideveilWireJson.decodeFromString<RpcRequest>(rawJson) }
                 .getOrNull() ?: return
 
-        if (req.method == "container.action") {
+        if (req.method == SideveilMethods.CONTAINER_ACTION) {
             handleContainerAction(req)
             return
         }
@@ -220,27 +215,26 @@ class PanelWebViewBridge(
     }
 
     private fun handleContainerAction(req: RpcRequest) {
-        val obj: JsonObject? = runCatching { req.params?.jsonObject }.getOrNull()
-        val actionType = obj?.get("type")?.jsonPrimitive?.content
+        val action =
+            req.params?.let { params ->
+                runCatching { SideveilWireJson.decodeFromJsonElement<ContainerActionPayload>(params) }.getOrNull()
+            }
         mainHandler.post {
-            when (actionType) {
+            when (action?.type) {
                 "dismiss" -> {
                     containerDelegate.dismissPanel()
                 }
 
                 "requestImeFocus" -> {
-                    val focused = obj["focused"]?.jsonPrimitive?.booleanOrNull == true
-                    containerDelegate.setImeFocused(focused)
+                    containerDelegate.setImeFocused(action.focused == true)
                 }
 
                 "syncTheme" -> {
-                    val payload = runCatching { obj["payload"]?.jsonObject }.getOrNull()
+                    val payload = action.payload
                     if (payload != null) {
                         containerDelegate.syncAppearance(
-                            themeId = payload["themeId"]?.jsonPrimitive?.content ?: "coloros-glass",
-                            colorScheme = payload["colorScheme"]?.jsonPrimitive?.content ?: "dark",
-                            wantsNativeBlur = payload["wantsNativeBlur"]?.jsonPrimitive?.booleanOrNull != false,
-                            cornerRadiusPx = payload["cornerRadiusPx"]?.jsonPrimitive?.intOrNull ?: 56,
+                            themeId = payload.themeId,
+                            colorScheme = payload.colorScheme,
                         )
                     }
                 }
@@ -250,7 +244,7 @@ class PanelWebViewBridge(
                 }
 
                 else -> {
-                    Log.d(TAG, "Ignored unknown container.action type=$actionType")
+                    Log.d(TAG, "Ignored unknown container.action type=${action?.type}")
                 }
             }
 

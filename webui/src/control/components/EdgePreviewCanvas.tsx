@@ -58,7 +58,8 @@ export function EdgePreviewCanvas({ config, previewOpen = true }: EdgePreviewCan
       const scale = h / 912;
 
       ctx.save();
-      drawRoundedRect(ctx, pad, pad, w, h, 14);
+      ctx.beginPath();
+      ctx.roundRect(pad, pad, w, h, 14);
       ctx.fillStyle = surface;
       ctx.fill();
       ctx.lineWidth = 1.25;
@@ -103,7 +104,8 @@ export function EdgePreviewCanvas({ config, previewOpen = true }: EdgePreviewCan
         const offsetPx = Math.max(0, config.edge.edgeOffsetDp * scale);
         const pillX = isLeft ? pad + offsetPx : pad + w - offsetPx - 4;
         ctx.globalAlpha = config.edge.handleOpacity;
-        drawRoundedRect(ctx, pillX, pillY, 4, pillH, 2);
+        ctx.beginPath();
+        ctx.roundRect(pillX, pillY, 4, pillH, 2);
         ctx.fillStyle = accent;
         ctx.fill();
         ctx.globalAlpha = 1;
@@ -116,7 +118,8 @@ export function EdgePreviewCanvas({ config, previewOpen = true }: EdgePreviewCan
         const panelX = isLeft ? pad + 10 : pad + w - panelW - 10;
         const corner = Math.max(6, Math.min(18, config.panel.cornerRadiusDp * scale));
 
-        drawRoundedRect(ctx, panelX, panelY, panelW, panelH, corner);
+        ctx.beginPath();
+        ctx.roundRect(panelX, panelY, panelW, panelH, corner);
         ctx.fillStyle = colorWithAlpha(accent, config.panel.nativeBlurEnabled ? 0.14 : 0.22);
         ctx.fill();
         ctx.lineWidth = 1.2;
@@ -163,22 +166,4 @@ export function EdgePreviewCanvas({ config, previewOpen = true }: EdgePreviewCan
       </p>
     </div>
   );
-}
-
-function drawRoundedRect(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  r: number,
-) {
-  const radius = Math.min(r, w / 2, h / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + radius, y);
-  ctx.arcTo(x + w, y, x + w, y + h, radius);
-  ctx.arcTo(x + w, y + h, x, y + h, radius);
-  ctx.arcTo(x, y + h, x, y, radius);
-  ctx.arcTo(x, y, x + w, y, radius);
-  ctx.closePath();
 }

@@ -200,6 +200,7 @@ class DaemonClient(
                     Log.w(TAG, "WebSocket loop error: ${t.message}")
                 }
             } finally {
+                runCatching { loopSocket?.getInputStream()?.let(WebSocketCodec::clearStreamState) }
                 var detachedActive = false
                 synchronized(writeLock) {
                     if (loopSocket != null && activeSocket === loopSocket) {

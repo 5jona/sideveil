@@ -14,6 +14,7 @@ import org.junit.rules.TemporaryFolder
 import pochita.sideveil.shared.AppearancePatchParams
 import pochita.sideveil.shared.DaemonStatus
 import pochita.sideveil.shared.HostHelloPayload
+import pochita.sideveil.shared.PanelCommand
 import pochita.sideveil.shared.PanelState
 import pochita.sideveil.shared.PingResult
 import pochita.sideveil.shared.RpcRequest
@@ -58,13 +59,13 @@ class ControlServerAndConfigStoreTest {
                     wsPort = 12345,
                 )
 
-            override fun currentConfigJson(): JsonElement = SideveilWireJson.encodeToJsonElement(SideveilConfig.DEFAULT)
+            override fun currentConfig(): SideveilConfig = SideveilConfig.DEFAULT
 
-            override fun reloadConfig(): JsonElement = currentConfigJson()
+            override fun reloadConfig(): SideveilConfig = currentConfig()
 
-            override fun patchAppearance(params: AppearancePatchParams): JsonElement = currentConfigJson()
+            override fun patchAppearance(params: AppearancePatchParams): SideveilConfig = currentConfig()
 
-            override fun sendPanelCommand(command: String) {}
+            override fun sendPanelCommand(command: PanelCommand) {}
 
             override fun restartHost() {}
 
@@ -236,5 +237,41 @@ class ControlServerAndConfigStoreTest {
         } finally {
             server.stop()
         }
+    }
+
+    @Test
+    fun `edgeGestureMonitor decays fling velocity to zero after stationary pause and foregroundMonitor extracts valid packages`() {
+        assertEquals(
+            1800f,
+            EdgeGestureMonitor.resolveReleaseVelocity(
+                trackedVelocityPxPerSec = 1800f,
+                lastSignificantMoveTimeMs = 1000L,
+                upEventTimeMs = 1032L,
+            ),
+            0.01f,
+        )
+        assertEquals(
+            0f,
+            EdgeGestureMonitor.resolveReleaseVelocity(
+                trackedVelocityPxPerSec = 1800f,
+                lastSignificantMoveTimeMs = 1000L,
+                upEventTimeMs = 1250L,
+            ),
+            0.01f,
+        )
+
+        val hostPkg = "pochita.sideveil.host"
+        assertEquals(
+            "com.coloros.launcher",
+            ForegroundMonitor.extractValidPackageName("com.coloros.launcher/com.coloros.launcher.Launcher", hostPkg),
+        )
+        assertEquals(
+            "",
+            ForegroundMonitor.extractValidPackageName("pochita.sideveil.host/pochita.sideveil.host.MainActivity", hostPkg),
+        )
+        assertEquals(
+            "",
+            ForegroundMonitor.extractValidPackageName("StatusBar", hostPkg),
+        )
     }
 }

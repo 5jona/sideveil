@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.IBinder
 import android.os.ServiceManager
+import java.lang.reflect.Method
 
 data class HostAppPermissionsStatus(
     val installed: Boolean,
@@ -27,12 +28,55 @@ class AppOpsManagerBridge(
         }.onFailure { DaemonLog.warn("Failed to bind IAppOpsService", it) }.getOrNull()
     }
 
+    private val checkOperationMethod: Method? by lazy {
+        appOpsService?.let { service ->
+            runCatching {
+                service.javaClass.getMethod(
+                    "checkOperation",
+                    Int::class.javaPrimitiveType,
+                    Int::class.javaPrimitiveType,
+                    String::class.java,
+                )
+            }.getOrNull()
+        }
+    }
+
+    private val setModeMethod: Method? by lazy {
+        appOpsService?.let { service ->
+            runCatching {
+                service.javaClass.getMethod(
+                    "setMode",
+                    Int::class.javaPrimitiveType,
+                    Int::class.javaPrimitiveType,
+                    String::class.java,
+                    Int::class.javaPrimitiveType,
+                )
+            }.getOrNull()
+        }
+    }
+
     private val deviceIdleService: Any? by lazy {
         runCatching {
             val binder = ServiceManager.getService("deviceidle") ?: return@runCatching null
             val stubClass = Class.forName("android.os.IDeviceIdleController\$Stub")
             stubClass.getMethod("asInterface", IBinder::class.java).invoke(null, binder)
         }.onFailure { DaemonLog.warn("Failed to bind IDeviceIdleController", it) }.getOrNull()
+    }
+
+    private val isPowerSaveWhitelistMethod: Method? by lazy {
+        deviceIdleService?.let { service ->
+            runCatching {
+                service.javaClass.getMethod("isPowerSaveWhitelistApp", String::class.java)
+            }.getOrNull()
+        }
+    }
+
+    private val addPowerSaveWhitelistMethod: Method? by lazy {
+        deviceIdleService?.let { service ->
+            runCatching {
+                service.javaClass.getMethod("addPowerSaveWhitelistApp", String::class.java)
+            }.getOrNull()
+        }
     }
 
     fun inspectAndEnsure(): HostAppPermissionsStatus {
@@ -50,27 +94,14 @@ class AppOpsManagerBridge(
 
     private fun ensureOverlayPermission(uid: Int): Boolean {
         val service = appOpsService ?: return false
+        val checkMethod = checkOperationMethod ?: return false
         return runCatching {
-            val checkMethod =
-                service.javaClass.getMethod(
-                    "checkOperation",
-                    Int::class.javaPrimitiveType,
-                    Int::class.javaPrimitiveType,
-                    String::class.java,
-                )
             val currentMode = checkMethod.invoke(service, OP_SYSTEM_ALERT_WINDOW, uid, hostPackage) as Int
             if (currentMode == MODE_ALLOWED) {
                 return@runCatching true
             }
-            val setModeMethod =
-                service.javaClass.getMethod(
-                    "setMode",
-                    Int::class.javaPrimitiveType,
-                    Int::class.javaPrimitiveType,
-                    String::class.java,
-                    Int::class.javaPrimitiveType,
-                )
-            setModeMethod.invoke(service, OP_SYSTEM_ALERT_WINDOW, uid, hostPackage, MODE_ALLOWED)
+            val setMethod = setModeMethod ?: return@runCatching false
+            setMethod.invoke(service, OP_SYSTEM_ALERT_WINDOW, uid, hostPackage, MODE_ALLOWED)
             val verifyMode = checkMethod.invoke(service, OP_SYSTEM_ALERT_WINDOW, uid, hostPackage) as Int
             DaemonLog.info("Updated OP_SYSTEM_ALERT_WINDOW for $hostPackage (uid=$uid) -> mode=$verifyMode")
             verifyMode == MODE_ALLOWED
@@ -81,15 +112,11 @@ class AppOpsManagerBridge(
 
     private fun ensurePowerSaveWhitelist() {
         val service = deviceIdleService ?: return
+        val checkMethod = isPowerSaveWhitelistMethod ?: return
         runCatching {
-            val isWhitelisted =
-                service.javaClass
-                    .getMethod("isPowerSaveWhitelistApp", String::class.java)
-                    .invoke(service, hostPackage) as? Boolean
+            val isWhitelisted = checkMethod.invoke(service, hostPackage) as? Boolean
             if (isWhitelisted != true) {
-                service.javaClass
-                    .getMethod("addPowerSaveWhitelistApp", String::class.java)
-                    .invoke(service, hostPackage)
+                addPowerSaveWhitelistMethod?.invoke(service, hostPackage)
                 DaemonLog.info("Added $hostPackage to Doze power-save whitelist")
             }
         }.onFailure {

@@ -69,6 +69,41 @@ export interface PingResult {
   timestampMs: number;
 }
 
+export const SIDEVEIL_METHODS = {
+  DAEMON_PING: 'daemon.ping',
+  DAEMON_STATUS: 'daemon.status',
+  DAEMON_LOGS: 'daemon.logs',
+  CONFIG_GET: 'config.get',
+  CONFIG_PATCH_APPEARANCE: 'config.patchAppearance',
+  CONFIG_RELOAD: 'config.reload',
+  PANEL_OPEN: 'panel.open',
+  PANEL_CLOSE: 'panel.close',
+  PANEL_TOGGLE: 'panel.toggle',
+  HOST_RESTART: 'host.restart',
+} as const;
+
+export const SIDEVEIL_EVENTS = {
+  CONFIG_UPDATED: 'config.updated',
+  SCOPE_CHANGED: 'scope.changed',
+  PANEL_VISIBILITY: 'panel.visibility',
+} as const;
+
+export interface ScopeChangedEventPayload {
+  foregroundPackage?: string;
+  active?: boolean;
+}
+
+export interface ConfigUpdatedEventPayload {
+  config?: Partial<SideveilConfig>;
+  foregroundPackage?: string;
+  scopeActive?: boolean;
+}
+
+export interface PanelVisibilityEventPayload {
+  visible?: boolean;
+  state?: PanelState;
+}
+
 export type CtlCommand =
   | 'open'
   | 'close'

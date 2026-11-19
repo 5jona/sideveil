@@ -95,6 +95,7 @@ adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/post-fs-data.sh" "${STAGE_DIR}/pos
 adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/customize.sh" "${STAGE_DIR}/customize.sh"
 adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/uninstall.sh" "${STAGE_DIR}/uninstall.sh"
 adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/bin/sideveil-ctl" "${STAGE_DIR}/sideveil-ctl"
+adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/bin/sideveil-common.sh" "${STAGE_DIR}/sideveil-common.sh"
 adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/bin/sideveil-daemon.dex" "${STAGE_DIR}/sideveil-daemon.dex"
 adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/system/priv-app/SideveilHost/SideveilHost.apk" "${STAGE_DIR}/SideveilHost.apk"
 adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/system/etc/permissions/privapp-permissions-pochita-sideveil.xml" "${STAGE_DIR}/privapp.xml"
@@ -113,6 +114,7 @@ adb -s "${TARGET_SERIAL}" shell "su -c '
     cp ${STAGE_DIR}/customize.sh ${REMOTE_MOD_DIR}/customize.sh
     cp ${STAGE_DIR}/uninstall.sh ${REMOTE_MOD_DIR}/uninstall.sh
     cp ${STAGE_DIR}/sideveil-ctl ${REMOTE_MOD_DIR}/bin/sideveil-ctl
+    cp ${STAGE_DIR}/sideveil-common.sh ${REMOTE_MOD_DIR}/bin/sideveil-common.sh
     cp ${STAGE_DIR}/sideveil-daemon.dex ${REMOTE_MOD_DIR}/bin/sideveil-daemon.dex
     cp ${STAGE_DIR}/SideveilHost.apk ${REMOTE_MOD_DIR}/system/priv-app/SideveilHost/SideveilHost.apk
     cp ${STAGE_DIR}/privapp.xml ${REMOTE_MOD_DIR}/system/etc/permissions/privapp-permissions-pochita-sideveil.xml
@@ -127,7 +129,7 @@ adb -s "${TARGET_SERIAL}" shell "su -c '
     fi
 
     chmod 0755 ${REMOTE_MOD_DIR}/service.sh ${REMOTE_MOD_DIR}/post-fs-data.sh ${REMOTE_MOD_DIR}/customize.sh ${REMOTE_MOD_DIR}/uninstall.sh ${REMOTE_MOD_DIR}/bin/sideveil-ctl
-    chmod 0644 ${REMOTE_MOD_DIR}/module.prop ${REMOTE_MOD_DIR}/config.json ${REMOTE_MOD_DIR}/bin/sideveil-daemon.dex ${REMOTE_MOD_DIR}/system/priv-app/SideveilHost/SideveilHost.apk ${REMOTE_MOD_DIR}/system/etc/permissions/privapp-permissions-pochita-sideveil.xml ${REMOTE_MOD_DIR}/system/etc/sysconfig/sideveil-allowlist.xml
+    chmod 0644 ${REMOTE_MOD_DIR}/module.prop ${REMOTE_MOD_DIR}/config.json ${REMOTE_MOD_DIR}/bin/sideveil-common.sh ${REMOTE_MOD_DIR}/bin/sideveil-daemon.dex ${REMOTE_MOD_DIR}/system/priv-app/SideveilHost/SideveilHost.apk ${REMOTE_MOD_DIR}/system/etc/permissions/privapp-permissions-pochita-sideveil.xml ${REMOTE_MOD_DIR}/system/etc/sysconfig/sideveil-allowlist.xml
     find ${REMOTE_MOD_DIR}/webroot -type d -exec chmod 0755 {} +
     find ${REMOTE_MOD_DIR}/webroot -type f -exec chmod 0644 {} +
     rm -rf ${STAGE_DIR}

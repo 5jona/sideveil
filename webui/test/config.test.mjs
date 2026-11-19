@@ -1,10 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   DEFAULT_CONFIG,
+  SIDEVEIL_EVENTS,
+  SIDEVEIL_METHODS,
   normalizeSideveilConfig,
   normalizeConfig,
 } from '../src/shared/types.ts';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test('DEFAULT_CONFIG conforms to expected structural and numerical bounds', () => {
   assert.equal(DEFAULT_CONFIG.version, 1);
@@ -185,4 +192,16 @@ test('normalizeSideveilConfig handles NaN and non-number fallback values cleanly
   assert.equal(result.edge.handleOpacity, DEFAULT_CONFIG.edge.handleOpacity);
   assert.equal(result.panel.widthDp, DEFAULT_CONFIG.panel.widthDp);
   assert.equal(result.panel.scrimAlpha, DEFAULT_CONFIG.panel.scrimAlpha);
+});
+
+test('root config.json snapshot matches DEFAULT_CONFIG and wire contract constants are aligned', () => {
+  const rootConfigPath = path.resolve(__dirname, '../../config.json');
+  const raw = JSON.parse(fs.readFileSync(rootConfigPath, 'utf8'));
+  assert.deepEqual(normalizeSideveilConfig(raw), DEFAULT_CONFIG);
+  assert.deepEqual(raw, DEFAULT_CONFIG);
+
+  assert.equal(SIDEVEIL_METHODS.DAEMON_PING, 'daemon.ping');
+  assert.equal(SIDEVEIL_METHODS.CONFIG_PATCH_APPEARANCE, 'config.patchAppearance');
+  assert.equal(SIDEVEIL_EVENTS.CONFIG_UPDATED, 'config.updated');
+  assert.equal(SIDEVEIL_EVENTS.SCOPE_CHANGED, 'scope.changed');
 });

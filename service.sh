@@ -7,36 +7,16 @@
 
 MODDIR="${0%/*}"
 LOG_TAG="SideveilSvc"
-STATE_DIR="/data/system/sideveil"
-RUN_DIR="${STATE_DIR}/run"
-ROOT_RUN_DIR="/data/adb/sideveil/run"
-RUN_ENV="${RUN_DIR}/daemon.env"
+. "${MODDIR}/bin/sideveil-common.sh"
+
 LIVE_CONFIG="${STATE_DIR}/config.json"
 LIVE_DEX="${STATE_DIR}/sideveil-daemon.dex"
 MODULE_CONFIG="${MODDIR}/config.json"
 MODULE_DEX="${MODDIR}/bin/sideveil-daemon.dex"
 CTL_BIN="${MODDIR}/bin/sideveil-ctl"
-DAEMON_PROC_NAME="sideveil-daemon"
-MAIN_CLASS="pochita.sideveil.daemon.DaemonMain"
 
 log_info() {
     log -t "$LOG_TAG" -p i "$1"
-}
-
-terminate_pid_gracefully() {
-    TARGET_PID="$1"
-    case "$TARGET_PID" in
-        ''|*[!0-9]*) return 0 ;;
-    esac
-    if kill -0 "$TARGET_PID" 2>/dev/null; then
-        kill -TERM "$TARGET_PID" 2>/dev/null || true
-        WAIT_STEPS=0
-        while [ "$WAIT_STEPS" -lt 10 ] && kill -0 "$TARGET_PID" 2>/dev/null; do
-            sleep 0.2
-            WAIT_STEPS=$((WAIT_STEPS + 1))
-        done
-        kill -9 "$TARGET_PID" 2>/dev/null || true
-    fi
 }
 
 stop_daemon_processes() {
@@ -47,74 +27,6 @@ stop_daemon_processes() {
     pkill -TERM -x "$DAEMON_PROC_NAME" 2>/dev/null || true
     sleep 0.5
     pkill -9 -x "$DAEMON_PROC_NAME" 2>/dev/null || true
-}
-
-load_daemon_env() {
-    [ -f "$RUN_ENV" ] && [ ! -L "$RUN_ENV" ] && [ -r "$RUN_ENV" ] || return 1
-    SIDEVEIL_PORT=""
-    SIDEVEIL_TOKEN=""
-    SIDEVEIL_PID=""
-    while IFS='=' read -r key val || [ -n "$key" ]; do
-        case "$key" in
-            SIDEVEIL_PORT) SIDEVEIL_PORT="$val" ;;
-            SIDEVEIL_TOKEN) SIDEVEIL_TOKEN="$val" ;;
-            SIDEVEIL_PID) SIDEVEIL_PID="$val" ;;
-        esac
-    done < "$RUN_ENV"
-
-    case "$SIDEVEIL_PORT" in
-        ''|*[!0-9]*) return 1 ;;
-    esac
-    if [ "$SIDEVEIL_PORT" -lt 1 ] || [ "$SIDEVEIL_PORT" -gt 65535 ]; then
-        return 1
-    fi
-
-    case "$SIDEVEIL_TOKEN" in
-        ''|*[!0-9a-f]*) return 1 ;;
-    esac
-    if [ "${#SIDEVEIL_TOKEN}" -ne 64 ]; then
-        return 1
-    fi
-
-    case "$SIDEVEIL_PID" in
-        ''|*[!0-9]*) return 1 ;;
-    esac
-    kill -0 "$SIDEVEIL_PID" 2>/dev/null || return 1
-    if [ -r "/proc/${SIDEVEIL_PID}/cmdline" ]; then
-        CMDLINE=$(tr '\000' ' ' < "/proc/${SIDEVEIL_PID}/cmdline" 2>/dev/null || true)
-        case "$CMDLINE" in
-            *sideveil-daemon*|*pochita.sideveil.daemon.DaemonMain*) ;;
-            *) return 1 ;;
-        esac
-    fi
-    return 0
-}
-
-sync_host_endpoint() {
-    HOST_DATA_DIR="/data/user/0/pochita.sideveil.host"
-    [ -d "$HOST_DATA_DIR" ] || HOST_DATA_DIR="/data/data/pochita.sideveil.host"
-    [ -d "$HOST_DATA_DIR" ] || return 1
-    HOST_NOBACKUP_DIR="${HOST_DATA_DIR}/no_backup"
-    ENDPOINT_FILE="${HOST_NOBACKUP_DIR}/daemon_endpoint.json"
-    ENDPOINT_TMP="${HOST_NOBACKUP_DIR}/daemon_endpoint.json.tmp.$$"
-
-    HOST_UID=$(stat -c '%u:%g' "$HOST_DATA_DIR" 2>/dev/null || true)
-    mkdir -p "$HOST_NOBACKUP_DIR"
-    if [ -n "$HOST_UID" ]; then
-        chown "$HOST_UID" "$HOST_NOBACKUP_DIR" 2>/dev/null || true
-    fi
-    chmod 0700 "$HOST_NOBACKUP_DIR" 2>/dev/null || true
-
-    (
-        umask 077
-        printf '{"port":%s,"token":"%s"}\n' "$SIDEVEIL_PORT" "$SIDEVEIL_TOKEN" > "$ENDPOINT_TMP"
-    )
-    if [ -n "$HOST_UID" ]; then
-        chown "$HOST_UID" "$ENDPOINT_TMP" 2>/dev/null || true
-    fi
-    chmod 0600 "$ENDPOINT_TMP" 2>/dev/null || true
-    chcon --reference="$HOST_DATA_DIR" "$HOST_NOBACKUP_DIR" "$ENDPOINT_TMP" 2>/dev/null || restorecon -F "$HOST_NOBACKUP_DIR" "$ENDPOINT_TMP" 2>/dev/null || true
-    mv -f "$ENDPOINT_TMP" "$ENDPOINT_FILE"
 }
 
 until [ "$(getprop sys.boot_completed)" = "1" ]; do
@@ -162,10 +74,7 @@ start_host_if_needed() {
             return 0
             ;;
         *'"hostConnected":false'*)
-            sync_host_endpoint || true
-            am start-foreground-service --user 0 \
-                -n "pochita.sideveil.host/.HostService" \
-                -a "pochita.sideveil.host.ACTION_SYNC_ENDPOINT" >/dev/null 2>&1 || true
+            wake_host_service
             return 0
             ;;
     esac

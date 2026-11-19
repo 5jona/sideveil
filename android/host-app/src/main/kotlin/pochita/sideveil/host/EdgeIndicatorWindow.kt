@@ -44,11 +44,12 @@ class EdgeIndicatorWindow(
                 PixelFormat.TRANSLUCENT,
             ).apply {
                 title = "SideveilEdgeIndicator"
-                applyNoMoveAnimationFlag(this)
+                OverlayWindowFlags.disableMoveAnimation(this)
             }
 
     private var attached = false
     private var fullscreenBarsHidden = false
+    private var dragPulseProgress = 0f
     private var latestEdge = EdgeConfig()
     private var latestScopeActive = false
     private var latestPanelState = PanelState.CLOSED
@@ -100,10 +101,23 @@ class EdgeIndicatorWindow(
     }
 
     fun setDragPulse(progress: Float) {
-        if (!attached) return
         val clamped = progress.coerceIn(0f, 1f)
-        pillView.scaleX = 1f + clamped * 0.45f
-        pillView.scaleY = 1f + clamped * 0.08f
+        dragPulseProgress = clamped
+        if (!attached) return
+        val targetScaleX = 1f + clamped * 0.45f
+        val targetScaleY = 1f + clamped * 0.08f
+        if (clamped == 0f) {
+            pillView
+                .animate()
+                .scaleX(1f)
+                .scaleY(1f)
+                .setDuration(140L)
+                .start()
+        } else {
+            pillView.animate().cancel()
+            pillView.scaleX = targetScaleX
+            pillView.scaleY = targetScaleY
+        }
     }
 
     fun detach() {
@@ -170,8 +184,8 @@ class EdgeIndicatorWindow(
                 baseOpacity
             }
         rootView.alpha = effectiveAlpha
-        pillView.scaleX = 1f
-        pillView.scaleY = 1f
+        pillView.scaleX = 1f + dragPulseProgress * 0.45f
+        pillView.scaleY = 1f + dragPulseProgress * 0.08f
 
         runCatching { windowManager.updateViewLayout(rootView, layoutParams) }
     }
@@ -180,16 +194,7 @@ class EdgeIndicatorWindow(
 
     private fun dpOrZero(value: Float): Int = (value * currentDensity + 0.5f).toInt().coerceAtLeast(0)
 
-    private fun applyNoMoveAnimationFlag(lp: WindowManager.LayoutParams) {
-        runCatching {
-            val field = WindowManager.LayoutParams::class.java.getField("privateFlags")
-            val current = field.getInt(lp)
-            field.setInt(lp, current or PRIVATE_FLAG_NO_MOVE_ANIMATION)
-        }
-    }
-
     companion object {
         private const val TAG = "SideveilEdgeIndicator"
-        private const val PRIVATE_FLAG_NO_MOVE_ANIMATION = 0x00000040
     }
 }

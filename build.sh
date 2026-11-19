@@ -72,6 +72,7 @@ explicit_files = [
     ("customize.sh", 0o755),
     ("uninstall.sh", 0o755),
     ("bin/sideveil-ctl", 0o755),
+    ("bin/sideveil-common.sh", 0o644),
     ("bin/sideveil-daemon.dex", 0o644),
 ]
 

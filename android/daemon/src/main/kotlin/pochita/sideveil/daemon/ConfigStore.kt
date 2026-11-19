@@ -66,39 +66,35 @@ class ConfigStore(
 
     fun reloadFromDisk(notifyIfUnchanged: Boolean = true): SideveilConfig {
         val loaded = readOrDefault()
-        val changed: Boolean
         synchronized(lock) {
-            changed = loaded != current
+            val changed = loaded != current
             current = loaded
-        }
-        if (changed || notifyIfUnchanged) {
-            DaemonLog.info("Configuration loaded (enabled=${loaded.enabled}, side=${loaded.edge.side}, mode=${loaded.scope.mode})")
-            onChanged(loaded)
+            if (changed || notifyIfUnchanged) {
+                DaemonLog.info("Configuration loaded (enabled=${loaded.enabled}, side=${loaded.edge.side}, mode=${loaded.scope.mode})")
+                onChanged(loaded)
+            }
         }
         return loaded
     }
 
-    fun updateAppearance(patch: AppearancePatchParams): SideveilConfig {
-        val updated =
-            synchronized(lock) {
-                val base = current
-                val nextPanel =
-                    base.panel
-                        .copy(
-                            themeId = patch.themeId ?: base.panel.themeId,
-                            colorMode = patch.colorMode ?: base.panel.colorMode,
-                            nativeBlurEnabled = patch.nativeBlurEnabled ?: base.panel.nativeBlurEnabled,
-                            blurRadiusPx = patch.blurRadiusPx ?: base.panel.blurRadiusPx,
-                            cornerRadiusDp = patch.cornerRadiusDp ?: base.panel.cornerRadiusDp,
-                        ).sanitized()
-                val next = base.copy(panel = nextPanel).sanitized()
-                writeAtomic(next)
-                current = next
-                next
-            }
-        onChanged(updated)
-        return updated
-    }
+    fun updateAppearance(patch: AppearancePatchParams): SideveilConfig =
+        synchronized(lock) {
+            val base = current
+            val nextPanel =
+                base.panel
+                    .copy(
+                        themeId = patch.themeId ?: base.panel.themeId,
+                        colorMode = patch.colorMode ?: base.panel.colorMode,
+                        nativeBlurEnabled = patch.nativeBlurEnabled ?: base.panel.nativeBlurEnabled,
+                        blurRadiusPx = patch.blurRadiusPx ?: base.panel.blurRadiusPx,
+                        cornerRadiusDp = patch.cornerRadiusDp ?: base.panel.cornerRadiusDp,
+                    ).sanitized()
+            val next = base.copy(panel = nextPanel).sanitized()
+            writeAtomic(next)
+            current = next
+            onChanged(next)
+            next
+        }
 
     fun stop() {
         handler?.removeCallbacks(reloadRunnable)

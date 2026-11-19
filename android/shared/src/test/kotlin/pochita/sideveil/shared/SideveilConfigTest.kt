@@ -93,4 +93,25 @@ class SideveilConfigTest {
         val decoded = SideveilPrettyJson.decodeFromString<SideveilConfig>(encoded)
         assertEquals(SideveilConfig.DEFAULT, decoded)
     }
+
+    @Test
+    fun `protocol DTOs serialize and deserialize panel commands, endpoints, and container actions`() {
+        val cmdWire = SideveilWireJson.encodeToString(PanelCommandPayload(PanelCommand.OPEN))
+        assertTrue(cmdWire.contains("\"command\":\"open\""))
+        val cmdDecoded = SideveilWireJson.decodeFromString<PanelCommandPayload>(cmdWire)
+        assertEquals(PanelCommand.OPEN, cmdDecoded.command)
+
+        val endpoint = DaemonEndpoint(port = 54321, token = "a".repeat(64))
+        val endpointDecoded = SideveilWireJson.decodeFromString<DaemonEndpoint>(SideveilWireJson.encodeToString(endpoint))
+        assertEquals(endpoint, endpointDecoded)
+
+        val syncJson =
+            """
+            {"type":"syncTheme","payload":{"themeId":"modern-saas-dark","colorScheme":"dark","wantsNativeBlur":false,"cornerRadiusPx":48}}
+            """.trimIndent()
+        val actionDecoded = SideveilWireJson.decodeFromString<ContainerActionPayload>(syncJson)
+        assertEquals("syncTheme", actionDecoded.type)
+        assertEquals("modern-saas-dark", actionDecoded.payload?.themeId)
+        assertEquals(false, actionDecoded.payload?.wantsNativeBlur)
+    }
 }

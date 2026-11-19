@@ -16,6 +16,7 @@ set_perm "$MODPATH/service.sh" 0 0 0755
 set_perm "$MODPATH/post-fs-data.sh" 0 0 0755
 set_perm "$MODPATH/uninstall.sh" 0 0 0755
 set_perm "$MODPATH/bin/sideveil-ctl" 0 0 0755
+set_perm "$MODPATH/bin/sideveil-common.sh" 0 0 0644
 set_perm "$MODPATH/bin/sideveil-daemon.dex" 0 0 0644
 set_perm "$MODPATH/module.prop" 0 0 0644
 set_perm "$MODPATH/config.json" 0 0 0644

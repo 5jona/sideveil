@@ -12,9 +12,10 @@ const baseConfig = createWebUiViteConfig({
   outDir: path.resolve(__dirname, '../webroot'),
   port: 5174,
   kitRoot,
+  surface: 'standalone',
   server: {
     fs: {
-      allow: [__dirname, kitRoot],
+      allow: [__dirname],
     },
   },
 });

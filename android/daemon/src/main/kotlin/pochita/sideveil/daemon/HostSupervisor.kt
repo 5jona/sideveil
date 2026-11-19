@@ -19,6 +19,7 @@ class HostSupervisor(
     var lastPermissionStatus: HostAppPermissionsStatus = HostAppPermissionsStatus(false, null, false)
         private set
 
+    @Volatile
     private var running = false
     private var missingLogged = false
 
@@ -45,12 +46,28 @@ class HostSupervisor(
         controlServer.closeActiveHostSession("Forced host restart")
         handler.post {
             runCatching {
-                val proc = Runtime.getRuntime().exec(arrayOf("/system/bin/am", "force-stop", hostPackage))
-                if (!proc.waitFor(3, TimeUnit.SECONDS)) {
-                    proc.destroyForcibly()
+                val stopProc = Runtime.getRuntime().exec(arrayOf("/system/bin/am", "force-stop", hostPackage))
+                if (!stopProc.waitFor(3, TimeUnit.SECONDS)) {
+                    stopProc.destroyForcibly()
+                }
+                val startProc =
+                    Runtime.getRuntime().exec(
+                        arrayOf(
+                            "/system/bin/am",
+                            "start-foreground-service",
+                            "--user",
+                            "0",
+                            "-n",
+                            "$hostPackage/$hostPackage.HostService",
+                            "-a",
+                            "pochita.sideveil.host.ACTION_SYNC_ENDPOINT",
+                        ),
+                    )
+                if (!startProc.waitFor(3, TimeUnit.SECONDS)) {
+                    startProc.destroyForcibly()
                 }
             }.onFailure { err ->
-                DaemonLog.warn("Failed to force-stop $hostPackage", err)
+                DaemonLog.warn("Failed to restart $hostPackage", err)
             }
         }
     }

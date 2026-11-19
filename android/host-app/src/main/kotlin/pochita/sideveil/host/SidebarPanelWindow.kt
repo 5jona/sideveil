@@ -39,6 +39,7 @@ class SidebarPanelWindow(
     private val springController = PanelSpringController()
 
     private var currentState: PanelState = PanelState.CLOSED
+    private var closingInProgress = false
     private var attached = false
     private var edgeSide = EdgeSide.RIGHT
     private var panelConfig = PanelConfig()
@@ -116,7 +117,7 @@ class SidebarPanelWindow(
         lp.height = 1
         lp.flags = BASE_INVISIBLE_FLAGS
         lp.dimAmount = 0f
-        applyNoMoveAnimationFlag(lp)
+        OverlayWindowFlags.disableMoveAnimation(lp)
         window.attributes = lp
     }
 
@@ -175,8 +176,6 @@ class SidebarPanelWindow(
     fun syncRuntimeAppearance(
         themeId: String,
         colorScheme: String,
-        @Suppress("UNUSED_PARAMETER") wantsNativeBlur: Boolean,
-        @Suppress("UNUSED_PARAMETER") cornerRadiusPx: Int,
     ) {
         // Authoritative blur and corner radius come from SideveilConfig via config.updated.
         syncedThemeId = themeId
@@ -188,6 +187,7 @@ class SidebarPanelWindow(
     fun onGestureStart() {
         if (!attached) attachWarm()
         springController.cancel()
+        closingInProgress = false
         recomputePanelDimensions()
         val startX = hiddenOffsetX().toFloat()
         springController.snapTo(startX)
@@ -205,7 +205,7 @@ class SidebarPanelWindow(
                 hiddenX = hiddenOffsetX().toFloat(),
                 openX = openMarginPx().toFloat(),
             )
-        updateWindowPosition(nextX.toInt(), focusable = false, allowOffscreen = nextX < 0f)
+        updateWindowPosition(nextX.toInt(), focusable = false, allowOffscreen = true)
     }
 
     fun onGestureEnd(
@@ -222,6 +222,7 @@ class SidebarPanelWindow(
     fun open(initialVelocityPx: Float = 0f) {
         if (!attached) attachWarm()
         springController.cancel()
+        closingInProgress = false
         recomputePanelDimensions()
 
         val wasClosed = currentState == PanelState.CLOSED
@@ -236,10 +237,10 @@ class SidebarPanelWindow(
             endX = endX,
             startVelocityPx = initialVelocityPx,
             onUpdate = { value ->
-                updateWindowPosition(value.toInt(), focusable = true, allowOffscreen = value < 0f)
+                updateWindowPosition(value.toInt(), focusable = true, allowOffscreen = true)
             },
             onSettled = {
-                if (currentState == PanelState.OPEN) {
+                if (currentState == PanelState.OPEN && !closingInProgress) {
                     applyOpenLayout(settled = true)
                 }
             },
@@ -248,11 +249,11 @@ class SidebarPanelWindow(
     }
 
     fun close(initialVelocityPx: Float = 0f) {
-        if (!attached || currentState == PanelState.CLOSED) return
+        if (!attached || currentState == PanelState.CLOSED || closingInProgress) return
         springController.cancel()
+        closingInProgress = true
         setImeFocused(false)
         recomputePanelDimensions()
-        setState(PanelState.DRAGGING)
 
         val closeVelocityPx = if (initialVelocityPx <= 0f) initialVelocityPx else -initialVelocityPx
         springController.animateTo(
@@ -269,9 +270,10 @@ class SidebarPanelWindow(
     }
 
     fun toggle() {
-        when (currentState) {
-            PanelState.OPEN -> close()
-            PanelState.CLOSED, PanelState.DRAGGING -> open()
+        if (currentState == PanelState.OPEN && !closingInProgress) {
+            close()
+        } else {
+            open()
         }
     }
 
@@ -311,7 +313,7 @@ class SidebarPanelWindow(
         lp.y = 0
         lp.flags = computeInteractiveFlags(focusable = focusable, allowOffscreen = allowOffscreen)
         lp.dimAmount = panelConfig.scrimAlpha.coerceIn(0f, 0.75f)
-        applyNoMoveAnimationFlag(lp)
+        OverlayWindowFlags.disableMoveAnimation(lp)
         window.attributes = lp
         window.decorView.visibility = View.VISIBLE
         applyPanelBackdrop()
@@ -357,6 +359,7 @@ class SidebarPanelWindow(
     }
 
     private fun collapseToWarmInvisible() {
+        closingInProgress = false
         val window = dialog.window ?: return
         window.decorView.visibility = View.INVISIBLE
         applyBlurRadius(window, 0)
@@ -368,7 +371,7 @@ class SidebarPanelWindow(
         lp.y = 0
         lp.dimAmount = 0f
         lp.flags = BASE_INVISIBLE_FLAGS
-        applyNoMoveAnimationFlag(lp)
+        OverlayWindowFlags.disableMoveAnimation(lp)
         window.attributes = lp
         setState(PanelState.CLOSED)
     }
@@ -482,21 +485,30 @@ class SidebarPanelWindow(
 
     private fun dp(value: Float): Int = (value * currentDensity + 0.5f).toInt().coerceAtLeast(1)
 
-    private fun applyNoMoveAnimationFlag(lp: WindowManager.LayoutParams) {
-        runCatching {
-            val field = WindowManager.LayoutParams::class.java.getField("privateFlags")
-            field.setInt(lp, field.getInt(lp) or PRIVATE_FLAG_NO_MOVE_ANIMATION)
-        }
-    }
-
     companion object {
         private const val TAG = "SideveilPanelWindow"
-        private const val PRIVATE_FLAG_NO_MOVE_ANIMATION = 0x00000040
 
         private const val BASE_INVISIBLE_FLAGS =
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                 WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
+    }
+}
+
+internal object OverlayWindowFlags {
+    private const val PRIVATE_FLAG_NO_MOVE_ANIMATION = 0x00000040
+
+    private val privateFlagsField by lazy {
+        runCatching {
+            WindowManager.LayoutParams::class.java.getField("privateFlags")
+        }.getOrNull()
+    }
+
+    fun disableMoveAnimation(lp: WindowManager.LayoutParams) {
+        val field = privateFlagsField ?: return
+        runCatching {
+            field.setInt(lp, field.getInt(lp) or PRIVATE_FLAG_NO_MOVE_ANIMATION)
+        }
     }
 }

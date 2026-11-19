@@ -15,9 +15,11 @@ import pochita.sideveil.shared.ConfigUpdatedPayload
 import pochita.sideveil.shared.DaemonStatus
 import pochita.sideveil.shared.EdgeSide
 import pochita.sideveil.shared.HostHelloPayload
+import pochita.sideveil.shared.PanelCommand
 import pochita.sideveil.shared.PanelCommandPayload
 import pochita.sideveil.shared.PanelState
 import pochita.sideveil.shared.ScopeChangedPayload
+import pochita.sideveil.shared.SideveilConfig
 import pochita.sideveil.shared.SideveilEvents
 import pochita.sideveil.shared.SideveilWireJson
 import java.io.File
@@ -117,19 +119,13 @@ object DaemonMain {
                     )
                 }
 
-                override fun currentConfigJson(): JsonElement = SideveilWireJson.encodeToJsonElement(configStore.current)
+                override fun currentConfig(): SideveilConfig = configStore.current
 
-                override fun reloadConfig(): JsonElement {
-                    val reloaded = configStore.reloadFromDisk(notifyIfUnchanged = true)
-                    return SideveilWireJson.encodeToJsonElement(reloaded)
-                }
+                override fun reloadConfig(): SideveilConfig = configStore.reloadFromDisk(notifyIfUnchanged = true)
 
-                override fun patchAppearance(params: AppearancePatchParams): JsonElement {
-                    val updated = configStore.updateAppearance(params)
-                    return SideveilWireJson.encodeToJsonElement(updated)
-                }
+                override fun patchAppearance(params: AppearancePatchParams): SideveilConfig = configStore.updateAppearance(params)
 
-                override fun sendPanelCommand(command: String) {
+                override fun sendPanelCommand(command: PanelCommand) {
                     controlServer.emitEvent(
                         SideveilEvents.PANEL_COMMAND,
                         SideveilWireJson.encodeToJsonElement(PanelCommandPayload(command)),
@@ -170,7 +166,9 @@ object DaemonMain {
                             side: EdgeSide,
                             startYFraction: Float,
                         ) {
-                            panelState = PanelState.DRAGGING
+                            if (controlServer.isHostConnected()) {
+                                panelState = PanelState.DRAGGING
+                            }
                             controlServer.emitEvent(
                                 SideveilEvents.GESTURE_DRAG_START,
                                 SideveilWireJson.encodeToJsonElement(
@@ -198,6 +196,9 @@ object DaemonMain {
                             shouldOpen: Boolean,
                             velocityPxPerSec: Float,
                         ) {
+                            if (!controlServer.isHostConnected()) {
+                                panelState = PanelState.CLOSED
+                            }
                             controlServer.emitEvent(
                                 SideveilEvents.GESTURE_DRAG_END,
                                 SideveilWireJson.encodeToJsonElement(

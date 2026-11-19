@@ -4,9 +4,9 @@ import android.app.ActivityManager
 import android.content.ComponentName
 import android.os.Binder
 import android.os.Handler
-import android.os.IBinder
 import android.os.Looper
 import android.os.Parcel
+import java.lang.reflect.Method
 import java.lang.reflect.Proxy
 
 /**
@@ -27,7 +27,19 @@ class ForegroundMonitor(
         private set
 
     private var atmService: Any? = null
+    private var getTasksMethod: Method? = null
     private var registeredListener: Any? = null
+
+    private val oplusFocusCaller: (() -> String?)? by lazy {
+        runCatching {
+            val cls = Class.forName("android.view.OplusWindowManager")
+            val instance = cls.getDeclaredConstructor().newInstance()
+            val method = cls.getMethod("getCurrentFocus")
+            ({ method.invoke(instance) as? String })
+        }.getOrNull()
+    }
+
+    @Volatile
     private var running = false
 
     private val debouncedRefresh = Runnable { refreshNow() }
@@ -142,23 +154,25 @@ class ForegroundMonitor(
                         ?.also { atmService = it }
                     ?: return ""
 
-            @Suppress("UNCHECKED_CAST")
-            val tasks =
-                (
-                    atm.javaClass
+            val method =
+                getTasksMethod
+                    ?: atm.javaClass
                         .getMethod(
                             "getTasks",
                             Int::class.javaPrimitiveType,
                             Boolean::class.javaPrimitiveType,
                             Boolean::class.javaPrimitiveType,
                             Int::class.javaPrimitiveType,
-                        ).invoke(atm, 5, false, false, 0) as? List<ActivityManager.RunningTaskInfo>
-                ).orEmpty()
+                        ).also { getTasksMethod = it }
+
+            @Suppress("UNCHECKED_CAST")
+            val tasks =
+                (method.invoke(atm, 5, false, false, 0) as? List<ActivityManager.RunningTaskInfo>).orEmpty()
 
             for (task in tasks) {
                 val component: ComponentName = task.topActivity ?: task.baseActivity ?: continue
                 val pkg = component.packageName
-                if (pkg.isNotBlank()) {
+                if (pkg.isNotBlank() && pkg != hostPackage) {
                     return@runCatching pkg
                 }
             }
@@ -169,14 +183,28 @@ class ForegroundMonitor(
 
     private fun queryViaOplusWindowManager(): String =
         runCatching {
-            val cls = Class.forName("android.view.OplusWindowManager")
-            val instance = cls.getDeclaredConstructor().newInstance()
-            val focus = cls.getMethod("getCurrentFocus").invoke(instance) as? String
-            focus?.trim().orEmpty()
+            val rawFocus = oplusFocusCaller?.invoke()
+            extractValidPackageName(rawFocus, hostPackage)
         }.getOrDefault("")
 
     companion object {
         private const val DEBOUNCE_MS = 50L
         private const val POLL_INTERVAL_MS = 2_000L
+        private val PACKAGE_NAME_REGEX = Regex("^[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z0-9_]+)+$")
+
+        internal fun extractValidPackageName(
+            rawFocus: String?,
+            hostPackage: String,
+        ): String {
+            if (rawFocus.isNullOrBlank()) return ""
+            val candidate =
+                rawFocus
+                    .trim()
+                    .substringBefore('/')
+                    .substringBefore(' ')
+                    .trim()
+            if (candidate.isEmpty() || candidate == hostPackage) return ""
+            return if (PACKAGE_NAME_REGEX.matches(candidate)) candidate else ""
+        }
     }
 }

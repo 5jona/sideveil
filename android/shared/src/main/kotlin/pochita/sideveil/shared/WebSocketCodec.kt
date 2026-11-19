@@ -60,6 +60,12 @@ object WebSocketCodec {
 
     private val fragmentStates = WeakHashMap<InputStream, FragmentAssembly>()
 
+    fun clearStreamState(input: InputStream) {
+        synchronized(fragmentStates) {
+            fragmentStates.remove(input)
+        }
+    }
+
     fun computeAcceptKey(clientKey: String): String {
         val sha1 = MessageDigest.getInstance("SHA-1")
         val digest = sha1.digest((clientKey.trim() + WS_MAGIC_GUID).toByteArray(StandardCharsets.US_ASCII))

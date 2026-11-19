@@ -12,9 +12,10 @@ const baseConfig = createWebUiViteConfig({
   outDir: path.resolve(__dirname, '../android/host-app/src/main/assets/panel'),
   port: 5175,
   kitRoot,
+  surface: 'native-glass',
   server: {
     fs: {
-      allow: [__dirname, kitRoot],
+      allow: [__dirname],
     },
   },
 });

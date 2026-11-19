@@ -23,16 +23,22 @@ import {
   useToast,
   type ColorMode,
   type LogEntry,
+  type ThemeId,
   type ThemeSyncPayload,
 } from '@pochita/ui';
 import { cn } from '@pochita/ui';
 import {
-  DEFAULT_CONFIG,
   normalizeConfig,
+  SIDEVEIL_EVENTS,
+  SIDEVEIL_METHODS,
+  type ConfigUpdatedEventPayload,
   type DaemonStatus,
+  type PanelVisibilityEventPayload,
   type PingResult,
+  type ScopeChangedEventPayload,
   type SideveilConfig,
 } from '../shared/types.ts';
+import { createMockPanelRpcHandler } from './mockPanelBridge.ts';
 
 function nowTimeStr(): string {
   const d = new Date();
@@ -43,33 +49,32 @@ function PanelWorkbench({
   eventsLog,
   onAppendLog,
   onClearLogs,
-  cornerRadiusDp,
   onCornerRadiusDpChange,
+  nativeBlurEnabled,
+  onNativeBlurEnabledChange,
 }: {
   eventsLog: readonly LogEntry[];
   onAppendLog: (level: LogEntry['level'], message: string) => void;
   onClearLogs: () => void;
-  cornerRadiusDp: number;
   onCornerRadiusDpChange: (dp: number) => void;
+  nativeBlurEnabled: boolean;
+  onNativeBlurEnabledChange: (enabled: boolean) => void;
 }) {
   const bridge = useBridge();
   const { pushToast } = useToast();
-  const { themeId, colorMode, resolvedScheme, setThemeId, setColorMode } = useTheme();
+  const { themeId, colorMode, setThemeId, setColorMode } = useTheme();
 
   const [status, setStatus] = useState<DaemonStatus | null>(null);
-  const [nativeBlurEnabled, setNativeBlurEnabled] = useState(true);
-  const [blurRadiusPx, setBlurRadiusPx] = useState(160);
   const [lastPingMs, setLastPingMs] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [imeText, setImeText] = useState('');
   const [imeFocused, setImeFocused] = useState(false);
 
-  const lastDaemonThemeRef = useRef<{ themeId: string; colorMode: ColorMode } | null>(null);
   const isNativeHost = bridge.env === 'host';
 
   const refreshStatus = useCallback(async () => {
     try {
-      const res = await bridge.invoke<DaemonStatus>('daemon.status');
+      const res = await bridge.invoke<DaemonStatus>(SIDEVEIL_METHODS.DAEMON_STATUS);
       if (res && typeof res.pid === 'number') {
         setStatus(res);
       }
@@ -83,27 +88,20 @@ function PanelWorkbench({
 
     const loadDaemonConfig = async () => {
       try {
-        const res = await bridge.invoke<unknown>('config.get');
+        const res = await bridge.invoke<unknown>(SIDEVEIL_METHODS.CONFIG_GET);
         const cfg = normalizeConfig(res as Partial<SideveilConfig> | null);
-        const nextThemeId = cfg.panel.themeId;
-        const nextMode = cfg.panel.colorMode;
-        lastDaemonThemeRef.current = { themeId: nextThemeId, colorMode: nextMode };
-        setThemeId(nextThemeId);
-        setColorMode(nextMode);
-        setNativeBlurEnabled(cfg.panel.nativeBlurEnabled);
-        setBlurRadiusPx(cfg.panel.blurRadiusPx);
+        setThemeId(cfg.panel.themeId);
+        setColorMode(cfg.panel.colorMode);
+        onNativeBlurEnabledChange(cfg.panel.nativeBlurEnabled);
         onCornerRadiusDpChange(cfg.panel.cornerRadiusDp);
       } catch (err) {
         onAppendLog('warn', `config.get failed: ${err instanceof Error ? err.message : String(err)}`);
-        if (!lastDaemonThemeRef.current) {
-          lastDaemonThemeRef.current = { themeId, colorMode };
-        }
       }
     };
     void loadDaemonConfig();
 
-    const unsubScope = bridge.onHostEvent('scope.changed', (payload) => {
-      const p = payload as { foregroundPackage?: string; active?: boolean } | undefined;
+    const unsubScope = bridge.onHostEvent(SIDEVEIL_EVENTS.SCOPE_CHANGED, (payload) => {
+      const p = payload as ScopeChangedEventPayload | undefined;
       if (p?.foregroundPackage) {
         setStatus((prev) =>
           prev
@@ -118,19 +116,13 @@ function PanelWorkbench({
       }
     });
 
-    const unsubConfig = bridge.onHostEvent('config.updated', (payload) => {
-      const p = payload as
-        | { config?: Partial<SideveilConfig>; foregroundPackage?: string; scopeActive?: boolean }
-        | undefined;
+    const unsubConfig = bridge.onHostEvent(SIDEVEIL_EVENTS.CONFIG_UPDATED, (payload) => {
+      const p = payload as ConfigUpdatedEventPayload | undefined;
       if (!p?.config) return;
       const cfg = normalizeConfig(p.config);
-      const nextThemeId = cfg.panel.themeId;
-      const nextMode = cfg.panel.colorMode;
-      lastDaemonThemeRef.current = { themeId: nextThemeId, colorMode: nextMode };
-      setThemeId(nextThemeId);
-      setColorMode(nextMode);
-      setNativeBlurEnabled(cfg.panel.nativeBlurEnabled);
-      setBlurRadiusPx(cfg.panel.blurRadiusPx);
+      setThemeId(cfg.panel.themeId);
+      setColorMode(cfg.panel.colorMode);
+      onNativeBlurEnabledChange(cfg.panel.nativeBlurEnabled);
       onCornerRadiusDpChange(cfg.panel.cornerRadiusDp);
       if (typeof p.foregroundPackage === 'string') {
         setStatus((prev) =>
@@ -146,8 +138,8 @@ function PanelWorkbench({
       onAppendLog('info', `config.updated (theme=${cfg.panel.themeId}, blur=${cfg.panel.nativeBlurEnabled})`);
     });
 
-    const unsubVis = bridge.onHostEvent('panel.visibility', (payload) => {
-      const p = payload as { visible?: boolean; state?: string } | undefined;
+    const unsubVis = bridge.onHostEvent(SIDEVEIL_EVENTS.PANEL_VISIBILITY, (payload) => {
+      const p = payload as PanelVisibilityEventPayload | undefined;
       onAppendLog('info', `panel.visibility -> ${p?.state ?? String(p?.visible)}`);
       if (p?.visible) {
         void refreshStatus();
@@ -159,13 +151,21 @@ function PanelWorkbench({
       unsubConfig();
       unsubVis();
     };
-  }, [bridge, colorMode, onAppendLog, onCornerRadiusDpChange, refreshStatus, setColorMode, setThemeId, themeId]);
+  }, [
+    bridge,
+    onAppendLog,
+    onCornerRadiusDpChange,
+    onNativeBlurEnabledChange,
+    refreshStatus,
+    setColorMode,
+    setThemeId,
+  ]);
 
   const handlePing = async () => {
     setBusy(true);
     const t0 = performance.now();
     try {
-      const res = await bridge.invoke<PingResult>('daemon.ping');
+      const res = await bridge.invoke<PingResult>(SIDEVEIL_METHODS.DAEMON_PING);
       const rtt = Math.max(1, Math.round(performance.now() - t0));
       setLastPingMs(rtt);
       onAppendLog(
@@ -181,49 +181,34 @@ function PanelWorkbench({
     }
   };
 
-  // Sync theme/colorMode initiated inside the panel back to the daemon config.
-  useEffect(() => {
-    if (
-      lastDaemonThemeRef.current &&
-      lastDaemonThemeRef.current.themeId === themeId &&
-      lastDaemonThemeRef.current.colorMode === colorMode
-    ) {
-      return;
-    }
-    if (!lastDaemonThemeRef.current) {
-      return;
-    }
-    lastDaemonThemeRef.current = { themeId, colorMode };
-    void bridge.invoke('config.patchAppearance', { themeId, colorMode }).catch((err) => {
-      onAppendLog(
-        'warn',
-        `config.patchAppearance failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    });
-  }, [themeId, colorMode, bridge, onAppendLog]);
+  const handleThemePatch = (nextThemeId: ThemeId, nextColorMode: ColorMode) => {
+    void bridge
+      .invoke(SIDEVEIL_METHODS.CONFIG_PATCH_APPEARANCE, {
+        themeId: nextThemeId,
+        colorMode: nextColorMode,
+      })
+      .catch((err) => {
+        onAppendLog(
+          'warn',
+          `config.patchAppearance failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
+  };
 
   const handleToggleBlur = (checked: boolean) => {
-    setNativeBlurEnabled(checked);
-    const cornerRadiusPx = Math.round(cornerRadiusDp * (window.devicePixelRatio || 1));
-    void bridge.sendContainerAction({
-      type: 'syncTheme',
-      payload: {
+    onNativeBlurEnabledChange(checked);
+    void bridge
+      .invoke(SIDEVEIL_METHODS.CONFIG_PATCH_APPEARANCE, {
         themeId,
-        colorScheme: resolvedScheme,
-        wantsNativeBlur: checked,
-        cornerRadiusPx,
-      },
-    });
-    void bridge.invoke('config.patchAppearance', {
-      themeId,
-      colorMode,
-      nativeBlurEnabled: checked,
-    }).catch((err) => {
-      onAppendLog(
-        'warn',
-        `config.patchAppearance failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    });
+        colorMode,
+        nativeBlurEnabled: checked,
+      })
+      .catch((err) => {
+        onAppendLog(
+          'warn',
+          `config.patchAppearance failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
     onAppendLog('info', `nativeBlurEnabled -> ${checked}`);
   };
 
@@ -318,7 +303,11 @@ function PanelWorkbench({
           </div>
 
           <Card className="space-y-2.5 p-3">
-            <ThemeSwitcher compact />
+            <ThemeSwitcher
+              compact
+              onThemeChange={(nextTheme) => handleThemePatch(nextTheme, colorMode)}
+              onColorModeChange={(nextMode) => handleThemePatch(themeId, nextMode)}
+            />
             <div className="pochita-divider" />
             <SettingRow
               variant="plain"
@@ -381,7 +370,8 @@ function PanelThemedContainer({
   onClearLogs: () => void;
 }) {
   const bridge = useBridge();
-  const [cornerRadiusDp, setCornerRadiusDp] = useState<number>(28);
+  const [cornerRadiusDp, setCornerRadiusDp] = useState<number>(22);
+  const [nativeBlurEnabled, setNativeBlurEnabled] = useState<boolean>(true);
   const lastSyncKeyRef = useRef<string>('');
   const lastThemePayloadRef = useRef<ThemeSyncPayload | null>(null);
 
@@ -391,6 +381,7 @@ function PanelThemedContainer({
       const cornerRadiusPx = Math.round(cornerRadiusDp * (window.devicePixelRatio || 1));
       const syncPayload: ThemeSyncPayload = {
         ...payload,
+        wantsNativeBlur: nativeBlurEnabled && payload.wantsNativeBlur,
         cornerRadiusPx,
       };
       const key = `${syncPayload.themeId}:${syncPayload.colorScheme}:${syncPayload.wantsNativeBlur}:${syncPayload.cornerRadiusPx}`;
@@ -398,7 +389,7 @@ function PanelThemedContainer({
       lastSyncKeyRef.current = key;
       void bridge.sendContainerAction({ type: 'syncTheme', payload: syncPayload });
     },
-    [bridge, cornerRadiusDp],
+    [bridge, cornerRadiusDp, nativeBlurEnabled],
   );
 
   useEffect(() => {
@@ -406,13 +397,14 @@ function PanelThemedContainer({
     const cornerRadiusPx = Math.round(cornerRadiusDp * (window.devicePixelRatio || 1));
     const syncPayload: ThemeSyncPayload = {
       ...lastThemePayloadRef.current,
+      wantsNativeBlur: nativeBlurEnabled && lastThemePayloadRef.current.wantsNativeBlur,
       cornerRadiusPx,
     };
     const key = `${syncPayload.themeId}:${syncPayload.colorScheme}:${syncPayload.wantsNativeBlur}:${syncPayload.cornerRadiusPx}`;
     if (lastSyncKeyRef.current === key) return;
     lastSyncKeyRef.current = key;
     void bridge.sendContainerAction({ type: 'syncTheme', payload: syncPayload });
-  }, [bridge, cornerRadiusDp]);
+  }, [bridge, cornerRadiusDp, nativeBlurEnabled]);
 
   return (
     <ThemeProvider
@@ -426,8 +418,9 @@ function PanelThemedContainer({
           eventsLog={eventsLog}
           onAppendLog={onAppendLog}
           onClearLogs={onClearLogs}
-          cornerRadiusDp={cornerRadiusDp}
           onCornerRadiusDpChange={setCornerRadiusDp}
+          nativeBlurEnabled={nativeBlurEnabled}
+          onNativeBlurEnabledChange={setNativeBlurEnabled}
         />
       </ToastProvider>
     </ThemeProvider>
@@ -435,7 +428,6 @@ function PanelThemedContainer({
 }
 
 export function PanelApp() {
-  const mockConfigRef = useRef<SideveilConfig>(DEFAULT_CONFIG);
   const [eventsLog, setEventsLog] = useState<LogEntry[]>(() => [
     {
       id: 'init-1',
@@ -463,46 +455,7 @@ export function PanelApp() {
   const bridgeOptions = useMemo<BridgeOptions>(
     () => ({
       mockNamespace: 'sideveil-panel',
-      onMockRpc: async (method, params) => {
-        if (method === 'daemon.ping') {
-          return { pong: true, daemonUptimeMs: 184_200, timestampMs: Date.now() };
-        }
-        if (method === 'daemon.status') {
-          return {
-            pid: 14820,
-            uid: 1000,
-            uptimeMs: 184_200,
-            configVersion: mockConfigRef.current.version,
-            enabled: true,
-            scopeActive: true,
-            foregroundPackage: 'me.weishu.kernelsu',
-            hostPackage: 'pochita.sideveil.host',
-            hostConnected: true,
-            hostPid: 14905,
-            overlayPermissionGranted: true,
-            crossWindowBlurSupported: true,
-            gestureMonitorActive: true,
-            taskListenerActive: true,
-            panelState: 'open',
-            screenWidthPx: 3392,
-            screenHeightPx: 2400,
-            density: 2.625,
-            wsPort: 41928,
-          } satisfies DaemonStatus;
-        }
-        if (method === 'config.get') {
-          return mockConfigRef.current;
-        }
-        if (method === 'config.patchAppearance') {
-          const patch = (params ?? {}) as Partial<SideveilConfig['panel']>;
-          mockConfigRef.current = {
-            ...mockConfigRef.current,
-            panel: { ...mockConfigRef.current.panel, ...patch },
-          };
-          return mockConfigRef.current;
-        }
-        return { ok: true };
-      },
+      onMockRpc: createMockPanelRpcHandler(),
       onMockContainerAction: (action: ContainerAction) => {
         appendLogRef.current('info', `container.action -> ${action.type}`);
       },

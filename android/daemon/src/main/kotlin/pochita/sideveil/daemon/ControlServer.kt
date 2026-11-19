@@ -3,24 +3,16 @@ package pochita.sideveil.daemon
 import android.system.Os
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonArray
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
-import pochita.sideveil.shared.AppearancePatchParams
-import pochita.sideveil.shared.DaemonStatus
+import pochita.sideveil.shared.ConfigUpdatedPayload
 import pochita.sideveil.shared.HostEventEnvelope
-import pochita.sideveil.shared.HostHelloPayload
 import pochita.sideveil.shared.PanelState
-import pochita.sideveil.shared.PanelStateChangedPayload
-import pochita.sideveil.shared.PingResult
 import pochita.sideveil.shared.RpcError
 import pochita.sideveil.shared.RpcRequest
 import pochita.sideveil.shared.RpcResponse
 import pochita.sideveil.shared.SideveilEvents
-import pochita.sideveil.shared.SideveilMethods
 import pochita.sideveil.shared.SideveilWireJson
 import pochita.sideveil.shared.WebSocketCodec
 import pochita.sideveil.shared.WsOpcode
@@ -42,26 +34,11 @@ import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.ThreadFactory
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
-
-interface DaemonRpcDelegate {
-    fun buildStatus(): DaemonStatus
-
-    fun currentConfigJson(): JsonElement
-
-    fun reloadConfig(): JsonElement
-
-    fun patchAppearance(params: AppearancePatchParams): JsonElement
-
-    fun sendPanelCommand(command: String)
-
-    fun restartHost()
-
-    fun onHostHello(payload: HostHelloPayload)
-
-    fun onPanelStateChanged(state: PanelState)
-}
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.locks.ReentrantLock
 
 /**
  * Single loopback HTTP/1.1 + RFC 6455 WebSocket server bound strictly to 127.0.0.1:0
@@ -69,9 +46,10 @@ interface DaemonRpcDelegate {
  */
 class ControlServer(
     private val runDir: File,
-    private val uptimeProvider: () -> Long,
+    uptimeProvider: () -> Long,
     private val delegate: DaemonRpcDelegate,
 ) {
+    private val rpcDispatcher = RpcDispatcher(uptimeProvider = uptimeProvider, delegate = delegate)
     private val acceptExecutor = Executors.newSingleThreadExecutor()
     private val workerPool =
         ThreadPoolExecutor(
@@ -219,7 +197,7 @@ class ControlServer(
                     }
                     val bodyBytes = readExactBytes(input, contentLen)
                     val bodyText = String(bodyBytes, StandardCharsets.UTF_8)
-                    val response = executeRpcText(bodyText)
+                    val response = rpcDispatcher.executeRpcText(bodyText)
                     writeHttpJson(output, 200, SideveilWireJson.encodeToString(response))
                 }
 
@@ -259,8 +237,8 @@ class ControlServer(
         val status = delegate.buildStatus()
         val syncPayload =
             SideveilWireJson.encodeToJsonElement(
-                pochita.sideveil.shared.ConfigUpdatedPayload(
-                    config = SideveilWireJson.decodeFromJsonElement(delegate.currentConfigJson()),
+                ConfigUpdatedPayload(
+                    config = delegate.currentConfig(),
                     scopeActive = status.scopeActive,
                     foregroundPackage = status.foregroundPackage,
                 ),
@@ -307,6 +285,7 @@ class ControlServer(
                 DaemonLog.warn("WebSocket session read terminated", t)
             }
         } finally {
+            WebSocketCodec.clearStreamState(input)
             var dropped = false
             synchronized(sessionLock) {
                 if (activeSession === session) {
@@ -330,7 +309,13 @@ class ControlServer(
             runCatching { SideveilWireJson.parseToJsonElement(text).jsonObject }.getOrNull() ?: return
 
         if (obj.containsKey("method") && obj.containsKey("id")) {
-            val response = executeRpcText(text)
+            val response =
+                runCatching {
+                    val req = SideveilWireJson.decodeFromJsonElement<RpcRequest>(obj)
+                    rpcDispatcher.executeRpcRequest(req)
+                }.getOrElse { t ->
+                    RpcResponse(id = "0", error = RpcError(-32700, "Parse error: ${t.message}"))
+                }
             session.sendText(SideveilWireJson.encodeToString(response))
             return
         }
@@ -339,108 +324,7 @@ class ControlServer(
             val envelope =
                 runCatching { SideveilWireJson.decodeFromJsonElement<HostEventEnvelope>(obj) }.getOrNull()
                     ?: return
-            when (envelope.event) {
-                SideveilEvents.HOST_HELLO -> {
-                    envelope.payload?.let { payload ->
-                        runCatching {
-                            SideveilWireJson.decodeFromJsonElement<HostHelloPayload>(payload)
-                        }.onSuccess { delegate.onHostHello(it) }
-                    }
-                }
-
-                SideveilEvents.PANEL_STATE_CHANGED -> {
-                    envelope.payload?.let { payload ->
-                        runCatching {
-                            SideveilWireJson.decodeFromJsonElement<PanelStateChangedPayload>(payload)
-                        }.onSuccess { delegate.onPanelStateChanged(it.state) }
-                    }
-                }
-            }
-        }
-    }
-
-    private fun executeRpcText(bodyText: String): RpcResponse {
-        val req =
-            try {
-                SideveilWireJson.decodeFromString<RpcRequest>(bodyText)
-            } catch (t: Throwable) {
-                return RpcResponse(id = "0", error = RpcError(-32700, "Parse error: ${t.message}"))
-            }
-
-        return try {
-            val result: JsonElement =
-                when (req.method) {
-                    SideveilMethods.DAEMON_PING -> {
-                        SideveilWireJson.encodeToJsonElement(
-                            PingResult(
-                                pong = true,
-                                daemonUptimeMs = uptimeProvider(),
-                                timestampMs = System.currentTimeMillis(),
-                            ),
-                        )
-                    }
-
-                    SideveilMethods.DAEMON_STATUS -> {
-                        SideveilWireJson.encodeToJsonElement(delegate.buildStatus())
-                    }
-
-                    SideveilMethods.DAEMON_LOGS -> {
-                        buildJsonObject {
-                            put(
-                                "lines",
-                                buildJsonArray {
-                                    DaemonLog.recent().forEach { add(JsonPrimitive(it)) }
-                                },
-                            )
-                        }
-                    }
-
-                    SideveilMethods.CONFIG_GET -> {
-                        delegate.currentConfigJson()
-                    }
-
-                    SideveilMethods.CONFIG_RELOAD -> {
-                        delegate.reloadConfig()
-                    }
-
-                    SideveilMethods.CONFIG_PATCH_APPEARANCE -> {
-                        val patch =
-                            if (req.params != null) {
-                                SideveilWireJson.decodeFromJsonElement<AppearancePatchParams>(req.params!!)
-                            } else {
-                                AppearancePatchParams()
-                            }
-                        delegate.patchAppearance(patch)
-                    }
-
-                    SideveilMethods.PANEL_OPEN -> {
-                        delegate.sendPanelCommand("open")
-                        buildJsonObject { put("ok", JsonPrimitive(true)) }
-                    }
-
-                    SideveilMethods.PANEL_CLOSE -> {
-                        delegate.sendPanelCommand("close")
-                        buildJsonObject { put("ok", JsonPrimitive(true)) }
-                    }
-
-                    SideveilMethods.PANEL_TOGGLE -> {
-                        delegate.sendPanelCommand("toggle")
-                        buildJsonObject { put("ok", JsonPrimitive(true)) }
-                    }
-
-                    SideveilMethods.HOST_RESTART -> {
-                        delegate.restartHost()
-                        buildJsonObject { put("ok", JsonPrimitive(true)) }
-                    }
-
-                    else -> {
-                        return RpcResponse(id = req.id, error = RpcError(-32601, "Method not found: ${req.method}"))
-                    }
-                }
-            RpcResponse(id = req.id, result = result)
-        } catch (t: Throwable) {
-            DaemonLog.warn("RPC ${req.method} failed", t)
-            RpcResponse(id = req.id, error = RpcError(-32000, t.message ?: "RPC execution error"))
+            rpcDispatcher.dispatchHostEvent(envelope)
         }
     }
 
@@ -564,45 +448,71 @@ class ControlServer(
         private val socket: Socket,
         private val output: OutputStream,
     ) {
-        private val writeLock = Any()
+        private val writeLock = ReentrantLock()
+        private val writeExecutor =
+            ThreadPoolExecutor(
+                1,
+                1,
+                0L,
+                TimeUnit.MILLISECONDS,
+                ArrayBlockingQueue(256),
+                ThreadFactory { r ->
+                    Thread(r, "SideveilWsWriter").apply { isDaemon = true }
+                },
+                ThreadPoolExecutor.DiscardOldestPolicy(),
+            )
 
-        @Volatile
-        private var closed = false
+        private val closed = AtomicBoolean(false)
 
-        fun isOpen(): Boolean = !closed && !socket.isClosed
+        fun isOpen(): Boolean = !closed.get() && !socket.isClosed
 
         fun sendText(text: String) {
-            if (!isOpen()) return
-            synchronized(writeLock) {
-                if (!isOpen()) return
+            enqueueWrite {
                 runCatching { WebSocketCodec.writeText(output, text, mask = false) }
                     .onFailure { close("Write text failed") }
             }
         }
 
         fun sendPong(payload: ByteArray) {
-            if (!isOpen()) return
-            synchronized(writeLock) {
-                if (!isOpen()) return
+            enqueueWrite {
                 runCatching { WebSocketCodec.writePong(output, payload, mask = false) }
                     .onFailure { close("Write pong failed") }
             }
         }
 
         fun sendPing() {
-            if (!isOpen()) return
-            synchronized(writeLock) {
-                if (!isOpen()) return
+            enqueueWrite {
                 runCatching { WebSocketCodec.writePing(output, ByteArray(0), mask = false) }
                     .onFailure { close("Write ping failed") }
             }
         }
 
+        private fun enqueueWrite(action: () -> Unit) {
+            if (!isOpen()) return
+            runCatching {
+                writeExecutor.execute {
+                    if (!isOpen()) return@execute
+                    writeLock.lock()
+                    try {
+                        if (!isOpen()) return@execute
+                        action()
+                    } finally {
+                        writeLock.unlock()
+                    }
+                }
+            }
+        }
+
         fun close(reason: String) {
-            if (closed) return
-            closed = true
-            synchronized(writeLock) {
-                runCatching { WebSocketCodec.writeClose(output, 1000, reason.take(60), mask = false) }
+            if (!closed.compareAndSet(false, true)) return
+            writeExecutor.shutdownNow()
+            val locked = runCatching { writeLock.tryLock(50, TimeUnit.MILLISECONDS) }.getOrDefault(false)
+            if (locked) {
+                try {
+                    runCatching { WebSocketCodec.writeClose(output, 1000, reason.take(60), mask = false) }
+                } finally {
+                    writeLock.unlock()
+                }
             }
             runCatching { socket.close() }
         }

@@ -1,5 +1,5 @@
 import { Plus, X } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import {
   Badge,
   Button,
@@ -17,6 +17,107 @@ import {
 } from '@pochita/ui';
 import type { ScopeMode, SideveilConfig } from '../../shared/types.ts';
 
+interface PackageScopeListProps {
+  title: string;
+  description: string;
+  emptyText?: string;
+  packages: readonly string[];
+  inputId: string;
+  inputName: string;
+  inputPlaceholder: string;
+  inputAriaLabel: string;
+  removeAriaPrefix: string;
+  submitLabel?: string;
+  headerAction?: ReactNode;
+  onAddPackage: (pkg: string) => void;
+  onRemovePackage: (pkg: string) => void;
+}
+
+function PackageScopeList({
+  title,
+  description,
+  emptyText,
+  packages,
+  inputId,
+  inputName,
+  inputPlaceholder,
+  inputAriaLabel,
+  removeAriaPrefix,
+  submitLabel = '添加',
+  headerAction,
+  onAddPackage,
+  onRemovePackage,
+}: PackageScopeListProps) {
+  const [inputValue, setInputValue] = useState('');
+
+  const handleSubmit = (pkgRaw: string) => {
+    const trimmed = pkgRaw.trim();
+    if (!trimmed) return;
+    onAddPackage(trimmed);
+    setInputValue('');
+  };
+
+  return (
+    <div className="pochita-card-elevated space-y-2.5 p-3.5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="text-xs font-medium text-[var(--text-primary)]">
+            {title}（{packages.length}）
+          </div>
+          <p className="text-[11px] text-[var(--text-secondary)]">{description}</p>
+        </div>
+        {headerAction}
+      </div>
+
+      <div className="flex flex-wrap gap-1.5">
+        {packages.length === 0 && emptyText ? (
+          <span className="text-xs text-[var(--text-secondary)]">{emptyText}</span>
+        ) : (
+          packages.map((pkg) => (
+            <span
+              key={pkg}
+              className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] border border-[var(--border-hairline)] bg-[var(--surface-card)] px-2.5 py-1 text-xs text-[var(--text-primary)]"
+            >
+              <span className="font-mono text-[11px]">{pkg}</span>
+              <button
+                type="button"
+                onClick={() => onRemovePackage(pkg)}
+                aria-label={`${removeAriaPrefix} ${pkg}`}
+                className="cursor-pointer rounded-full p-0.5 text-[var(--text-secondary)] hover:bg-[var(--surface-elevated)] hover:text-[var(--danger)]"
+              >
+                <X className="size-3" />
+              </button>
+            </span>
+          ))
+        )}
+      </div>
+
+      <form
+        className="flex items-center gap-2 pt-1"
+        onSubmit={(ev) => {
+          ev.preventDefault();
+          handleSubmit(inputValue);
+        }}
+      >
+        <Input
+          id={inputId}
+          name={inputName}
+          size="sm"
+          className="flex-1"
+          value={inputValue}
+          onChange={(ev) => setInputValue(ev.target.value)}
+          placeholder={inputPlaceholder}
+          aria-label={inputAriaLabel}
+        />
+        <Button size="sm" type="submit" variant="secondary" disabled={!inputValue.trim()}>
+          <Plus className="size-3.5" />
+          {submitLabel}
+        </Button>
+      </form>
+    </div>
+  );
+}
+
 export interface AppearanceScopeTabProps {
   config: SideveilConfig;
   foregroundPackage: string;
@@ -30,29 +131,7 @@ export function AppearanceScopeTab({
   crossWindowBlurSupported,
   onChange,
 }: AppearanceScopeTabProps) {
-  const { themeId, colorMode, setThemeId, setColorMode } = useTheme();
-  const [allowInput, setAllowInput] = useState('');
-  const [denyInput, setDenyInput] = useState('');
-
-  const prevThemeRef = useRef({ themeId, colorMode });
-
-  // Keep config.panel.themeId and colorMode aligned when user interacts with ThemeSwitcher.
-  useEffect(() => {
-    if (
-      prevThemeRef.current.themeId !== themeId ||
-      prevThemeRef.current.colorMode !== colorMode
-    ) {
-      prevThemeRef.current = { themeId, colorMode };
-      onChange((prev) => ({
-        ...prev,
-        panel: {
-          ...prev.panel,
-          themeId,
-          colorMode,
-        },
-      }));
-    }
-  }, [themeId, colorMode, onChange]);
+  const { setThemeId, setColorMode } = useTheme();
 
   const updatePanel = <K extends keyof SideveilConfig['panel']>(
     key: K,
@@ -89,7 +168,6 @@ export function AppearanceScopeTab({
           : [...prev.scope.allowlist, pkg],
       },
     }));
-    setAllowInput('');
   };
 
   const removeAllowPackage = (pkg: string) => {
@@ -114,7 +192,6 @@ export function AppearanceScopeTab({
           : [...prev.scope.denylist, pkg],
       },
     }));
-    setDenyInput('');
   };
 
   const removeDenyPackage = (pkg: string) => {
@@ -143,7 +220,10 @@ export function AppearanceScopeTab({
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
-            <ThemeSwitcher />
+            <ThemeSwitcher
+              onThemeChange={(nextTheme) => updatePanel('themeId', nextTheme)}
+              onColorModeChange={(nextMode) => updatePanel('colorMode', nextMode)}
+            />
             <div className="flex flex-wrap items-center gap-2 pt-1 text-xs text-[var(--text-secondary)]">
               <span>当前：</span>
               <Badge variant="accent">{config.panel.themeId}</Badge>
@@ -154,6 +234,14 @@ export function AppearanceScopeTab({
                 onClick={() => {
                   setThemeId('coloros-glass');
                   setColorMode('system');
+                  onChange((prev) => ({
+                    ...prev,
+                    panel: {
+                      ...prev.panel,
+                      themeId: 'coloros-glass',
+                      colorMode: 'system',
+                    },
+                  }));
                 }}
               >
                 恢复默认
@@ -286,123 +374,42 @@ export function AppearanceScopeTab({
             }
           />
 
-          <div className="pochita-card-elevated space-y-2.5 p-3.5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <div className="text-xs font-medium text-[var(--text-primary)]">
-                  激活白名单（{config.scope.allowlist.length}）
-                </div>
-                <p className="text-[11px] text-[var(--text-secondary)]">
-                  默认包含 KernelSU 管理器（me.weishu.kernelsu），方便边调参边直接滑出测试
-                </p>
-              </div>
-              {canQuickAddFg ? (
+          <PackageScopeList
+            title="激活白名单"
+            description="默认包含 KernelSU 管理器（me.weishu.kernelsu），方便边调参边直接滑出测试"
+            emptyText="暂无白名单包名"
+            packages={config.scope.allowlist}
+            inputId="allowlist-pkg-input"
+            inputName="allowlistPackage"
+            inputPlaceholder="输入包名，例如 com.example.app"
+            inputAriaLabel="新增白名单包名"
+            removeAriaPrefix="移除"
+            submitLabel="添加"
+            headerAction={
+              canQuickAddFg ? (
                 <Button size="sm" variant="pill" onClick={() => addAllowPackage(foregroundPackage)}>
                   <Plus className="size-3.5" />
                   加入当前前台 ({foregroundPackage})
                 </Button>
-              ) : null}
-            </div>
+              ) : undefined
+            }
+            onAddPackage={addAllowPackage}
+            onRemovePackage={removeAllowPackage}
+          />
 
-            <div className="flex flex-wrap gap-1.5">
-              {config.scope.allowlist.length === 0 ? (
-                <span className="text-xs text-[var(--text-secondary)]">暂无白名单包名</span>
-              ) : (
-                config.scope.allowlist.map((pkg) => (
-                  <span
-                    key={pkg}
-                    className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] border border-[var(--border-hairline)] bg-[var(--surface-card)] px-2.5 py-1 text-xs text-[var(--text-primary)]"
-                  >
-                    <span className="font-mono text-[11px]">{pkg}</span>
-                    <button
-                      type="button"
-                      onClick={() => removeAllowPackage(pkg)}
-                      aria-label={`移除 ${pkg}`}
-                      className="cursor-pointer rounded-full p-0.5 text-[var(--text-secondary)] hover:bg-[var(--surface-elevated)] hover:text-[var(--danger)]"
-                    >
-                      <X className="size-3" />
-                    </button>
-                  </span>
-                ))
-              )}
-            </div>
-
-            <form
-              className="flex items-center gap-2 pt-1"
-              onSubmit={(ev) => {
-                ev.preventDefault();
-                addAllowPackage(allowInput);
-              }}
-            >
-              <Input
-                id="allowlist-pkg-input"
-                name="allowlistPackage"
-                size="sm"
-                className="flex-1"
-                value={allowInput}
-                onChange={(ev) => setAllowInput(ev.target.value)}
-                placeholder="输入包名，例如 com.example.app"
-                aria-label="新增白名单包名"
-              />
-              <Button size="sm" type="submit" variant="secondary" disabled={!allowInput.trim()}>
-                <Plus className="size-3.5" />
-                添加
-              </Button>
-            </form>
-          </div>
-
-          <div className="pochita-card-elevated space-y-2.5 p-3.5">
-            <div>
-              <div className="text-xs font-medium text-[var(--text-primary)]">
-                排除黑名单（{config.scope.denylist.length}）
-              </div>
-              <p className="text-[11px] text-[var(--text-secondary)]">
-                无论何种模式，下列系统进程界面中始终禁用侧边栏热区
-              </p>
-            </div>
-
-            <div className="flex flex-wrap gap-1.5">
-              {config.scope.denylist.map((pkg) => (
-                <span
-                  key={pkg}
-                  className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] border border-[var(--border-hairline)] bg-[var(--surface-card)] px-2.5 py-1 text-xs text-[var(--text-primary)]"
-                >
-                  <span className="font-mono text-[11px]">{pkg}</span>
-                  <button
-                    type="button"
-                    onClick={() => removeDenyPackage(pkg)}
-                    aria-label={`移除排除项 ${pkg}`}
-                    className="cursor-pointer rounded-full p-0.5 text-[var(--text-secondary)] hover:bg-[var(--surface-elevated)] hover:text-[var(--danger)]"
-                  >
-                    <X className="size-3" />
-                  </button>
-                </span>
-              ))}
-            </div>
-
-            <form
-              className="flex items-center gap-2 pt-1"
-              onSubmit={(ev) => {
-                ev.preventDefault();
-                addDenyPackage(denyInput);
-              }}
-            >
-              <Input
-                id="denylist-pkg-input"
-                name="denylistPackage"
-                size="sm"
-                className="flex-1"
-                value={denyInput}
-                onChange={(ev) => setDenyInput(ev.target.value)}
-                placeholder="输入排除包名"
-                aria-label="新增排除包名"
-              />
-              <Button size="sm" type="submit" variant="secondary" disabled={!denyInput.trim()}>
-                <Plus className="size-3.5" />
-                排除
-              </Button>
-            </form>
-          </div>
+          <PackageScopeList
+            title="排除黑名单"
+            description="无论何种模式，下列系统进程界面中始终禁用侧边栏热区"
+            packages={config.scope.denylist}
+            inputId="denylist-pkg-input"
+            inputName="denylistPackage"
+            inputPlaceholder="输入排除包名"
+            inputAriaLabel="新增排除包名"
+            removeAriaPrefix="移除排除项"
+            submitLabel="排除"
+            onAddPackage={addDenyPackage}
+            onRemovePackage={removeDenyPackage}
+          />
         </CardContent>
       </Card>
     </div>

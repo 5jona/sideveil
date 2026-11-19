@@ -78,6 +78,7 @@ class EdgeGestureMonitor(
     private var displayManager: DisplayManager? = null
     private var displayListener: DisplayManager.DisplayListener? = null
     private var inputThread: HandlerThread? = null
+    private var inputHandler: Handler? = null
     private var inputMonitor: InputMonitor? = null
     private var inputReceiver: InputEventReceiver? = null
 
@@ -88,6 +89,7 @@ class EdgeGestureMonitor(
     private var downY = 0f
     private var lastX = 0f
     private var lastEventTimeMs = 0L
+    private var lastSignificantMoveTimeMs = 0L
     private var lastVelocityPxPerSec = 0f
     private var lastMoveEmitMs = 0L
     private var activeEdge: EdgeSide = EdgeSide.RIGHT
@@ -95,10 +97,12 @@ class EdgeGestureMonitor(
     fun start(initialConfig: SideveilConfig) {
         config = initialConfig
         if (inputThread == null) {
-            inputThread =
+            val thread =
                 HandlerThread("SideveilInputDispatcher", Process.THREAD_PRIORITY_URGENT_DISPLAY).apply {
                     start()
                 }
+            inputThread = thread
+            inputHandler = Handler(thread.looper)
         }
         refreshDisplayGeometry(notify = false)
         registerDisplayWatcher()
@@ -113,8 +117,17 @@ class EdgeGestureMonitor(
         config = nextConfig
         scopeActive = nextScopeActive
         panelState = nextPanelState
-        if (!scopeActive && tracking && !pilfered) {
-            resetTracking()
+        if (!nextScopeActive) {
+            val dispatcher = inputHandler
+            if (dispatcher != null && dispatcher.looper != Looper.myLooper()) {
+                dispatcher.post {
+                    if (!scopeActive && tracking && !pilfered) {
+                        resetTracking()
+                    }
+                }
+            } else if (tracking && !pilfered) {
+                resetTracking()
+            }
         }
     }
 
@@ -131,11 +144,14 @@ class EdgeGestureMonitor(
         runCatching { inputMonitor?.dispose() }
         inputMonitor = null
 
+        inputHandler?.removeCallbacksAndMessages(null)
+        inputHandler = null
+
         runCatching { inputThread?.quitSafely() }
         inputThread = null
 
         gestureMonitorActive = false
-        resetTracking()
+        resetTracking(notifyAbortIfPilfered = true)
     }
 
     private fun registerDisplayWatcher() {
@@ -294,6 +310,7 @@ class EdgeGestureMonitor(
         downY = y
         lastX = x
         lastEventTimeMs = event.eventTime
+        lastSignificantMoveTimeMs = event.eventTime
         lastVelocityPxPerSec = 0f
         lastMoveEmitMs = 0L
     }
@@ -302,10 +319,7 @@ class EdgeGestureMonitor(
         if (!tracking) return
         val index = event.findPointerIndex(activePointerId)
         if (index < 0) {
-            if (pilfered) {
-                listener.onDragEnd(shouldOpen = false, velocityPxPerSec = 0f)
-            }
-            resetTracking()
+            resetTracking(notifyAbortIfPilfered = true)
             return
         }
 
@@ -317,16 +331,28 @@ class EdgeGestureMonitor(
         val geo = geometry
         val touchSlopPx = 10f * geo.density
 
-        val dtMs = (event.eventTime - lastEventTimeMs).coerceAtLeast(4L)
+        val rawDtMs = event.eventTime - lastEventTimeMs
         val stepInward = if (activeEdge == EdgeSide.RIGHT) -(rawX - lastX) else (rawX - lastX)
-        val instantVelocity = ((stepInward * 1000f) / dtMs.toFloat()).coerceIn(-12_000f, 12_000f)
-        lastVelocityPxPerSec = lastVelocityPxPerSec * 0.4f + instantVelocity * 0.6f
+        if (rawDtMs > 0L) {
+            val dtMs = rawDtMs.coerceAtLeast(4L)
+            val instantVelocity = ((stepInward * 1000f) / dtMs.toFloat()).coerceIn(-12_000f, 12_000f)
+            val baseVelocity =
+                if (event.eventTime - lastSignificantMoveTimeMs > STALE_VELOCITY_WINDOW_MS) {
+                    0f
+                } else {
+                    lastVelocityPxPerSec
+                }
+            lastVelocityPxPerSec = baseVelocity * 0.4f + instantVelocity * 0.6f
+            lastEventTimeMs = event.eventTime
+        }
+        if (abs(stepInward) >= 0.5f) {
+            lastSignificantMoveTimeMs = event.eventTime
+        }
         lastX = rawX
-        lastEventTimeMs = event.eventTime
 
         if (!pilfered) {
             if (abs(dy) > touchSlopPx && abs(dy) > abs(dx) * 1.15f) {
-                resetTracking()
+                resetTracking(notifyAbortIfPilfered = false)
                 return
             }
             if (inwardDx > touchSlopPx && inwardDx > abs(dy)) {
@@ -363,15 +389,22 @@ class EdgeGestureMonitor(
     ) {
         if (!tracking) return
         if (pilfered) {
+            pilfered = false
             val index = event.findPointerIndex(activePointerId)
             val rawX = if (index >= 0) event.getRawX(index) else lastX
             val dx = rawX - downX
             val inwardDx = if (activeEdge == EdgeSide.RIGHT) -dx else dx
             val triggerDistPx = config.edge.triggerDistanceDp * geometry.density
-            val shouldOpen = !canceled && (inwardDx >= triggerDistPx || lastVelocityPxPerSec >= 450f)
-            listener.onDragEnd(shouldOpen = shouldOpen, velocityPxPerSec = lastVelocityPxPerSec)
+            val releaseVelocity =
+                resolveReleaseVelocity(
+                    trackedVelocityPxPerSec = lastVelocityPxPerSec,
+                    lastSignificantMoveTimeMs = lastSignificantMoveTimeMs,
+                    upEventTimeMs = event.eventTime,
+                )
+            val shouldOpen = !canceled && (inwardDx >= triggerDistPx || releaseVelocity >= FLING_OPEN_VELOCITY_PX_PER_SEC)
+            listener.onDragEnd(shouldOpen = shouldOpen, velocityPxPerSec = releaseVelocity)
         }
-        resetTracking()
+        resetTracking(notifyAbortIfPilfered = false)
     }
 
     private fun isInsideHotzone(
@@ -394,10 +427,32 @@ class EdgeGestureMonitor(
         return rawY >= topPx && rawY <= (topPx + heightPx)
     }
 
-    private fun resetTracking() {
+    private fun resetTracking(notifyAbortIfPilfered: Boolean = true) {
+        val wasPilfered = pilfered
         tracking = false
         pilfered = false
         activePointerId = MotionEvent.INVALID_POINTER_ID
+        lastSignificantMoveTimeMs = 0L
         lastVelocityPxPerSec = 0f
+        if (notifyAbortIfPilfered && wasPilfered) {
+            runCatching { listener.onDragEnd(shouldOpen = false, velocityPxPerSec = 0f) }
+        }
+    }
+
+    companion object {
+        internal const val STALE_VELOCITY_WINDOW_MS = 64L
+        internal const val FLING_OPEN_VELOCITY_PX_PER_SEC = 450f
+
+        internal fun resolveReleaseVelocity(
+            trackedVelocityPxPerSec: Float,
+            lastSignificantMoveTimeMs: Long,
+            upEventTimeMs: Long,
+            staleWindowMs: Long = STALE_VELOCITY_WINDOW_MS,
+        ): Float =
+            if (upEventTimeMs - lastSignificantMoveTimeMs > staleWindowMs) {
+                0f
+            } else {
+                trackedVelocityPxPerSec
+            }
     }
 }

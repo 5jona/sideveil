@@ -1,5 +1,6 @@
 package pochita.sideveil.shared
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 
@@ -26,6 +27,25 @@ object SideveilMethods {
     const val PANEL_CLOSE = "panel.close"
     const val PANEL_TOGGLE = "panel.toggle"
     const val HOST_RESTART = "host.restart"
+    const val CONTAINER_ACTION = "container.action"
+}
+
+@Serializable
+data class DaemonEndpoint(
+    val port: Int,
+    val token: String,
+)
+
+@Serializable
+enum class PanelCommand {
+    @SerialName("open")
+    OPEN,
+
+    @SerialName("close")
+    CLOSE,
+
+    @SerialName("toggle")
+    TOGGLE,
 }
 
 @Serializable
@@ -115,7 +135,24 @@ data class GestureDragEndPayload(
 
 @Serializable
 data class PanelCommandPayload(
-    val command: String,
+    val command: PanelCommand,
+)
+
+@Serializable
+data class ContainerThemePayload(
+    val themeId: String = "coloros-glass",
+    val colorScheme: String = "dark",
+    val wantsNativeBlur: Boolean = true,
+    val cornerRadiusPx: Int = 56,
+)
+
+@Serializable
+data class ContainerActionPayload(
+    val type: String,
+    val focused: Boolean? = null,
+    val widthDp: Int? = null,
+    val heightDp: Int? = null,
+    val payload: ContainerThemePayload? = null,
 )
 
 @Serializable
