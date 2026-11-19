@@ -27,15 +27,16 @@ run_in_env() {
 echo "[*] Building WebUI bundles (Control Plane + Built-in Panel)..."
 (
     cd "${WEBUI_DIR}"
-    run_in_env pnpm install --frozen-lockfile || run_in_env pnpm install
+    run_in_env pnpm install --frozen-lockfile
     run_in_env pnpm typecheck
+    run_in_env pnpm test
     run_in_env pnpm build
 )
 
-echo "[*] Compiling Android modules (:shared:test :daemon:buildDex :host-app:assembleRelease)..."
+echo "[*] Compiling Android modules (spotlessCheck, unit tests, DEX, release APK)..."
 (
     cd "${ANDROID_DIR}"
-    run_in_env ./gradlew :shared:test :daemon:buildDex :host-app:assembleRelease
+    run_in_env ./gradlew spotlessCheck :shared:test :daemon:test :host-app:testDebugUnitTest :daemon:buildDex :host-app:assembleRelease
 )
 
 if [ ! -f "${DEX_DST}" ]; then

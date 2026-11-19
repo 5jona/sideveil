@@ -65,7 +65,7 @@ class ForegroundMonitor(
 
     fun refreshNow(): String {
         val detected = queryTopPackage()
-        if (detected.isNotBlank() && detected != hostPackage && detected != foregroundPackage) {
+        if (detected.isNotBlank() && detected != foregroundPackage) {
             foregroundPackage = detected
             DaemonLog.info("Foreground package changed -> $detected")
             onForegroundChanged(detected)
@@ -144,8 +144,7 @@ class ForegroundMonitor(
 
             @Suppress("UNCHECKED_CAST")
             val tasks =
-                runCatching {
-                    // Android 17 signature: getTasks(int maxNum, boolean filterOnlyVisibleRecents, boolean keepIntentExtra, int displayId)
+                (
                     atm.javaClass
                         .getMethod(
                             "getTasks",
@@ -154,17 +153,12 @@ class ForegroundMonitor(
                             Boolean::class.javaPrimitiveType,
                             Int::class.javaPrimitiveType,
                         ).invoke(atm, 5, false, false, 0) as? List<ActivityManager.RunningTaskInfo>
-                }.getOrElse {
-                    @Suppress("DEPRECATION")
-                    atm.javaClass
-                        .getMethod("getTasks", Int::class.javaPrimitiveType)
-                        .invoke(atm, 5) as? List<ActivityManager.RunningTaskInfo>
-                }.orEmpty()
+                ).orEmpty()
 
             for (task in tasks) {
                 val component: ComponentName = task.topActivity ?: task.baseActivity ?: continue
                 val pkg = component.packageName
-                if (pkg.isNotBlank() && pkg != hostPackage) {
+                if (pkg.isNotBlank()) {
                     return@runCatching pkg
                 }
             }
@@ -178,8 +172,7 @@ class ForegroundMonitor(
             val cls = Class.forName("android.view.OplusWindowManager")
             val instance = cls.getDeclaredConstructor().newInstance()
             val focus = cls.getMethod("getCurrentFocus").invoke(instance) as? String
-            val pkg = focus?.trim().orEmpty()
-            if (pkg.isNotBlank() && pkg != hostPackage) pkg else ""
+            focus?.trim().orEmpty()
         }.getOrDefault("")
 
     companion object {

@@ -7,34 +7,133 @@
 set -eu
 
 RUN_ENV="/data/system/sideveil/run/daemon.env"
-CURL_BIN="/system/bin/curl"
 
-print_error() {
-    printf '{"error":"%s"}\n' "$1" >&2
+json_escape() {
+    printf '%s' "$1" | tr '\r\n\t' '   ' | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
 
-if [ ! -x "$CURL_BIN" ]; then
-    print_error "curl binary not found at $CURL_BIN"
+print_error() {
+    ESCAPED_MSG=$(json_escape "$1")
+    printf '{"error":"%s"}\n' "$ESCAPED_MSG" >&2
+}
+
+find_curl_bin() {
+    for candidate in \
+        "/system/bin/curl" \
+        "$(command -v curl 2>/dev/null || true)" \
+        "/data/adb/ksu/bin/curl" \
+        "/data/adb/ap/bin/curl" \
+        "/data/adb/magisk/curl"; do
+        if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+            printf '%s' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+CURL_BIN=$(find_curl_bin || true)
+if [ -z "$CURL_BIN" ]; then
+    print_error "curl binary not found in /system/bin, PATH, or root manager bin directories"
     exit 127
 fi
 
-if [ ! -r "$RUN_ENV" ]; then
-    print_error "Daemon runtime state not found ($RUN_ENV)"
-    exit 1
-fi
+load_daemon_env() {
+    if [ ! -f "$RUN_ENV" ] || [ -L "$RUN_ENV" ] || [ ! -r "$RUN_ENV" ]; then
+        print_error "Daemon runtime state not found or invalid ($RUN_ENV)"
+        exit 1
+    fi
 
-# shellcheck disable=SC1090
-. "$RUN_ENV"
+    SIDEVEIL_PORT=""
+    SIDEVEIL_TOKEN=""
+    SIDEVEIL_PID=""
+    while IFS='=' read -r key val || [ -n "$key" ]; do
+        case "$key" in
+            SIDEVEIL_PORT) SIDEVEIL_PORT="$val" ;;
+            SIDEVEIL_TOKEN) SIDEVEIL_TOKEN="$val" ;;
+            SIDEVEIL_PID) SIDEVEIL_PID="$val" ;;
+        esac
+    done < "$RUN_ENV"
 
-if [ -z "${SIDEVEIL_PORT:-}" ] || [ -z "${SIDEVEIL_TOKEN:-}" ] || [ -z "${SIDEVEIL_PID:-}" ]; then
-    print_error "Incomplete daemon environment in $RUN_ENV"
-    exit 1
-fi
+    if [ -z "$SIDEVEIL_PORT" ] || [ -z "$SIDEVEIL_TOKEN" ] || [ -z "$SIDEVEIL_PID" ]; then
+        print_error "Incomplete daemon environment in $RUN_ENV"
+        exit 1
+    fi
 
-if ! kill -0 "$SIDEVEIL_PID" 2>/dev/null; then
-    print_error "Sideveil daemon pid $SIDEVEIL_PID is not alive"
-    exit 1
-fi
+    case "$SIDEVEIL_PORT" in
+        ''|*[!0-9]*)
+            print_error "Invalid daemon port in $RUN_ENV"
+            exit 1
+            ;;
+    esac
+    if [ "$SIDEVEIL_PORT" -lt 1 ] || [ "$SIDEVEIL_PORT" -gt 65535 ]; then
+        print_error "Out-of-range daemon port in $RUN_ENV"
+        exit 1
+    fi
+
+    case "$SIDEVEIL_TOKEN" in
+        ''|*[!0-9a-f]*)
+            print_error "Invalid daemon token format in $RUN_ENV"
+            exit 1
+            ;;
+    esac
+    if [ "${#SIDEVEIL_TOKEN}" -ne 64 ]; then
+        print_error "Invalid daemon token length in $RUN_ENV"
+        exit 1
+    fi
+
+    case "$SIDEVEIL_PID" in
+        ''|*[!0-9]*)
+            print_error "Invalid daemon PID in $RUN_ENV"
+            exit 1
+            ;;
+    esac
+
+    if ! kill -0 "$SIDEVEIL_PID" 2>/dev/null; then
+        print_error "Sideveil daemon pid $SIDEVEIL_PID is not alive"
+        exit 1
+    fi
+
+    if [ -r "/proc/${SIDEVEIL_PID}/cmdline" ]; then
+        CMDLINE=$(tr '\000' ' ' < "/proc/${SIDEVEIL_PID}/cmdline" 2>/dev/null || true)
+        case "$CMDLINE" in
+            *sideveil-daemon*|*pochita.sideveil.daemon.DaemonMain*) ;;
+            *)
+                print_error "PID $SIDEVEIL_PID does not match sideveil-daemon process"
+                exit 1
+                ;;
+        esac
+    fi
+}
+
+sync_host_endpoint() {
+    HOST_DATA_DIR="/data/user/0/pochita.sideveil.host"
+    [ -d "$HOST_DATA_DIR" ] || HOST_DATA_DIR="/data/data/pochita.sideveil.host"
+    [ -d "$HOST_DATA_DIR" ] || return 1
+    HOST_NOBACKUP_DIR="${HOST_DATA_DIR}/no_backup"
+    ENDPOINT_FILE="${HOST_NOBACKUP_DIR}/daemon_endpoint.json"
+    ENDPOINT_TMP="${HOST_NOBACKUP_DIR}/daemon_endpoint.json.tmp.$$"
+
+    HOST_UID=$(stat -c '%u:%g' "$HOST_DATA_DIR" 2>/dev/null || true)
+    mkdir -p "$HOST_NOBACKUP_DIR"
+    if [ -n "$HOST_UID" ]; then
+        chown "$HOST_UID" "$HOST_NOBACKUP_DIR" 2>/dev/null || true
+    fi
+    chmod 0700 "$HOST_NOBACKUP_DIR" 2>/dev/null || true
+
+    (
+        umask 077
+        printf '{"port":%s,"token":"%s"}\n' "$SIDEVEIL_PORT" "$SIDEVEIL_TOKEN" > "$ENDPOINT_TMP"
+    )
+    if [ -n "$HOST_UID" ]; then
+        chown "$HOST_UID" "$ENDPOINT_TMP" 2>/dev/null || true
+    fi
+    chmod 0600 "$ENDPOINT_TMP" 2>/dev/null || true
+    chcon --reference="$HOST_DATA_DIR" "$HOST_NOBACKUP_DIR" "$ENDPOINT_TMP" 2>/dev/null || restorecon -F "$HOST_NOBACKUP_DIR" "$ENDPOINT_TMP" 2>/dev/null || true
+    mv -f "$ENDPOINT_TMP" "$ENDPOINT_FILE"
+}
+
+load_daemon_env
 
 BASE_URL="http://127.0.0.1:${SIDEVEIL_PORT}"
 AUTH_HEADER="Authorization: Bearer ${SIDEVEIL_TOKEN}"
@@ -74,10 +173,10 @@ case "$CMD" in
     restart-host)
         call_rpc "host.restart" >/dev/null 2>&1 || true
         sleep 1
+        sync_host_endpoint || true
         am start-foreground-service --user 0 \
             -n "pochita.sideveil.host/.HostService" \
-            --ei port "$SIDEVEIL_PORT" \
-            --es token "$SIDEVEIL_TOKEN" >/dev/null 2>&1 || true
+            -a "pochita.sideveil.host.ACTION_SYNC_ENDPOINT" >/dev/null 2>&1 || true
         printf '{"jsonrpc":"2.0","id":"ctl","result":{"ok":true}}'
         ;;
     ping)

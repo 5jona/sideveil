@@ -16,7 +16,7 @@ object DaemonLog {
     private val timeFormat = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
 
     fun info(message: String) {
-        Log.i(TAG, message)
+        runCatching { Log.i(TAG, message) }
         append("I", message)
     }
 
@@ -25,10 +25,10 @@ object DaemonLog {
         error: Throwable? = null,
     ) {
         if (error != null) {
-            Log.w(TAG, message, error)
+            runCatching { Log.w(TAG, message, error) }
             append("W", "$message: ${error.javaClass.simpleName}: ${error.message}")
         } else {
-            Log.w(TAG, message)
+            runCatching { Log.w(TAG, message) }
             append("W", message)
         }
     }
@@ -38,10 +38,10 @@ object DaemonLog {
         error: Throwable? = null,
     ) {
         if (error != null) {
-            Log.e(TAG, message, error)
+            runCatching { Log.e(TAG, message, error) }
             append("E", "$message: ${error.javaClass.simpleName}: ${error.message}")
         } else {
-            Log.e(TAG, message)
+            runCatching { Log.e(TAG, message) }
             append("E", message)
         }
     }

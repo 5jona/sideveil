@@ -45,12 +45,7 @@ class AppOpsManagerBridge(
     fun resolvePackageUid(): Int? =
         runCatching {
             val pm = systemContext.packageManager
-            if (android.os.Build.VERSION.SDK_INT >= 33) {
-                pm.getPackageUid(hostPackage, PackageManager.PackageInfoFlags.of(0L))
-            } else {
-                @Suppress("DEPRECATION")
-                pm.getPackageUid(hostPackage, 0)
-            }
+            pm.getPackageUid(hostPackage, PackageManager.PackageInfoFlags.of(0L))
         }.getOrNull()
 
     private fun ensureOverlayPermission(uid: Int): Boolean {

@@ -1,11 +1,11 @@
 package pochita.sideveil.host
 
+import android.annotation.SuppressLint
 import android.app.Dialog
 import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.PixelFormat
-import android.os.Build
 import android.util.Log
 import android.view.ContextThemeWrapper
 import android.view.Gravity
@@ -22,18 +22,20 @@ import java.util.function.Consumer
 
 /**
  * Warm-resident TYPE_APPLICATION_OVERLAY Dialog container hosting the preloaded panel
- * WebView over a single persistent [GlassBackdropDrawable] and public Android 12+
+ * WebView over a single persistent [GlassBackdropDrawable] and public
  * [android.view.Window.setBackgroundBlurRadius] hardware cross-window blur.
  */
+@SuppressLint("RtlHardcoded")
 class SidebarPanelWindow(
     private val context: Context,
     private val windowManager: WindowManager,
     private val webBridge: PanelWebViewBridge,
     private val onPanelStateChanged: (PanelState) -> Unit,
 ) {
-    private val density = context.resources.displayMetrics.density
+    private val currentDensity: Float
+        get() = context.resources.displayMetrics.density
     private val themedContext = ContextThemeWrapper(context, R.style.Theme_Sideveil_OverlayDialog)
-    private val backdropDrawable = GlassBackdropDrawable(density)
+    private val backdropDrawable = GlassBackdropDrawable(currentDensity)
     private val springController = PanelSpringController()
 
     private var currentState: PanelState = PanelState.CLOSED
@@ -107,7 +109,7 @@ class SidebarPanelWindow(
 
         val lp = window.attributes
         lp.title = "SideveilPanelHost"
-        lp.gravity = Gravity.TOP or Gravity.START
+        lp.gravity = Gravity.TOP or Gravity.LEFT
         lp.x = 0
         lp.y = 0
         lp.width = 1
@@ -119,6 +121,8 @@ class SidebarPanelWindow(
     }
 
     fun isSystemBlurSupported(): Boolean = systemBlurSupported
+
+    fun isDarkSurfaceActive(): Boolean = syncedColorScheme != "light"
 
     fun getCurrentState(): PanelState = currentState
 
@@ -132,6 +136,18 @@ class SidebarPanelWindow(
             applyPanelBackdrop()
         }.onFailure { err ->
             Log.e(TAG, "Failed to attach warm panel dialog overlay", err)
+        }
+    }
+
+    fun onSystemConfigurationChanged() {
+        recomputePanelDimensions()
+        if (panelConfig.colorMode != "light" && panelConfig.colorMode != "dark") {
+            syncedColorScheme = resolveSystemScheme()
+        }
+        contentContainer.invalidateOutline()
+        applyPanelBackdrop()
+        if (currentState == PanelState.OPEN && attached) {
+            applyOpenLayout(settled = true)
         }
     }
 
@@ -238,10 +254,11 @@ class SidebarPanelWindow(
         recomputePanelDimensions()
         setState(PanelState.DRAGGING)
 
+        val closeVelocityPx = if (initialVelocityPx <= 0f) initialVelocityPx else -initialVelocityPx
         springController.animateTo(
             startX = springController.currentX,
             endX = hiddenOffsetX().toFloat(),
-            startVelocityPx = -initialVelocityPx,
+            startVelocityPx = closeVelocityPx,
             onUpdate = { value ->
                 updateWindowPosition(value.toInt(), focusable = false, allowOffscreen = true)
             },
@@ -272,9 +289,7 @@ class SidebarPanelWindow(
 
     fun detach() {
         springController.cancel()
-        if (Build.VERSION.SDK_INT >= 31) {
-            runCatching { windowManager.removeCrossWindowBlurEnabledListener(blurEnabledListener) }
-        }
+        runCatching { windowManager.removeCrossWindowBlurEnabledListener(blurEnabledListener) }
         if (attached) {
             runCatching { dialog.dismiss() }
             attached = false
@@ -288,7 +303,7 @@ class SidebarPanelWindow(
     ) {
         val window = dialog.window ?: return
         val lp = window.attributes
-        val horiz = if (edgeSide == EdgeSide.LEFT) Gravity.START else Gravity.END
+        val horiz = if (edgeSide == EdgeSide.LEFT) Gravity.LEFT else Gravity.RIGHT
         lp.gravity = Gravity.CENTER_VERTICAL or horiz
         lp.width = cachedWidthPx
         lp.height = cachedHeightPx
@@ -346,7 +361,7 @@ class SidebarPanelWindow(
         window.decorView.visibility = View.INVISIBLE
         applyBlurRadius(window, 0)
         val lp = window.attributes
-        lp.gravity = Gravity.TOP or Gravity.START
+        lp.gravity = Gravity.TOP or Gravity.LEFT
         lp.width = 1
         lp.height = 1
         lp.x = 0
@@ -380,6 +395,7 @@ class SidebarPanelWindow(
     }
 
     private fun recomputePanelDimensions() {
+        backdropDrawable.updateDensity(currentDensity)
         val bounds = runCatching { windowManager.currentWindowMetrics.bounds }.getOrNull()
         val screenW = bounds?.width() ?: context.resources.displayMetrics.widthPixels
         val screenH = bounds?.height() ?: context.resources.displayMetrics.heightPixels
@@ -432,26 +448,19 @@ class SidebarPanelWindow(
         window: android.view.Window,
         radiusPx: Int,
     ) {
-        if (Build.VERSION.SDK_INT >= 31 && lastAppliedBlurRadius != radiusPx) {
+        if (lastAppliedBlurRadius != radiusPx) {
             lastAppliedBlurRadius = radiusPx
             window.setBackgroundBlurRadius(radiusPx)
         }
     }
 
     private fun registerBlurListener() {
-        if (Build.VERSION.SDK_INT >= 31) {
-            runCatching {
-                windowManager.addCrossWindowBlurEnabledListener(context.mainExecutor, blurEnabledListener)
-            }
+        runCatching {
+            windowManager.addCrossWindowBlurEnabledListener(context.mainExecutor, blurEnabledListener)
         }
     }
 
-    private fun queryCrossWindowBlurEnabled(): Boolean =
-        if (Build.VERSION.SDK_INT >= 31) {
-            runCatching { windowManager.isCrossWindowBlurEnabled }.getOrDefault(false)
-        } else {
-            false
-        }
+    private fun queryCrossWindowBlurEnabled(): Boolean = runCatching { windowManager.isCrossWindowBlurEnabled }.getOrDefault(false)
 
     private fun preloadHardwareRenderer() {
         runCatching {
@@ -471,7 +480,7 @@ class SidebarPanelWindow(
         }
     }
 
-    private fun dp(value: Float): Int = (value * density + 0.5f).toInt().coerceAtLeast(1)
+    private fun dp(value: Float): Int = (value * currentDensity + 0.5f).toInt().coerceAtLeast(1)
 
     private fun applyNoMoveAnimationFlag(lp: WindowManager.LayoutParams) {
         runCatching {

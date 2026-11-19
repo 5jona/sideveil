@@ -1,11 +1,14 @@
 package pochita.sideveil.daemon
 
+import android.system.Os
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.jsonObject
 import pochita.sideveil.shared.AppearancePatchParams
 import pochita.sideveil.shared.DaemonStatus
 import pochita.sideveil.shared.HostEventEnvelope
@@ -28,15 +31,18 @@ import java.io.OutputStream
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
-import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.nio.file.attribute.PosixFilePermissions
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Locale
+import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 
 interface DaemonRpcDelegate {
@@ -66,7 +72,15 @@ class ControlServer(
     private val uptimeProvider: () -> Long,
     private val delegate: DaemonRpcDelegate,
 ) {
-    private val executor = Executors.newCachedThreadPool()
+    private val acceptExecutor = Executors.newSingleThreadExecutor()
+    private val workerPool =
+        ThreadPoolExecutor(
+            2,
+            16,
+            30L,
+            TimeUnit.SECONDS,
+            ArrayBlockingQueue(32),
+        )
     private val scheduler: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
     private val sessionLock = Any()
 
@@ -84,7 +98,7 @@ class ControlServer(
     private var activeSession: HostSession? = null
 
     fun start() {
-        val server = ServerSocket(0, 16, InetAddress.getByName("127.0.0.1"))
+        val server = ServerSocket(0, 32, InetAddress.getByName("127.0.0.1"))
         serverSocket = server
         boundPort = server.localPort
         running = true
@@ -92,7 +106,7 @@ class ControlServer(
         writeEnvFile(boundPort, sessionToken)
         DaemonLog.info("ControlServer listening on 127.0.0.1:$boundPort")
 
-        executor.execute { acceptLoop(server) }
+        acceptExecutor.execute { acceptLoop(server) }
         scheduler.scheduleAtFixedRate({ sendKeepalivePing() }, 15L, 15L, TimeUnit.SECONDS)
     }
 
@@ -121,7 +135,8 @@ class ControlServer(
         runCatching { serverSocket?.close() }
         serverSocket = null
         scheduler.shutdownNow()
-        executor.shutdownNow()
+        acceptExecutor.shutdownNow()
+        workerPool.shutdownNow()
         removeEnvFile()
     }
 
@@ -133,7 +148,15 @@ class ControlServer(
                 } catch (_: Throwable) {
                     break
                 }
-            executor.execute { handleConnection(client) }
+            try {
+                workerPool.execute { handleConnection(client) }
+            } catch (_: RejectedExecutionException) {
+                runCatching {
+                    client.soTimeout = 1_000
+                    writeHttpJson(client.getOutputStream(), 503, """{"error":"Server busy"}""")
+                }
+                runCatching { client.close() }
+            }
         }
     }
 
@@ -152,13 +175,17 @@ class ControlServer(
                 return
             }
 
+            if (!block.headers["origin"].isNullOrBlank()) {
+                writeHttpJson(output, 403, """{"error":"Cross-origin access forbidden"}""")
+                return
+            }
+
             val method = parts[0].uppercase(Locale.ROOT)
             val rawTarget = parts[1]
             val qIdx = rawTarget.indexOf('?')
             val path = if (qIdx >= 0) rawTarget.substring(0, qIdx) else rawTarget
-            val queryParams = parseQueryParams(if (qIdx >= 0) rawTarget.substring(qIdx + 1) else "")
 
-            val suppliedToken = extractToken(block.headers, queryParams)
+            val suppliedToken = extractToken(block.headers)
             if (suppliedToken == null || !constantTimeEquals(suppliedToken, sessionToken)) {
                 writeHttpJson(output, 401, """{"error":"Unauthorized"}""")
                 return
@@ -246,7 +273,7 @@ class ControlServer(
 
         try {
             while (running && session.isOpen()) {
-                val frame = WebSocketCodec.readFrame(input) ?: break
+                val frame = WebSocketCodec.readFrame(input, requireMasked = true) ?: break
                 when (frame.opcode) {
                     WsOpcode.CLOSE -> {
                         session.close("Peer closed")
@@ -299,19 +326,18 @@ class ControlServer(
         session: HostSession,
         text: String,
     ) {
-        val obj =
-            runCatching { SideveilWireJson.parseToJsonElement(text) }.getOrNull() ?: return
-        val jsonText = obj.toString()
+        val obj: JsonObject =
+            runCatching { SideveilWireJson.parseToJsonElement(text).jsonObject }.getOrNull() ?: return
 
-        if (jsonText.contains("\"method\"") && jsonText.contains("\"id\"")) {
-            val response = executeRpcText(jsonText)
+        if (obj.containsKey("method") && obj.containsKey("id")) {
+            val response = executeRpcText(text)
             session.sendText(SideveilWireJson.encodeToString(response))
             return
         }
 
-        if (jsonText.contains("\"event\"")) {
+        if (obj.containsKey("event")) {
             val envelope =
-                runCatching { SideveilWireJson.decodeFromString<HostEventEnvelope>(jsonText) }.getOrNull()
+                runCatching { SideveilWireJson.decodeFromJsonElement<HostEventEnvelope>(obj) }.getOrNull()
                     ?: return
             when (envelope.event) {
                 SideveilEvents.HOST_HELLO -> {
@@ -433,7 +459,9 @@ class ControlServer(
                 200 -> "OK"
                 400 -> "Bad Request"
                 401 -> "Unauthorized"
+                403 -> "Forbidden"
                 404 -> "Not Found"
+                503 -> "Service Unavailable"
                 else -> "Error"
             }
         val bytes = body.toByteArray(StandardCharsets.UTF_8)
@@ -468,29 +496,12 @@ class ControlServer(
         return buf
     }
 
-    private fun extractToken(
-        headers: Map<String, String>,
-        queryParams: Map<String, String>,
-    ): String? {
+    private fun extractToken(headers: Map<String, String>): String? {
         val auth = headers["authorization"]
         if (auth != null && auth.startsWith("Bearer ", ignoreCase = true)) {
             return auth.substring(7).trim()
         }
-        return queryParams["token"]
-    }
-
-    private fun parseQueryParams(rawQuery: String): Map<String, String> {
-        if (rawQuery.isBlank()) return emptyMap()
-        val result = LinkedHashMap<String, String>()
-        for (pair in rawQuery.split('&')) {
-            val idx = pair.indexOf('=')
-            if (idx > 0) {
-                val key = URLDecoder.decode(pair.substring(0, idx), StandardCharsets.UTF_8)
-                val value = URLDecoder.decode(pair.substring(idx + 1), StandardCharsets.UTF_8)
-                result[key] = value
-            }
-        }
-        return result
+        return null
     }
 
     private fun writeEnvFile(
@@ -501,23 +512,33 @@ class ControlServer(
             runDir.mkdirs()
         }
         val envFile = File(runDir, "daemon.env")
-        val tmpFile = File(runDir, ".daemon.env.tmp.${android.os.Process.myPid()}")
+        val pid = runCatching { android.os.Process.myPid() }.getOrDefault(0)
+        val tmpFile = File(runDir, ".daemon.env.tmp.$pid")
+        Files.deleteIfExists(tmpFile.toPath())
+        tmpFile.createNewFile()
+        applyRestrictedMode0600(tmpFile)
         val content =
             buildString {
                 append("SIDEVEIL_PORT=").append(port).append('\n')
                 append("SIDEVEIL_TOKEN=").append(token).append('\n')
-                append("SIDEVEIL_PID=").append(android.os.Process.myPid()).append('\n')
+                append("SIDEVEIL_PID=").append(pid).append('\n')
             }
         tmpFile.writeText(content, StandardCharsets.UTF_8)
-        runCatching {
-            Runtime.getRuntime().exec(arrayOf("chmod", "0600", tmpFile.absolutePath)).waitFor()
-        }
+        applyRestrictedMode0600(tmpFile)
         Files.move(
             tmpFile.toPath(),
             envFile.toPath(),
             StandardCopyOption.REPLACE_EXISTING,
             StandardCopyOption.ATOMIC_MOVE,
         )
+    }
+
+    private fun applyRestrictedMode0600(file: File) {
+        runCatching {
+            Os.chmod(file.absolutePath, 384) // 0600 octal
+        }.recoverCatching {
+            Files.setPosixFilePermissions(file.toPath(), PosixFilePermissions.fromString("rw-------"))
+        }
     }
 
     private fun removeEnvFile() {

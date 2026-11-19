@@ -2,6 +2,7 @@ package pochita.sideveil.daemon
 
 import android.os.Handler
 import android.os.Looper
+import java.util.concurrent.TimeUnit
 
 /**
  * Supervises pochita.sideveil.host permissions and lifecycle state from UID 1000.
@@ -32,15 +33,25 @@ class HostSupervisor(
 
     fun start() {
         running = true
-        tick()
-        handler.postDelayed(watchdogRunnable, WATCHDOG_INTERVAL_MS)
+        handler.post {
+            if (!running) return@post
+            tick()
+            handler.postDelayed(watchdogRunnable, WATCHDOG_INTERVAL_MS)
+        }
     }
 
     fun forceRestart() {
         DaemonLog.info("Host service restart requested")
         controlServer.closeActiveHostSession("Forced host restart")
-        runCatching {
-            Runtime.getRuntime().exec(arrayOf("/system/bin/am", "force-stop", hostPackage)).waitFor()
+        handler.post {
+            runCatching {
+                val proc = Runtime.getRuntime().exec(arrayOf("/system/bin/am", "force-stop", hostPackage))
+                if (!proc.waitFor(3, TimeUnit.SECONDS)) {
+                    proc.destroyForcibly()
+                }
+            }.onFailure { err ->
+                DaemonLog.warn("Failed to force-stop $hostPackage", err)
+            }
         }
     }
 

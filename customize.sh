@@ -25,10 +25,14 @@ set_perm_recursive "$MODPATH/webroot" 0 0 0755 0644
 
 STATE_DIR="/data/system/sideveil"
 RUN_DIR="${STATE_DIR}/run"
-mkdir -p "$STATE_DIR" "$RUN_DIR"
-chown 1000:1000 "$STATE_DIR" "$RUN_DIR"
-chmod 0755 "$STATE_DIR"
+ROOT_RUN_DIR="/data/adb/sideveil/run"
+mkdir -p "$STATE_DIR" "$RUN_DIR" "$ROOT_RUN_DIR"
+chown 0:1000 "$STATE_DIR"
+chmod 1775 "$STATE_DIR"
+chown 1000:1000 "$RUN_DIR"
 chmod 0700 "$RUN_DIR"
+chown 0:0 "/data/adb/sideveil" "$ROOT_RUN_DIR"
+chmod 0700 "/data/adb/sideveil" "$ROOT_RUN_DIR"
 
 if [ ! -f "${STATE_DIR}/config.json" ] && [ -f "${MODPATH}/config.json" ]; then
     cp "${MODPATH}/config.json" "${STATE_DIR}/config.json"

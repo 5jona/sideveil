@@ -1,5 +1,6 @@
 package pochita.sideveil.host
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Color
 import android.graphics.PixelFormat
@@ -18,11 +19,13 @@ import pochita.sideveil.shared.PanelState
  * Click-through TYPE_APPLICATION_OVERLAY capsule indicator positioned flush along the
  * configured screen edge trigger zone. Never intercepts touch events.
  */
+@SuppressLint("RtlHardcoded")
 class EdgeIndicatorWindow(
     private val context: Context,
     private val windowManager: WindowManager,
 ) {
-    private val density = context.resources.displayMetrics.density
+    private val currentDensity: Float
+        get() = context.resources.displayMetrics.density
 
     private val rootView = FrameLayout(context)
     private val pillView = View(context)
@@ -57,7 +60,7 @@ class EdgeIndicatorWindow(
 
         val pillParams =
             FrameLayout.LayoutParams(dp(4f), dp(120f)).apply {
-                gravity = Gravity.CENTER_VERTICAL or Gravity.END
+                gravity = Gravity.CENTER_VERTICAL or Gravity.RIGHT
             }
         rootView.addView(pillView, pillParams)
         rootView.visibility = View.GONE
@@ -130,7 +133,7 @@ class EdgeIndicatorWindow(
         val maxTop = (screenHeight - heightPx).coerceAtLeast(0)
         val topPx = ((latestEdge.topPercent / 100f) * screenHeight).toInt().coerceIn(0, maxTop)
 
-        val gravityHorizontal = if (latestEdge.side == EdgeSide.LEFT) Gravity.START else Gravity.END
+        val gravityHorizontal = if (latestEdge.side == EdgeSide.LEFT) Gravity.LEFT else Gravity.RIGHT
         layoutParams.gravity = Gravity.TOP or gravityHorizontal
         layoutParams.width = dp(6f)
         layoutParams.height = heightPx
@@ -173,9 +176,9 @@ class EdgeIndicatorWindow(
         runCatching { windowManager.updateViewLayout(rootView, layoutParams) }
     }
 
-    private fun dp(value: Float): Int = (value * density + 0.5f).toInt().coerceAtLeast(1)
+    private fun dp(value: Float): Int = (value * currentDensity + 0.5f).toInt().coerceAtLeast(1)
 
-    private fun dpOrZero(value: Float): Int = (value * density + 0.5f).toInt().coerceAtLeast(0)
+    private fun dpOrZero(value: Float): Int = (value * currentDensity + 0.5f).toInt().coerceAtLeast(0)
 
     private fun applyNoMoveAnimationFlag(lp: WindowManager.LayoutParams) {
         runCatching {

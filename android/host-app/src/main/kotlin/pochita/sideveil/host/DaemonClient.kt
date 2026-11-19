@@ -10,7 +10,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.jsonObject
 import pochita.sideveil.shared.HostEventEnvelope
 import pochita.sideveil.shared.RpcError
 import pochita.sideveil.shared.RpcRequest
@@ -21,8 +22,12 @@ import pochita.sideveil.shared.WsOpcode
 import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.cancellation.CancellationException
 
 /**
@@ -35,8 +40,16 @@ class DaemonClient(
     private val onEvent: (HostEventEnvelope) -> Unit,
 ) {
     private val writeLock = Any()
-    private val writeExecutor = Executors.newSingleThreadExecutor()
+    private val writeExecutor =
+        ThreadPoolExecutor(
+            1,
+            1,
+            0L,
+            TimeUnit.MILLISECONDS,
+            ArrayBlockingQueue(128),
+        )
     private val pendingRpcs = ConcurrentHashMap<String, CompletableDeferred<RpcResponse>>()
+    private val generationCounter = AtomicLong(0L)
 
     @Volatile
     private var port: Int = 0
@@ -65,9 +78,10 @@ class DaemonClient(
         }
         port = nextPort
         token = nextToken
+        val nextGen = generationCounter.incrementAndGet()
         connectionJob?.cancel()
         closeCurrentSocket()
-        connectionJob = scope.launch(Dispatchers.IO) { connectLoop() }
+        connectionJob = scope.launch(Dispatchers.IO) { connectLoop(nextGen) }
     }
 
     fun sendEvent(
@@ -107,6 +121,7 @@ class DaemonClient(
     }
 
     fun close() {
+        generationCounter.incrementAndGet()
         connectionJob?.cancel()
         connectionJob = null
         closeCurrentSocket()
@@ -114,13 +129,16 @@ class DaemonClient(
         writeExecutor.shutdownNow()
     }
 
-    private suspend fun connectLoop() {
+    private suspend fun connectLoop(generation: Long) {
         var attempt = 0
-        while (scope.isActive && port > 0 && token.isNotEmpty()) {
+        while (scope.isActive && generation == generationCounter.get() && port > 0 && token.isNotEmpty()) {
             val currentPort = port
             val currentToken = token
+            var loopSocket: Socket? = null
+            var connectedInThisAttempt = false
             try {
                 val socket = Socket()
+                loopSocket = socket
                 socket.tcpNoDelay = true
                 socket.connect(InetSocketAddress("127.0.0.1", currentPort), 3_000)
                 socket.soTimeout = 45_000
@@ -135,18 +153,25 @@ class DaemonClient(
                     extraHeaders = mapOf("Authorization" to "Bearer $currentToken"),
                 )
 
+                if (generation != generationCounter.get()) {
+                    runCatching { socket.close() }
+                    break
+                }
+
                 synchronized(writeLock) {
                     activeSocket = socket
                     activeOutput = output
                 }
+                connectedInThisAttempt = true
                 attempt = 0
                 Log.i(TAG, "Connected full-duplex WebSocket to 127.0.0.1:$currentPort")
                 onConnected()
 
-                while (scope.isActive && !socket.isClosed) {
-                    val frame = WebSocketCodec.readFrame(input) ?: break
+                while (scope.isActive && generation == generationCounter.get() && !socket.isClosed) {
+                    val frame = WebSocketCodec.readFrame(input, requireMasked = false) ?: break
                     when (frame.opcode) {
                         WsOpcode.CLOSE -> {
+                            sendCloseFrame()
                             break
                         }
 
@@ -171,16 +196,30 @@ class DaemonClient(
             } catch (c: CancellationException) {
                 throw c
             } catch (t: Throwable) {
-                Log.w(TAG, "WebSocket loop error: ${t.message}")
+                if (generation == generationCounter.get()) {
+                    Log.w(TAG, "WebSocket loop error: ${t.message}")
+                }
             } finally {
-                val wasConnected = activeSocket != null
-                closeCurrentSocket()
-                failAllPending("Daemon WebSocket connection lost")
-                if (wasConnected) {
+                var detachedActive = false
+                synchronized(writeLock) {
+                    if (loopSocket != null && activeSocket === loopSocket) {
+                        activeSocket = null
+                        activeOutput = null
+                        detachedActive = true
+                    }
+                }
+                runCatching { loopSocket?.close() }
+                if (detachedActive || generation == generationCounter.get()) {
+                    failAllPending("Daemon WebSocket connection lost")
+                }
+                if (connectedInThisAttempt && (detachedActive || generation == generationCounter.get())) {
                     onDisconnected()
                 }
             }
 
+            if (generation != generationCounter.get()) {
+                break
+            }
             val delayMs = BACKOFF_MS[attempt.coerceAtMost(BACKOFF_MS.lastIndex)]
             attempt++
             delay(delayMs)
@@ -188,16 +227,18 @@ class DaemonClient(
     }
 
     private fun handleIncomingText(text: String) {
-        if (text.contains("\"jsonrpc\"") && text.contains("\"id\"")) {
-            val resp = runCatching { SideveilWireJson.decodeFromString<RpcResponse>(text) }.getOrNull()
+        val obj = runCatching { SideveilWireJson.parseToJsonElement(text).jsonObject }.getOrNull() ?: return
+
+        if (obj.containsKey("jsonrpc") && obj.containsKey("id")) {
+            val resp = runCatching { SideveilWireJson.decodeFromJsonElement<RpcResponse>(obj) }.getOrNull()
             if (resp != null) {
                 pendingRpcs.remove(resp.id)?.complete(resp)
                 return
             }
         }
 
-        if (text.contains("\"event\"")) {
-            val env = runCatching { SideveilWireJson.decodeFromString<HostEventEnvelope>(text) }.getOrNull()
+        if (obj.containsKey("event")) {
+            val env = runCatching { SideveilWireJson.decodeFromJsonElement<HostEventEnvelope>(obj) }.getOrNull()
             if (env != null) {
                 onEvent(env)
             }
@@ -205,28 +246,43 @@ class DaemonClient(
     }
 
     private fun sendTextFrame(text: String): Boolean {
-        if (activeOutput == null) return false
-        writeExecutor.execute {
-            synchronized(writeLock) {
-                val output = activeOutput ?: return@execute
-                runCatching {
-                    WebSocketCodec.writeText(output, text, mask = true)
-                }.onFailure { err ->
-                    Log.w(TAG, "sendTextFrame failed: ${err.javaClass.simpleName}: ${err.message}")
-                    closeCurrentSocket()
+        if (activeOutput == null || writeExecutor.isShutdown) return false
+        return try {
+            writeExecutor.execute {
+                synchronized(writeLock) {
+                    val output = activeOutput ?: return@execute
+                    runCatching {
+                        WebSocketCodec.writeText(output, text, mask = true)
+                    }.onFailure { err ->
+                        Log.w(TAG, "sendTextFrame failed: ${err.javaClass.simpleName}: ${err.message}")
+                        closeCurrentSocket()
+                    }
                 }
             }
+            true
+        } catch (_: RejectedExecutionException) {
+            false
         }
-        return true
     }
 
     private fun sendPongFrame(payload: ByteArray) {
-        if (activeOutput == null) return
-        writeExecutor.execute {
-            synchronized(writeLock) {
-                val output = activeOutput ?: return@execute
-                runCatching { WebSocketCodec.writePong(output, payload, mask = true) }
+        if (activeOutput == null || writeExecutor.isShutdown) return
+        try {
+            writeExecutor.execute {
+                synchronized(writeLock) {
+                    val output = activeOutput ?: return@execute
+                    runCatching { WebSocketCodec.writePong(output, payload, mask = true) }
+                }
             }
+        } catch (_: RejectedExecutionException) {
+            // Ignore pong failure if write queue is saturated or shutting down.
+        }
+    }
+
+    private fun sendCloseFrame() {
+        synchronized(writeLock) {
+            val output = activeOutput ?: return
+            runCatching { WebSocketCodec.writeClose(output, 1000, "Peer close acknowledged", mask = true) }
         }
     }
 

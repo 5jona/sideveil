@@ -6,9 +6,11 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Test
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
@@ -106,5 +108,66 @@ class WebSocketCodecTest {
         val decodedResp = SideveilWireJson.decodeFromString<RpcResponse>(clientReceived!!)
         assertEquals("1", decodedResp.id)
         assertEquals(null, decodedResp.error)
+    }
+
+    @Test
+    fun `unmasked client frame is rejected when requireMasked is true`() {
+        val out = ByteArrayOutputStream()
+        WebSocketCodec.writeText(out, "hi", mask = false)
+        val input = ByteArrayInputStream(out.toByteArray())
+        assertThrows(IOException::class.java) {
+            WebSocketCodec.readFrame(input, requireMasked = true)
+        }
+    }
+
+    @Test
+    fun `non-zero RSV bits and oversized or fragmented control frames are rejected`() {
+        val rsvInput = ByteArrayInputStream(byteArrayOf(0x91.toByte(), 0x00.toByte()))
+        assertThrows(IOException::class.java) {
+            WebSocketCodec.readFrame(rsvInput)
+        }
+
+        val fragPingInput = ByteArrayInputStream(byteArrayOf(0x09.toByte(), 0x00.toByte()))
+        assertThrows(IOException::class.java) {
+            WebSocketCodec.readFrame(fragPingInput)
+        }
+
+        val oversizedPingInput =
+            ByteArrayInputStream(
+                byteArrayOf(
+                    0x89.toByte(),
+                    0x7E.toByte(),
+                    0x00.toByte(),
+                    0x7E.toByte(),
+                ),
+            )
+        assertThrows(IOException::class.java) {
+            WebSocketCodec.readFrame(oversizedPingInput)
+        }
+    }
+
+    @Test
+    fun `interleaved PING control frame during fragmented text message preserves fragment assembly`() {
+        val out = ByteArrayOutputStream()
+        out.write(byteArrayOf(0x01.toByte(), 0x05.toByte()))
+        out.write("hello".toByteArray(Charsets.UTF_8))
+
+        out.write(byteArrayOf(0x89.toByte(), 0x02.toByte()))
+        out.write("ok".toByteArray(Charsets.UTF_8))
+
+        out.write(byteArrayOf(0x80.toByte(), 0x06.toByte()))
+        out.write(" world".toByteArray(Charsets.UTF_8))
+
+        val input = ByteArrayInputStream(out.toByteArray())
+
+        val pingFrame = WebSocketCodec.readFrame(input)
+        assertNotNull(pingFrame)
+        assertEquals(WsOpcode.PING, pingFrame!!.opcode)
+        assertArrayEquals("ok".toByteArray(Charsets.UTF_8), pingFrame.payload)
+
+        val textFrame = WebSocketCodec.readFrame(input)
+        assertNotNull(textFrame)
+        assertEquals(WsOpcode.TEXT, textFrame!!.opcode)
+        assertEquals("hello world", textFrame.textOrNull())
     }
 }

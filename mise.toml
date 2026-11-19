@@ -15,14 +15,14 @@ description = "Build and hot-reload Sideveil onto connected Android device via A
 run = "bash reload.sh"
 
 [tasks."webui:check"]
-description = "Typecheck and build Control Plane and Panel WebUIs"
+description = "Typecheck, test, and build Control Plane and Panel WebUIs"
 dir = "{{config_root}}/webui"
-run = "pnpm typecheck && pnpm build"
+run = "pnpm typecheck && pnpm test && pnpm build"
 
 [tasks."android:check"]
 description = "Run Spotless, JVM unit tests, DEX build, and release APK build"
 dir = "{{config_root}}/android"
-run = "./gradlew spotlessCheck :shared:test :daemon:buildDex :host-app:assembleRelease"
+run = "./gradlew spotlessCheck :shared:test :daemon:test :host-app:testDebugUnitTest :daemon:buildDex :host-app:assembleRelease"
 
 [tasks."android:format"]
 description = "Format Kotlin, Gradle, and config files with Spotless"

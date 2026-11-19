@@ -69,6 +69,17 @@ export interface PingResult {
   timestampMs: number;
 }
 
+export type CtlCommand =
+  | 'open'
+  | 'close'
+  | 'toggle'
+  | 'reload'
+  | 'restart-host'
+  | 'ping'
+  | 'logs'
+  | 'status'
+  | 'health';
+
 export const CONFIG_PATH = '/data/system/sideveil/config.json';
 export const CTL_BIN = '/data/adb/modules/sideveil/bin/sideveil-ctl';
 
@@ -103,7 +114,9 @@ export const DEFAULT_CONFIG: SideveilConfig = {
   },
 };
 
-export function normalizeConfig(raw: Partial<SideveilConfig> | null | undefined): SideveilConfig {
+export function normalizeSideveilConfig(
+  raw: Partial<SideveilConfig> | null | undefined,
+): SideveilConfig {
   const edge = raw?.edge;
   const panel = raw?.panel;
   const scope = raw?.scope;
@@ -145,6 +158,9 @@ export function normalizeConfig(raw: Partial<SideveilConfig> | null | undefined)
     },
   };
 }
+
+export const normalizeConfig = normalizeSideveilConfig;
+
 
 function clampInt(val: number | undefined, min: number, max: number, fallback: number): number {
   if (typeof val !== 'number' || !Number.isFinite(val)) return fallback;

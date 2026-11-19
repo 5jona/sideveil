@@ -10,11 +10,9 @@ import android.graphics.Rect
 import android.graphics.RuntimeShader
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
-import android.os.Build
 import android.util.Log
 import android.view.View
 import android.view.ViewOutlineProvider
-import androidx.annotation.RequiresApi
 import kotlin.math.roundToInt
 
 /**
@@ -339,18 +337,19 @@ data class GlassOpticalPalette(
 }
 
 /**
- * Optical frosted-glass backdrop [Drawable] backed by a reusable Android 13+ AGSL
+ * Optical frosted-glass backdrop [Drawable] backed by a reusable AGSL
  * [RuntimeShader] composited over SurfaceFlinger cross-window blur.
  *
  * Renders low-turbidity color-preserving translucent tints, directional top-left/bottom-right
  * specular rim catchlights, Fresnel inner edge glow, and 0.8% procedural soft-light micro-grain
  * strictly inside valid premultiplied RGBA space (`0 <= rgb <= a <= 1`).
  *
- * Gracefully falls back to [GradientDrawable] on API 31-32 or if shader compilation fails.
+ * Gracefully falls back to [GradientDrawable] if shader compilation fails.
  */
 class GlassBackdropDrawable(
-    private val density: Float,
+    initialDensity: Float,
 ) : Drawable() {
+    private var density: Float = initialDensity.coerceAtLeast(1f)
     private var style: GlassBackdropStyle = GlassBackdropStyle()
     private var palette: GlassOpticalPalette = GlassOpticalPalette.from(style)
     private var drawableAlpha: Int = 255
@@ -360,12 +359,26 @@ class GlassBackdropDrawable(
     private val fallbackDrawable = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE }
 
     init {
-        if (runtimeShader != null && Build.VERSION.SDK_INT >= 33) {
+        if (runtimeShader != null) {
             shaderPaint.shader = runtimeShader
             pushStyleUniforms(runtimeShader)
         } else {
             syncFallbackDrawable()
         }
+    }
+
+    fun updateDensity(nextDensity: Float): Boolean {
+        val clamped = nextDensity.coerceAtLeast(1f)
+        if (density == clamped) return false
+        density = clamped
+        if (runtimeShader != null) {
+            pushStyleUniforms(runtimeShader)
+            pushBoundsUniforms(runtimeShader, bounds)
+        } else {
+            syncFallbackDrawable()
+        }
+        invalidateSelf()
+        return true
     }
 
     /**
@@ -378,7 +391,7 @@ class GlassBackdropDrawable(
         }
         style = next
         palette = GlassOpticalPalette.from(next)
-        if (runtimeShader != null && Build.VERSION.SDK_INT >= 33) {
+        if (runtimeShader != null) {
             pushStyleUniforms(runtimeShader)
             pushBoundsUniforms(runtimeShader, bounds)
         } else {
@@ -391,7 +404,7 @@ class GlassBackdropDrawable(
     override fun onBoundsChange(bounds: Rect) {
         super.onBoundsChange(bounds)
         fallbackDrawable.bounds = bounds
-        if (runtimeShader != null && Build.VERSION.SDK_INT >= 33) {
+        if (runtimeShader != null) {
             pushBoundsUniforms(runtimeShader, bounds)
         }
     }
@@ -399,7 +412,7 @@ class GlassBackdropDrawable(
     override fun draw(canvas: Canvas) {
         if (bounds.isEmpty) return
         val shader = runtimeShader
-        if (shader != null && Build.VERSION.SDK_INT >= 33) {
+        if (shader != null) {
             shaderPaint.alpha = drawableAlpha
             canvas.drawRect(bounds, shaderPaint)
         } else {
@@ -431,7 +444,6 @@ class GlassBackdropDrawable(
     @Suppress("OVERRIDE_DEPRECATION")
     override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
 
-    @RequiresApi(33)
     private fun pushStyleUniforms(shader: RuntimeShader) {
         val p = palette
         shader.setFloatUniform("uCornerRadius", style.cornerRadiusPx.coerceAtLeast(0f))
@@ -451,7 +463,6 @@ class GlassBackdropDrawable(
         shader.setFloatUniform("uRimAlphas", p.rimNearAlpha, p.rimFarAlpha, p.rimUniformAlpha)
     }
 
-    @RequiresApi(33)
     private fun pushBoundsUniforms(
         shader: RuntimeShader,
         rect: Rect,
@@ -469,14 +480,12 @@ class GlassBackdropDrawable(
         fallbackDrawable.setStroke((density + 0.5f).toInt().coerceAtLeast(1), palette.fallbackStrokeArgb)
     }
 
-    private fun createRuntimeShader(): RuntimeShader? {
-        if (Build.VERSION.SDK_INT < 33) return null
-        return runCatching {
+    private fun createRuntimeShader(): RuntimeShader? =
+        runCatching {
             RuntimeShader(GLASS_OPTICAL_AGSL)
         }.onFailure { err ->
             Log.w(TAG, "AGSL RuntimeShader compilation failed; falling back to GradientDrawable", err)
         }.getOrNull()
-    }
 
     companion object {
         private const val TAG = "GlassBackdropDrawable"

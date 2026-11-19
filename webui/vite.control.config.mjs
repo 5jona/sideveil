@@ -4,11 +4,14 @@ import { createWebUiViteConfig } from '@pochita/config';
 import { mergeConfig } from 'vite';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const kitRoot = path.resolve(__dirname, '../../../../pochita-webui-kit');
+const kitRoot = process.env.POCHITA_KIT_ROOT
+  ? path.resolve(process.env.POCHITA_KIT_ROOT)
+  : path.resolve(__dirname, '../../../../pochita-webui-kit');
 
 const baseConfig = createWebUiViteConfig({
   outDir: path.resolve(__dirname, '../webroot'),
   port: 5174,
+  kitRoot,
   server: {
     fs: {
       allow: [__dirname, kitRoot],

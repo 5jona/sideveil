@@ -25,7 +25,7 @@ android {
 
     defaultConfig {
         applicationId = "pochita.sideveil.host"
-        minSdk = 31
+        minSdk = 36
         targetSdk = 37
         versionCode = 100
         versionName = "0.1.0"
@@ -56,9 +56,23 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            val explicitReleaseSigning = signingConfigs.findByName("release")
+            val requireReleaseKeystore =
+                providers.environmentVariable("REQUIRE_RELEASE_KEYSTORE").orNull == "true" ||
+                    providers.environmentVariable("ALLOW_DEBUG_RELEASE_SIGNING").orNull == "false"
             signingConfig =
-                signingConfigs.findByName("release")
-                    ?: signingConfigs.getByName("debug")
+                if (explicitReleaseSigning != null) {
+                    explicitReleaseSigning
+                } else if (requireReleaseKeystore) {
+                    throw org.gradle.api.GradleException(
+                        "Release keystore not configured (keystore.properties or KEYSTORE_FILE required when REQUIRE_RELEASE_KEYSTORE=true).",
+                    )
+                } else {
+                    logger.warn(
+                        "WARNING: Release keystore not configured; falling back to debug signing config for local development build.",
+                    )
+                    signingConfigs.getByName("debug")
+                }
         }
     }
 

@@ -1,5 +1,5 @@
 import { Plus, X } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Badge,
   Button,
@@ -8,6 +8,7 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
+  Input,
   SettingRow,
   Slider,
   Switch,
@@ -33,9 +34,15 @@ export function AppearanceScopeTab({
   const [allowInput, setAllowInput] = useState('');
   const [denyInput, setDenyInput] = useState('');
 
-  // Keep config.panel.themeId and colorMode aligned with UI theme selections.
+  const prevThemeRef = useRef({ themeId, colorMode });
+
+  // Keep config.panel.themeId and colorMode aligned when user interacts with ThemeSwitcher.
   useEffect(() => {
-    if (config.panel.themeId !== themeId || config.panel.colorMode !== colorMode) {
+    if (
+      prevThemeRef.current.themeId !== themeId ||
+      prevThemeRef.current.colorMode !== colorMode
+    ) {
+      prevThemeRef.current = { themeId, colorMode };
       onChange((prev) => ({
         ...prev,
         panel: {
@@ -45,7 +52,7 @@ export function AppearanceScopeTab({
         },
       }));
     }
-  }, [themeId, colorMode, config.panel.themeId, config.panel.colorMode, onChange]);
+  }, [themeId, colorMode, onChange]);
 
   const updatePanel = <K extends keyof SideveilConfig['panel']>(
     key: K,
@@ -279,7 +286,7 @@ export function AppearanceScopeTab({
             }
           />
 
-          <div className="space-y-2.5 rounded-[var(--radius-control)] border border-[var(--border-hairline)] bg-[var(--surface-elevated)] p-3.5">
+          <div className="pochita-card-elevated space-y-2.5 p-3.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <div className="text-xs font-medium text-[var(--text-primary)]">
@@ -327,15 +334,15 @@ export function AppearanceScopeTab({
                 addAllowPackage(allowInput);
               }}
             >
-              <input
+              <Input
                 id="allowlist-pkg-input"
                 name="allowlistPackage"
-                type="text"
+                size="sm"
+                className="flex-1"
                 value={allowInput}
                 onChange={(ev) => setAllowInput(ev.target.value)}
                 placeholder="输入包名，例如 com.example.app"
                 aria-label="新增白名单包名"
-                className="h-8 min-w-0 flex-1 rounded-[var(--radius-control)] border border-[var(--border-hairline)] bg-[var(--surface-card)] px-3 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-secondary)] focus:border-[var(--accent)] focus:outline-none"
               />
               <Button size="sm" type="submit" variant="secondary" disabled={!allowInput.trim()}>
                 <Plus className="size-3.5" />
@@ -344,7 +351,7 @@ export function AppearanceScopeTab({
             </form>
           </div>
 
-          <div className="space-y-2.5 rounded-[var(--radius-control)] border border-[var(--border-hairline)] bg-[var(--surface-elevated)] p-3.5">
+          <div className="pochita-card-elevated space-y-2.5 p-3.5">
             <div>
               <div className="text-xs font-medium text-[var(--text-primary)]">
                 排除黑名单（{config.scope.denylist.length}）
@@ -380,15 +387,15 @@ export function AppearanceScopeTab({
                 addDenyPackage(denyInput);
               }}
             >
-              <input
+              <Input
                 id="denylist-pkg-input"
                 name="denylistPackage"
-                type="text"
+                size="sm"
+                className="flex-1"
                 value={denyInput}
                 onChange={(ev) => setDenyInput(ev.target.value)}
                 placeholder="输入排除包名"
                 aria-label="新增排除包名"
-                className="h-8 min-w-0 flex-1 rounded-[var(--radius-control)] border border-[var(--border-hairline)] bg-[var(--surface-card)] px-3 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-secondary)] focus:border-[var(--accent)] focus:outline-none"
               />
               <Button size="sm" type="submit" variant="secondary" disabled={!denyInput.trim()}>
                 <Plus className="size-3.5" />

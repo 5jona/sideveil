@@ -3,6 +3,7 @@ package pochita.sideveil.daemon
 import android.os.FileObserver
 import android.os.Handler
 import android.os.Looper
+import android.system.Os
 import pochita.sideveil.shared.AppearancePatchParams
 import pochita.sideveil.shared.SideveilConfig
 import pochita.sideveil.shared.SideveilPrettyJson
@@ -10,13 +11,14 @@ import java.io.File
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.nio.file.attribute.PosixFilePermissions
 
 /**
  * Loads, validates, watches, and atomically persists Sideveil configuration on disk.
  */
 class ConfigStore(
     private val configFile: File,
-    private val handler: Handler = Handler(Looper.getMainLooper()),
+    private val handler: Handler? = runCatching { Handler(Looper.getMainLooper()) }.getOrNull(),
     private val onChanged: (SideveilConfig) -> Unit,
 ) {
     private val lock = Any()
@@ -41,22 +43,24 @@ class ConfigStore(
         reloadFromDisk(notifyIfUnchanged = true)
 
         if (parent != null) {
-            val mask = FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO or FileObserver.CREATE
-            val dirObserver =
-                object : FileObserver(parent, mask) {
-                    override fun onEvent(
-                        event: Int,
-                        path: String?,
-                    ) {
-                        if (path == configFile.name || path == null) {
-                            handler.removeCallbacks(reloadRunnable)
-                            handler.postDelayed(reloadRunnable, 80L)
+            runCatching {
+                val mask = FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO or FileObserver.CREATE
+                val dirObserver =
+                    object : FileObserver(parent, mask) {
+                        override fun onEvent(
+                            event: Int,
+                            path: String?,
+                        ) {
+                            if (path == configFile.name || path == null) {
+                                handler?.removeCallbacks(reloadRunnable)
+                                handler?.postDelayed(reloadRunnable, 80L)
+                            }
                         }
                     }
-                }
-            dirObserver.startWatching()
-            observer = dirObserver
-            DaemonLog.info("Watching configuration directory: ${parent.absolutePath}")
+                dirObserver.startWatching()
+                observer = dirObserver
+                DaemonLog.info("Watching configuration directory: ${parent.absolutePath}")
+            }
         }
     }
 
@@ -97,8 +101,8 @@ class ConfigStore(
     }
 
     fun stop() {
-        handler.removeCallbacks(reloadRunnable)
-        observer?.stopWatching()
+        handler?.removeCallbacks(reloadRunnable)
+        runCatching { observer?.stopWatching() }
         observer = null
     }
 
@@ -116,17 +120,31 @@ class ConfigStore(
         if (!parent.exists()) {
             parent.mkdirs()
         }
-        val tmp = File(parent, ".${configFile.name}.tmp.${android.os.Process.myPid()}")
-        val json = SideveilPrettyJson.encodeToString(config.sanitized()) + "\n"
-        tmp.writeText(json, StandardCharsets.UTF_8)
-        runCatching {
-            Runtime.getRuntime().exec(arrayOf("chmod", "0644", tmp.absolutePath)).waitFor()
+        val pid = runCatching { android.os.Process.myPid() }.getOrDefault(0)
+        val tmp = File(parent, ".${configFile.name}.tmp.$pid.${System.nanoTime()}")
+        try {
+            Files.deleteIfExists(tmp.toPath())
+            tmp.createNewFile()
+            applyMode0644(tmp)
+            val json = SideveilPrettyJson.encodeToString(config.sanitized()) + "\n"
+            tmp.writeText(json, StandardCharsets.UTF_8)
+            applyMode0644(tmp)
+            Files.move(
+                tmp.toPath(),
+                configFile.toPath(),
+                StandardCopyOption.REPLACE_EXISTING,
+                StandardCopyOption.ATOMIC_MOVE,
+            )
+        } finally {
+            runCatching { Files.deleteIfExists(tmp.toPath()) }
         }
-        Files.move(
-            tmp.toPath(),
-            configFile.toPath(),
-            StandardCopyOption.REPLACE_EXISTING,
-            StandardCopyOption.ATOMIC_MOVE,
-        )
+    }
+
+    private fun applyMode0644(file: File) {
+        runCatching {
+            Os.chmod(file.absolutePath, 420) // 0644 octal
+        }.recoverCatching {
+            Files.setPosixFilePermissions(file.toPath(), PosixFilePermissions.fromString("rw-r--r--"))
+        }
     }
 }

@@ -4,7 +4,9 @@ import android.content.Context
 import android.hardware.display.DisplayManager
 import android.hardware.input.InputManagerGlobal
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.Looper
+import android.os.Process
 import android.os.SystemClock
 import android.util.DisplayMetrics
 import android.view.Display
@@ -75,6 +77,7 @@ class EdgeGestureMonitor(
 
     private var displayManager: DisplayManager? = null
     private var displayListener: DisplayManager.DisplayListener? = null
+    private var inputThread: HandlerThread? = null
     private var inputMonitor: InputMonitor? = null
     private var inputReceiver: InputEventReceiver? = null
 
@@ -91,6 +94,12 @@ class EdgeGestureMonitor(
 
     fun start(initialConfig: SideveilConfig) {
         config = initialConfig
+        if (inputThread == null) {
+            inputThread =
+                HandlerThread("SideveilInputDispatcher", Process.THREAD_PRIORITY_URGENT_DISPLAY).apply {
+                    start()
+                }
+        }
         refreshDisplayGeometry(notify = false)
         registerDisplayWatcher()
         openInputMonitor()
@@ -121,6 +130,9 @@ class EdgeGestureMonitor(
 
         runCatching { inputMonitor?.dispose() }
         inputMonitor = null
+
+        runCatching { inputThread?.quitSafely() }
+        inputThread = null
 
         gestureMonitorActive = false
         resetTracking()
@@ -196,8 +208,9 @@ class EdgeGestureMonitor(
             val monitor = InputManagerGlobal.getInstance().monitorGestureInput("sideveil-edge", Display.DEFAULT_DISPLAY)
             val channel = monitor.inputChannel
             val channelName = channel.name
+            val dispatchLooper = inputThread?.looper ?: handler.looper
             val receiver =
-                object : InputEventReceiver(channel, handler.looper) {
+                object : InputEventReceiver(channel, dispatchLooper) {
                     override fun onInputEvent(event: InputEvent) {
                         try {
                             if (event is MotionEvent) {
@@ -240,6 +253,13 @@ class EdgeGestureMonitor(
 
             MotionEvent.ACTION_MOVE -> {
                 handleMove(event)
+            }
+
+            MotionEvent.ACTION_POINTER_UP -> {
+                val liftedIndex = event.actionIndex
+                if (tracking && event.getPointerId(liftedIndex) == activePointerId) {
+                    handleUpOrCancel(event, canceled = false)
+                }
             }
 
             MotionEvent.ACTION_UP -> {
@@ -297,9 +317,9 @@ class EdgeGestureMonitor(
         val geo = geometry
         val touchSlopPx = 10f * geo.density
 
-        val dtMs = (event.eventTime - lastEventTimeMs).coerceAtLeast(1L)
+        val dtMs = (event.eventTime - lastEventTimeMs).coerceAtLeast(4L)
         val stepInward = if (activeEdge == EdgeSide.RIGHT) -(rawX - lastX) else (rawX - lastX)
-        val instantVelocity = (stepInward * 1000f) / dtMs.toFloat()
+        val instantVelocity = ((stepInward * 1000f) / dtMs.toFloat()).coerceIn(-12_000f, 12_000f)
         lastVelocityPxPerSec = lastVelocityPxPerSec * 0.4f + instantVelocity * 0.6f
         lastX = rawX
         lastEventTimeMs = event.eventTime

@@ -6,7 +6,6 @@ import android.app.NotificationManager
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.content.res.Configuration
-import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -17,6 +16,9 @@ import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import pochita.sideveil.shared.ConfigUpdatedPayload
 import pochita.sideveil.shared.GestureDragEndPayload
 import pochita.sideveil.shared.GestureDragMovePayload
@@ -30,6 +32,7 @@ import pochita.sideveil.shared.ScopeChangedPayload
 import pochita.sideveil.shared.SideveilConfig
 import pochita.sideveil.shared.SideveilEvents
 import pochita.sideveil.shared.SideveilWireJson
+import java.io.File
 
 /**
  * Headless foreground service running inside the AMS-managed SideveilHost priv-app process.
@@ -51,6 +54,7 @@ class HostService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         windowManager = getSystemService(WindowManager::class.java)
+        latestDarkSurface = resolveDarkSurface(latestConfig)
         promoteForeground()
 
         daemonClient =
@@ -68,11 +72,21 @@ class HostService : LifecycleService() {
                                 ),
                             ),
                         )
+                        val currentState = panelWindow.getCurrentState()
+                        if (currentState != PanelState.CLOSED) {
+                            daemonClient.sendEvent(
+                                SideveilEvents.PANEL_STATE_CHANGED,
+                                SideveilWireJson.encodeToJsonElement(PanelStateChangedPayload(currentState)),
+                            )
+                        }
                     }
                 },
                 onDisconnected = {
                     mainHandler.post {
                         latestScopeActive = false
+                        if (panelWindow.getCurrentState() != PanelState.CLOSED) {
+                            panelWindow.close()
+                        }
                         edgeIndicator.update(
                             latestConfig.edge,
                             scopeActive = false,
@@ -143,6 +157,7 @@ class HostService : LifecycleService() {
         edgeIndicator.attach()
         panelWindow.attachWarm()
         webBridge.warmLoad()
+        syncEndpointFromDisk()
         Log.i(TAG, "HostService created (pid=${Process.myPid()}, uid=${Process.myUid()})")
     }
 
@@ -152,11 +167,7 @@ class HostService : LifecycleService() {
         startId: Int,
     ): Int {
         super.onStartCommand(intent, flags, startId)
-        val port = intent?.getIntExtra("port", 0) ?: 0
-        val token = intent?.getStringExtra("token").orEmpty()
-        if (port > 0 && token.isNotEmpty()) {
-            daemonClient.updateEndpoint(port, token)
-        }
+        syncEndpointFromDisk()
         return START_STICKY
     }
 
@@ -164,6 +175,8 @@ class HostService : LifecycleService() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        latestDarkSurface = resolveDarkSurface(latestConfig, newConfig)
+        panelWindow.onSystemConfigurationChanged()
         panelWindow.updateConfig(latestConfig.edge.side, latestConfig.panel)
         edgeIndicator.update(
             latestConfig.edge,
@@ -191,6 +204,7 @@ class HostService : LifecycleService() {
                     } ?: return
                 latestConfig = decoded.config
                 latestScopeActive = decoded.scopeActive
+                latestDarkSurface = resolveDarkSurface(decoded.config)
                 panelWindow.updateConfig(decoded.config.edge.side, decoded.config.panel)
                 edgeIndicator.update(
                     decoded.config.edge,
@@ -282,16 +296,41 @@ class HostService : LifecycleService() {
                 .setPriority(NotificationCompat.PRIORITY_MIN)
                 .build()
 
-        if (Build.VERSION.SDK_INT >= 34) {
-            startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-        } else {
-            startForeground(NOTIF_ID, notification)
+        startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+    }
+
+    private fun syncEndpointFromDisk() {
+        val endpointFile = File(noBackupFilesDir, ENDPOINT_FILE_NAME)
+        if (!endpointFile.isFile || !endpointFile.canRead()) return
+        runCatching {
+            val root = SideveilWireJson.parseToJsonElement(endpointFile.readText(Charsets.UTF_8)).jsonObject
+            val port = root["port"]?.jsonPrimitive?.intOrNull ?: 0
+            val token = root["token"]?.jsonPrimitive?.content.orEmpty()
+            if (port in 1..65535 && TOKEN_REGEX.matches(token)) {
+                daemonClient.updateEndpoint(port, token)
+            } else {
+                Log.w(TAG, "Ignored malformed daemon endpoint file")
+            }
+        }.onFailure { err ->
+            Log.w(TAG, "Failed to read daemon endpoint file: ${err.message}")
         }
     }
+
+    private fun resolveDarkSurface(
+        config: SideveilConfig,
+        sysConfig: Configuration = resources.configuration,
+    ): Boolean =
+        when (config.panel.colorMode) {
+            "light" -> false
+            "dark" -> true
+            else -> (sysConfig.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+        }
 
     companion object {
         private const val TAG = "SideveilHostService"
         private const val CHANNEL_ID = "sideveil_host_channel"
         private const val NOTIF_ID = 1001
+        private const val ENDPOINT_FILE_NAME = "daemon_endpoint.json"
+        private val TOKEN_REGEX = Regex("^[0-9a-f]{64}$")
     }
 }

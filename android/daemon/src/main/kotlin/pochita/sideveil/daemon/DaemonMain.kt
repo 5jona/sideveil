@@ -2,6 +2,8 @@ package pochita.sideveil.daemon
 
 import android.app.ActivityThread
 import android.content.Context
+import android.os.Handler
+import android.os.HandlerThread
 import android.os.Looper
 import android.os.Process
 import android.os.SystemClock
@@ -210,6 +212,12 @@ object DaemonMain {
                     },
             )
 
+        val monitorThread =
+            HandlerThread("SideveilMonitorWorker", Process.THREAD_PRIORITY_DEFAULT).apply {
+                start()
+            }
+        val monitorHandler = Handler(monitorThread.looper)
+
         foregroundMonitor =
             ForegroundMonitor(
                 hostPackage = parsed.hostPackage,
@@ -221,6 +229,7 @@ object DaemonMain {
                         SideveilWireJson.encodeToJsonElement(ScopeChangedPayload(pkg, active)),
                     )
                 },
+                handler = monitorHandler,
             )
 
         configStore =
@@ -235,6 +244,7 @@ object DaemonMain {
                 hostPackage = parsed.hostPackage,
                 appOpsBridge = appOpsBridge,
                 controlServer = controlServer,
+                handler = monitorHandler,
             )
 
         Runtime.getRuntime().addShutdownHook(
@@ -245,6 +255,7 @@ object DaemonMain {
                 foregroundMonitor.stop()
                 configStore.stop()
                 controlServer.stop()
+                runCatching { monitorThread.quitSafely() }
             },
         )
 

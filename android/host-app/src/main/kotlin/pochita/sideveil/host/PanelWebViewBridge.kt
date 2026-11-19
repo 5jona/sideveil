@@ -101,17 +101,45 @@ class PanelWebViewBridge(
         webView.addJavascriptInterface(JsHostObject(), "__POCHITA_HOST__")
         webView.webViewClient =
             object : WebViewClient() {
+                override fun shouldOverrideUrlLoading(
+                    view: WebView,
+                    request: WebResourceRequest,
+                ): Boolean = !isAllowedAppUri(request.url)
+
                 override fun shouldInterceptRequest(
                     view: WebView,
                     request: WebResourceRequest,
-                ): WebResourceResponse? = assetLoader.shouldInterceptRequest(request.url)
+                ): WebResourceResponse? {
+                    val url = request.url
+                    if (!isAllowedAppUri(url)) {
+                        return WebResourceResponse(
+                            "text/plain",
+                            "UTF-8",
+                            403,
+                            "Forbidden",
+                            emptyMap(),
+                            ByteArrayInputStream(ByteArray(0)),
+                        )
+                    }
+                    return assetLoader.shouldInterceptRequest(url)
+                        ?: WebResourceResponse(
+                            "text/plain",
+                            "UTF-8",
+                            404,
+                            "Not Found",
+                            emptyMap(),
+                            ByteArrayInputStream(ByteArray(0)),
+                        )
+                }
 
                 override fun onPageFinished(
                     view: WebView,
                     url: String?,
                 ) {
                     super.onPageFinished(view, url)
-                    installMessageChannel()
+                    if (url != null && isAllowedAppUri(Uri.parse(url))) {
+                        installMessageChannel()
+                    }
                 }
             }
     }
@@ -261,7 +289,16 @@ class PanelWebViewBridge(
         }
 
         val quoted = JSONObject.quote(rawJson)
-        webView.evaluateJavascript("window.postMessage($quoted, '*');", null)
+        val quotedOrigin = JSONObject.quote(APP_ORIGIN)
+        webView.evaluateJavascript("window.postMessage($quoted, $quotedOrigin);", null)
+    }
+
+    private fun isAllowedAppUri(uri: Uri?): Boolean {
+        if (uri == null) return false
+        return uri.scheme == "https" &&
+            uri.host == APP_DOMAIN &&
+            uri.port == -1 &&
+            uri.path?.startsWith(PANEL_PREFIX) == true
     }
 
     private fun openPanelAsset(relativePath: String): WebResourceResponse {

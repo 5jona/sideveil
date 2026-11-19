@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { useTheme } from '@pochita/ui';
+import { colorWithAlpha, readThemeToken, useTheme } from '@pochita/ui';
 import type { SideveilConfig } from '../../shared/types.ts';
 
 export interface EdgePreviewCanvasProps {
@@ -34,23 +34,23 @@ export function EdgePreviewCanvas({ config, previewOpen = true }: EdgePreviewCan
 
       // Canvas 2D cannot evaluate CSS `light-dark(...)` expressions, so read the
       // concrete scheme-qualified custom properties resolved for the active theme.
-      const cs = getComputedStyle(document.documentElement);
       const isDark = resolvedScheme === 'dark';
-      const suffix = isDark ? 'dark' : 'light';
-      const readToken = (name: string, fallback: string) => {
-        const raw = cs.getPropertyValue(`--${name}-${suffix}`).trim();
-        return raw || fallback;
-      };
-      const accent = readToken('accent', isDark ? '#3b82f6' : '#0066ff');
-      const border = readToken(
+      const accent = readThemeToken('accent', resolvedScheme, isDark ? '#3b82f6' : '#0066ff');
+      const border = readThemeToken(
         'border-hairline',
+        resolvedScheme,
         isDark ? 'rgba(255, 255, 255, 0.14)' : 'rgba(18, 24, 38, 0.12)',
       );
-      const surface = readToken(
+      const surface = readThemeToken(
         'surface-elevated',
+        resolvedScheme,
         isDark ? 'rgba(46, 52, 66, 0.72)' : 'rgba(235, 241, 250, 0.88)',
       );
-      const textMuted = readToken('text-secondary', isDark ? '#a6b0c3' : '#4e5969');
+      const textMuted = readThemeToken(
+        'text-secondary',
+        resolvedScheme,
+        isDark ? '#a6b0c3' : '#4e5969',
+      );
 
       const pad = 10;
       const w = cssWidth - pad * 2;
@@ -181,22 +181,4 @@ function drawRoundedRect(
   ctx.arcTo(x, y + h, x, y, radius);
   ctx.arcTo(x, y, x + w, y, radius);
   ctx.closePath();
-}
-
-function colorWithAlpha(color: string, alpha: number): string {
-  if (color.startsWith('#') && (color.length === 7 || color.length === 4)) {
-    const hex = color.slice(1);
-    const full =
-      hex.length === 3
-        ? hex
-            .split('')
-            .map((c) => c + c)
-            .join('')
-        : hex;
-    const r = Number.parseInt(full.slice(0, 2), 16);
-    const g = Number.parseInt(full.slice(2, 4), 16);
-    const b = Number.parseInt(full.slice(4, 6), 16);
-    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-  }
-  return `color-mix(in srgb, ${color} ${Math.round(alpha * 100)}%, transparent)`;
 }

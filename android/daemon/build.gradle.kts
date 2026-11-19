@@ -70,6 +70,9 @@ dependencies {
     implementation(project(":shared"))
     compileOnly(project(":hidden-stubs"))
     compileOnly(files(resolveAndroidJar(resolveSdkRoot())))
+    testCompileOnly(project(":hidden-stubs"))
+    testCompileOnly(files(resolveAndroidJar(resolveSdkRoot())))
+    testImplementation(libs.junit)
 }
 
 abstract class BuildDaemonDexTask : DefaultTask() {
@@ -106,7 +109,7 @@ abstract class BuildDaemonDexTask : DefaultTask() {
 
         execOperations.exec {
             executable = d8Executable.get().asFile.absolutePath
-            args("--min-api", "31")
+            args("--min-api", "36")
             args("--lib", androidJar.get().asFile.absolutePath)
             args("--output", tempDexDir.absolutePath)
             args(inputArchives)

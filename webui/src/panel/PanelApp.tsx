@@ -11,6 +11,7 @@ import {
   Badge,
   Button,
   Card,
+  Input,
   LogConsole,
   MetricTile,
   SettingRow,
@@ -20,6 +21,7 @@ import {
   ToastProvider,
   useTheme,
   useToast,
+  type ColorMode,
   type LogEntry,
   type ThemeSyncPayload,
 } from '@pochita/ui';
@@ -41,10 +43,14 @@ function PanelWorkbench({
   eventsLog,
   onAppendLog,
   onClearLogs,
+  cornerRadiusDp,
+  onCornerRadiusDpChange,
 }: {
   eventsLog: readonly LogEntry[];
   onAppendLog: (level: LogEntry['level'], message: string) => void;
   onClearLogs: () => void;
+  cornerRadiusDp: number;
+  onCornerRadiusDpChange: (dp: number) => void;
 }) {
   const bridge = useBridge();
   const { pushToast } = useToast();
@@ -52,12 +58,13 @@ function PanelWorkbench({
 
   const [status, setStatus] = useState<DaemonStatus | null>(null);
   const [nativeBlurEnabled, setNativeBlurEnabled] = useState(true);
+  const [blurRadiusPx, setBlurRadiusPx] = useState(160);
   const [lastPingMs, setLastPingMs] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [imeText, setImeText] = useState('');
   const [imeFocused, setImeFocused] = useState(false);
 
-  const syncingFromDaemonRef = useRef(false);
+  const lastDaemonThemeRef = useRef<{ themeId: string; colorMode: ColorMode } | null>(null);
   const isNativeHost = bridge.env === 'host';
 
   const refreshStatus = useCallback(async () => {
@@ -73,6 +80,27 @@ function PanelWorkbench({
 
   useEffect(() => {
     void refreshStatus();
+
+    const loadDaemonConfig = async () => {
+      try {
+        const res = await bridge.invoke<unknown>('config.get');
+        const cfg = normalizeConfig(res as Partial<SideveilConfig> | null);
+        const nextThemeId = cfg.panel.themeId;
+        const nextMode = cfg.panel.colorMode;
+        lastDaemonThemeRef.current = { themeId: nextThemeId, colorMode: nextMode };
+        setThemeId(nextThemeId);
+        setColorMode(nextMode);
+        setNativeBlurEnabled(cfg.panel.nativeBlurEnabled);
+        setBlurRadiusPx(cfg.panel.blurRadiusPx);
+        onCornerRadiusDpChange(cfg.panel.cornerRadiusDp);
+      } catch (err) {
+        onAppendLog('warn', `config.get failed: ${err instanceof Error ? err.message : String(err)}`);
+        if (!lastDaemonThemeRef.current) {
+          lastDaemonThemeRef.current = { themeId, colorMode };
+        }
+      }
+    };
+    void loadDaemonConfig();
 
     const unsubScope = bridge.onHostEvent('scope.changed', (payload) => {
       const p = payload as { foregroundPackage?: string; active?: boolean } | undefined;
@@ -96,10 +124,14 @@ function PanelWorkbench({
         | undefined;
       if (!p?.config) return;
       const cfg = normalizeConfig(p.config);
-      syncingFromDaemonRef.current = true;
-      setThemeId(cfg.panel.themeId);
-      setColorMode(cfg.panel.colorMode);
+      const nextThemeId = cfg.panel.themeId;
+      const nextMode = cfg.panel.colorMode;
+      lastDaemonThemeRef.current = { themeId: nextThemeId, colorMode: nextMode };
+      setThemeId(nextThemeId);
+      setColorMode(nextMode);
       setNativeBlurEnabled(cfg.panel.nativeBlurEnabled);
+      setBlurRadiusPx(cfg.panel.blurRadiusPx);
+      onCornerRadiusDpChange(cfg.panel.cornerRadiusDp);
       if (typeof p.foregroundPackage === 'string') {
         setStatus((prev) =>
           prev
@@ -112,9 +144,6 @@ function PanelWorkbench({
         );
       }
       onAppendLog('info', `config.updated (theme=${cfg.panel.themeId}, blur=${cfg.panel.nativeBlurEnabled})`);
-      window.setTimeout(() => {
-        syncingFromDaemonRef.current = false;
-      }, 60);
     });
 
     const unsubVis = bridge.onHostEvent('panel.visibility', (payload) => {
@@ -130,7 +159,7 @@ function PanelWorkbench({
       unsubConfig();
       unsubVis();
     };
-  }, [bridge, onAppendLog, refreshStatus, setColorMode, setThemeId]);
+  }, [bridge, colorMode, onAppendLog, onCornerRadiusDpChange, refreshStatus, setColorMode, setThemeId, themeId]);
 
   const handlePing = async () => {
     setBusy(true);
@@ -152,49 +181,49 @@ function PanelWorkbench({
     }
   };
 
-  const patchAppearanceToDaemon = useCallback(
-    async (nextBlur: boolean) => {
-      try {
-        await bridge.invoke('config.patchAppearance', {
-          themeId,
-          colorMode,
-          nativeBlurEnabled: nextBlur,
-        });
-      } catch (err) {
-        onAppendLog(
-          'warn',
-          `config.patchAppearance failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-    },
-    [bridge, colorMode, onAppendLog, themeId],
-  );
-
   // Sync theme/colorMode initiated inside the panel back to the daemon config.
-  const prevPanelStyleRef = useRef({ themeId, colorMode });
   useEffect(() => {
-    const prev = prevPanelStyleRef.current;
-    if (prev.themeId === themeId && prev.colorMode === colorMode) {
+    if (
+      lastDaemonThemeRef.current &&
+      lastDaemonThemeRef.current.themeId === themeId &&
+      lastDaemonThemeRef.current.colorMode === colorMode
+    ) {
       return;
     }
-    prevPanelStyleRef.current = { themeId, colorMode };
-    if (!syncingFromDaemonRef.current) {
-      void patchAppearanceToDaemon(nativeBlurEnabled);
+    if (!lastDaemonThemeRef.current) {
+      return;
     }
-  }, [themeId, colorMode, nativeBlurEnabled, patchAppearanceToDaemon]);
+    lastDaemonThemeRef.current = { themeId, colorMode };
+    void bridge.invoke('config.patchAppearance', { themeId, colorMode }).catch((err) => {
+      onAppendLog(
+        'warn',
+        `config.patchAppearance failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
+  }, [themeId, colorMode, bridge, onAppendLog]);
 
   const handleToggleBlur = (checked: boolean) => {
     setNativeBlurEnabled(checked);
+    const cornerRadiusPx = Math.round(cornerRadiusDp * (window.devicePixelRatio || 1));
     void bridge.sendContainerAction({
       type: 'syncTheme',
       payload: {
         themeId,
         colorScheme: resolvedScheme,
         wantsNativeBlur: checked,
-        cornerRadiusPx: 58,
+        cornerRadiusPx,
       },
     });
-    void patchAppearanceToDaemon(checked);
+    void bridge.invoke('config.patchAppearance', {
+      themeId,
+      colorMode,
+      nativeBlurEnabled: checked,
+    }).catch((err) => {
+      onAppendLog(
+        'warn',
+        `config.patchAppearance failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
     onAppendLog('info', `nativeBlurEnabled -> ${checked}`);
   };
 
@@ -229,10 +258,9 @@ function PanelWorkbench({
               {isNativeHost ? '在线' : '预览'}
             </Badge>
             <Button
-              size="sm"
+              size="icon-sm"
               variant="ghost"
               aria-label="收起侧边栏"
-              className="size-7 px-0"
               onClick={() => void bridge.sendContainerAction({ type: 'dismiss' })}
             >
               <X className="size-4" />
@@ -291,7 +319,7 @@ function PanelWorkbench({
 
           <Card className="space-y-2.5 p-3">
             <ThemeSwitcher compact />
-            <div className="h-px bg-[var(--glass-divider,var(--border-hairline))]" />
+            <div className="pochita-divider" />
             <SettingRow
               variant="plain"
               title="跨窗毛玻璃"
@@ -312,17 +340,17 @@ function PanelWorkbench({
                 {imeFocused ? '已聚焦' : '待命'}
               </Badge>
             </div>
-            <input
+            <Input
               id="ime-focus-input"
               name="imeFocusInput"
-              type="text"
+              size="md"
+              className="bg-[var(--surface-elevated)]"
               value={imeText}
               onChange={(ev) => setImeText(ev.target.value)}
               onFocus={() => handleImeFocus(true)}
               onBlur={() => handleImeFocus(false)}
               placeholder="点击输入中文测试..."
               aria-label="中文输入法测试框"
-              className="h-9 w-full rounded-[var(--radius-control)] bg-[var(--surface-elevated)] px-3 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-secondary)] focus:outline-2 focus:outline-[var(--accent)]"
             />
             {imeText ? (
               <div className="rounded-[var(--radius-control)] bg-[var(--surface-elevated)] px-2.5 py-1.5 text-[11px] text-[var(--text-primary)]">
@@ -353,17 +381,38 @@ function PanelThemedContainer({
   onClearLogs: () => void;
 }) {
   const bridge = useBridge();
+  const [cornerRadiusDp, setCornerRadiusDp] = useState<number>(28);
   const lastSyncKeyRef = useRef<string>('');
+  const lastThemePayloadRef = useRef<ThemeSyncPayload | null>(null);
 
   const handleThemeSync = useCallback(
     (payload: ThemeSyncPayload) => {
-      const key = `${payload.themeId}:${payload.colorScheme}:${payload.wantsNativeBlur}:${payload.cornerRadiusPx}`;
+      lastThemePayloadRef.current = payload;
+      const cornerRadiusPx = Math.round(cornerRadiusDp * (window.devicePixelRatio || 1));
+      const syncPayload: ThemeSyncPayload = {
+        ...payload,
+        cornerRadiusPx,
+      };
+      const key = `${syncPayload.themeId}:${syncPayload.colorScheme}:${syncPayload.wantsNativeBlur}:${syncPayload.cornerRadiusPx}`;
       if (lastSyncKeyRef.current === key) return;
       lastSyncKeyRef.current = key;
-      void bridge.sendContainerAction({ type: 'syncTheme', payload });
+      void bridge.sendContainerAction({ type: 'syncTheme', payload: syncPayload });
     },
-    [bridge],
+    [bridge, cornerRadiusDp],
   );
+
+  useEffect(() => {
+    if (!lastThemePayloadRef.current) return;
+    const cornerRadiusPx = Math.round(cornerRadiusDp * (window.devicePixelRatio || 1));
+    const syncPayload: ThemeSyncPayload = {
+      ...lastThemePayloadRef.current,
+      cornerRadiusPx,
+    };
+    const key = `${syncPayload.themeId}:${syncPayload.colorScheme}:${syncPayload.wantsNativeBlur}:${syncPayload.cornerRadiusPx}`;
+    if (lastSyncKeyRef.current === key) return;
+    lastSyncKeyRef.current = key;
+    void bridge.sendContainerAction({ type: 'syncTheme', payload: syncPayload });
+  }, [bridge, cornerRadiusDp]);
 
   return (
     <ThemeProvider
@@ -377,6 +426,8 @@ function PanelThemedContainer({
           eventsLog={eventsLog}
           onAppendLog={onAppendLog}
           onClearLogs={onClearLogs}
+          cornerRadiusDp={cornerRadiusDp}
+          onCornerRadiusDpChange={setCornerRadiusDp}
         />
       </ToastProvider>
     </ThemeProvider>

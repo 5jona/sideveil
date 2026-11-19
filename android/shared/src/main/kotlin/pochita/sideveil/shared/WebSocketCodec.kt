@@ -10,6 +10,7 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Base64
 import java.util.Locale
+import java.util.WeakHashMap
 
 enum class WsOpcode(
     val code: Int,
@@ -49,7 +50,15 @@ object WebSocketCodec {
     private const val WS_MAGIC_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
     private const val MAX_HEADER_BYTES = 32 * 1024
     private const val MAX_PAYLOAD_BYTES = 8 * 1024 * 1024
+    private const val MAX_CONTROL_FRAME_BYTES = 125L
     private val rng = SecureRandom()
+
+    private class FragmentAssembly(
+        val opcode: WsOpcode,
+        val buffer: ByteArrayOutputStream,
+    )
+
+    private val fragmentStates = WeakHashMap<InputStream, FragmentAssembly>()
 
     fun computeAcceptKey(clientKey: String): String {
         val sha1 = MessageDigest.getInstance("SHA-1")
@@ -159,19 +168,39 @@ object WebSocketCodec {
         }
     }
 
-    fun readFrame(input: InputStream): WsFrame? {
-        var fragmentedOpcode: WsOpcode? = null
-        var fragmentBuffer: ByteArrayOutputStream? = null
-
+    fun readFrame(
+        input: InputStream,
+        requireMasked: Boolean = false,
+    ): WsFrame? {
         while (true) {
             val b1 = input.read()
-            if (b1 < 0) return null
+            if (b1 < 0) {
+                synchronized(fragmentStates) { fragmentStates.remove(input) }
+                return null
+            }
             val b2 = readByteOrEof(input)
 
             val fin = (b1 and 0x80) != 0
+            val rsv = b1 and 0x70
+            if (rsv != 0) {
+                throw IOException("Unsupported WebSocket RSV bits: 0x${rsv.toString(16)}")
+            }
             val rawOpcode = b1 and 0x0F
             val masked = (b2 and 0x80) != 0
+            if (requireMasked && !masked) {
+                throw IOException("RFC 6455 violation: client frame must be masked")
+            }
             val len7 = b2 and 0x7F
+            val isControlOpcode = (rawOpcode and 0x08) != 0
+
+            if (isControlOpcode) {
+                if (!fin) {
+                    throw IOException("RFC 6455 violation: control frame must not be fragmented")
+                }
+                if (len7 > MAX_CONTROL_FRAME_BYTES) {
+                    throw IOException("RFC 6455 violation: control frame payload exceeds 125 bytes ($len7)")
+                }
+            }
 
             val payloadLen =
                 when (len7) {
@@ -212,14 +241,17 @@ object WebSocketCodec {
             }
 
             if (rawOpcode == 0) {
-                val acc = fragmentBuffer ?: throw IOException("Unexpected continuation frame")
-                if (acc.size() + payload.size > MAX_PAYLOAD_BYTES) {
+                val assembly =
+                    synchronized(fragmentStates) { fragmentStates[input] }
+                        ?: throw IOException("Unexpected continuation frame")
+                if (assembly.buffer.size() + payload.size > MAX_PAYLOAD_BYTES) {
+                    synchronized(fragmentStates) { fragmentStates.remove(input) }
                     throw IOException("Fragmented WebSocket message exceeded $MAX_PAYLOAD_BYTES bytes")
                 }
-                acc.write(payload)
+                assembly.buffer.write(payload)
                 if (fin) {
-                    val op = fragmentedOpcode ?: throw IOException("Missing fragmented opcode")
-                    return WsFrame(op, acc.toByteArray())
+                    synchronized(fragmentStates) { fragmentStates.remove(input) }
+                    return WsFrame(assembly.opcode, assembly.buffer.toByteArray())
                 }
                 continue
             }
@@ -228,20 +260,32 @@ object WebSocketCodec {
                 WsOpcode.entries.firstOrNull { it.code == rawOpcode }
                     ?: throw IOException("Unsupported WebSocket opcode: 0x${rawOpcode.toString(16)}")
 
-            // Control frames (Close/Ping/Pong) may be interleaved between fragments and are never fragmented.
+            // Control frames (Close/Ping/Pong) may be interleaved between fragments without resetting fragment state.
             if (opcode == WsOpcode.CLOSE || opcode == WsOpcode.PING || opcode == WsOpcode.PONG) {
                 return WsFrame(opcode, payload)
+            }
+
+            val hasInFlightFragment = synchronized(fragmentStates) { fragmentStates.containsKey(input) }
+            if (hasInFlightFragment) {
+                synchronized(fragmentStates) { fragmentStates.remove(input) }
+                throw IOException("RFC 6455 violation: new data frame started before fragmented message completed")
             }
 
             if (fin) {
                 return WsFrame(opcode, payload)
             }
 
-            fragmentedOpcode = opcode
-            fragmentBuffer =
-                ByteArrayOutputStream(payload.size.coerceAtLeast(256)).apply {
-                    write(payload)
-                }
+            val newAssembly =
+                FragmentAssembly(
+                    opcode = opcode,
+                    buffer =
+                        ByteArrayOutputStream(payload.size.coerceAtLeast(256)).apply {
+                            write(payload)
+                        },
+                )
+            synchronized(fragmentStates) {
+                fragmentStates[input] = newAssembly
+            }
         }
     }
 
