@@ -1,0 +1,6 @@
+id=sideveil
+name=Sideveil
+version=v0.1.0
+versionCode=100
+author=pochita
+description=Generic Android sidebar micro-frontend host with UID 1000 gesture daemon and priv-app WebView container.

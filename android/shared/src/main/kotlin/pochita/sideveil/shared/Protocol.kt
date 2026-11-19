@@ -1,0 +1,153 @@
+package pochita.sideveil.shared
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
+
+object SideveilEvents {
+    const val CONFIG_UPDATED = "config.updated"
+    const val SCOPE_CHANGED = "scope.changed"
+    const val GESTURE_DRAG_START = "gesture.dragStart"
+    const val GESTURE_DRAG_MOVE = "gesture.dragMove"
+    const val GESTURE_DRAG_END = "gesture.dragEnd"
+    const val PANEL_COMMAND = "panel.command"
+    const val HOST_HELLO = "host.hello"
+    const val PANEL_STATE_CHANGED = "panel.stateChanged"
+    const val PANEL_VISIBILITY = "panel.visibility"
+}
+
+object SideveilMethods {
+    const val DAEMON_PING = "daemon.ping"
+    const val DAEMON_STATUS = "daemon.status"
+    const val DAEMON_LOGS = "daemon.logs"
+    const val CONFIG_GET = "config.get"
+    const val CONFIG_PATCH_APPEARANCE = "config.patchAppearance"
+    const val CONFIG_RELOAD = "config.reload"
+    const val PANEL_OPEN = "panel.open"
+    const val PANEL_CLOSE = "panel.close"
+    const val PANEL_TOGGLE = "panel.toggle"
+    const val HOST_RESTART = "host.restart"
+}
+
+@Serializable
+data class DaemonStatus(
+    val pid: Int,
+    val uid: Int,
+    val uptimeMs: Long,
+    val configVersion: Int,
+    val enabled: Boolean,
+    val scopeActive: Boolean,
+    val foregroundPackage: String,
+    val hostPackage: String,
+    val hostConnected: Boolean,
+    val hostPid: Int?,
+    val overlayPermissionGranted: Boolean,
+    val crossWindowBlurSupported: Boolean?,
+    val gestureMonitorActive: Boolean,
+    val taskListenerActive: Boolean,
+    val panelState: PanelState,
+    val screenWidthPx: Int,
+    val screenHeightPx: Int,
+    val density: Float,
+    val wsPort: Int,
+)
+
+@Serializable
+data class RpcError(
+    val code: Int,
+    val message: String,
+)
+
+@Serializable
+data class RpcRequest(
+    val jsonrpc: String = "2.0",
+    val id: String,
+    val method: String,
+    val params: JsonElement? = null,
+)
+
+@Serializable
+data class RpcResponse(
+    val jsonrpc: String = "2.0",
+    val id: String,
+    val result: JsonElement? = null,
+    val error: RpcError? = null,
+)
+
+@Serializable
+data class HostEventEnvelope(
+    val event: String,
+    val payload: JsonElement? = null,
+)
+
+@Serializable
+data class ConfigUpdatedPayload(
+    val config: SideveilConfig,
+    val scopeActive: Boolean,
+    val foregroundPackage: String,
+)
+
+@Serializable
+data class ScopeChangedPayload(
+    val foregroundPackage: String,
+    val active: Boolean,
+)
+
+@Serializable
+data class GestureDragStartPayload(
+    val side: EdgeSide,
+    val startYFraction: Float,
+)
+
+@Serializable
+data class GestureDragMovePayload(
+    val side: EdgeSide,
+    val progress: Float,
+    val rawX: Float,
+    val rawY: Float,
+    val deltaX: Float,
+)
+
+@Serializable
+data class GestureDragEndPayload(
+    val shouldOpen: Boolean,
+    val velocityPxPerSec: Float,
+)
+
+@Serializable
+data class PanelCommandPayload(
+    val command: String,
+)
+
+@Serializable
+data class HostHelloPayload(
+    val pid: Int,
+    val version: String,
+    val crossWindowBlurSupported: Boolean,
+)
+
+@Serializable
+data class PanelStateChangedPayload(
+    val state: PanelState,
+)
+
+@Serializable
+data class PanelVisibilityPayload(
+    val visible: Boolean,
+    val state: PanelState,
+)
+
+@Serializable
+data class PingResult(
+    val pong: Boolean = true,
+    val daemonUptimeMs: Long,
+    val timestampMs: Long,
+)
+
+@Serializable
+data class AppearancePatchParams(
+    val themeId: String? = null,
+    val colorMode: String? = null,
+    val nativeBlurEnabled: Boolean? = null,
+    val blurRadiusPx: Int? = null,
+    val cornerRadiusDp: Int? = null,
+)

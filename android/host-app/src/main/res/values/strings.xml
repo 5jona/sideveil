@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Sideveil Host</string>
+    <string name="notif_channel_name">Sideveil Overlay Host</string>
+    <string name="notif_title">Sideveil Host Active</string>
+    <string name="notif_text">Sidebar render container is warm and connected.</string>
+</resources>

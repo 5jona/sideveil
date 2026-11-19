@@ -1,0 +1,28 @@
+# Migrated research artifacts and reverse-engineering cache
+tmp/
+
+# Build and packaging outputs
+out/
+*.zip
+*.tar.gz
+webroot/
+bin/sideveil-daemon.dex
+system/priv-app/SideveilHost/SideveilHost.apk
+android/host-app/src/main/assets/panel/
+
+# Gradle and Android build artifacts
+android/.gradle/
+android/.kotlin/
+android/**/build/
+android/local.properties
+android/keystore.properties
+
+# WebUI dependencies and build artifacts
+webui/node_modules/
+webui/dist/
+
+# Editor and OS files
+*.tmp
+*.swp
+*~
+.DS_Store

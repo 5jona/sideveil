@@ -1,0 +1,34 @@
+[tools]
+android-sdk = "23.0"
+java = "25"
+pnpm = "12.22.0"
+
+[task_config]
+dir = "{{config_root}}"
+
+[tasks.build]
+description = "Build WebUI, daemon DEX, host APK, and KernelSU ZIP archive"
+run = "bash build.sh"
+
+[tasks.reload]
+description = "Build and hot-reload Sideveil onto connected Android device via ADB"
+run = "bash reload.sh"
+
+[tasks."webui:check"]
+description = "Typecheck and build Control Plane and Panel WebUIs"
+dir = "{{config_root}}/webui"
+run = "pnpm typecheck && pnpm build"
+
+[tasks."android:check"]
+description = "Run Spotless, JVM unit tests, DEX build, and release APK build"
+dir = "{{config_root}}/android"
+run = "./gradlew spotlessCheck :shared:test :daemon:buildDex :host-app:assembleRelease"
+
+[tasks."android:format"]
+description = "Format Kotlin, Gradle, and config files with Spotless"
+dir = "{{config_root}}/android"
+run = "./gradlew spotlessApply"
+
+[tasks.clean]
+description = "Clean Gradle and WebUI build outputs"
+run = "rm -rf out webroot bin/sideveil-daemon.dex system/priv-app/SideveilHost/SideveilHost.apk android/host-app/src/main/assets/panel && cd android && ./gradlew clean"
