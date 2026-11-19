@@ -337,6 +337,34 @@ data class GlassOpticalPalette(
 }
 
 /**
+ * Zero-draw immutable outline provider bound to [android.view.Window.setBackgroundDrawable].
+ *
+ * Supplies an alpha-zero round-rect outline for SurfaceFlinger's cross-window blur region
+ * without drawing any pixels on the window DecorView canvas. This cleanly separates
+ * window blur masking from optical glass rendering: PhoneWindow and DecorView manage the
+ * background blur layer independently, while [GlassBackdropDrawable] renders AGSL frosted-glass
+ * optics directly on the content container without having its [Drawable.Callback] hijacked
+ * or wrapped by DecorView.
+ */
+class BlurMaskDrawable(
+    val cornerRadiusPx: Float,
+) : Drawable() {
+    override fun draw(canvas: Canvas) = Unit
+
+    override fun getOutline(outline: Outline) {
+        outline.setRoundRect(bounds, cornerRadiusPx.coerceAtLeast(0f))
+        outline.alpha = 0f
+    }
+
+    override fun setAlpha(alpha: Int) = Unit
+
+    override fun setColorFilter(colorFilter: ColorFilter?) = Unit
+
+    @Suppress("OVERRIDE_DEPRECATION")
+    override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+}
+
+/**
  * Optical frosted-glass backdrop [Drawable] backed by a reusable AGSL
  * [RuntimeShader] composited over SurfaceFlinger cross-window blur.
  *
@@ -374,6 +402,7 @@ class GlassBackdropDrawable(
         if (runtimeShader != null) {
             pushStyleUniforms(runtimeShader)
             pushBoundsUniforms(runtimeShader, bounds)
+            rebindShader(runtimeShader)
         } else {
             syncFallbackDrawable()
         }
@@ -394,6 +423,7 @@ class GlassBackdropDrawable(
         if (runtimeShader != null) {
             pushStyleUniforms(runtimeShader)
             pushBoundsUniforms(runtimeShader, bounds)
+            rebindShader(runtimeShader)
         } else {
             syncFallbackDrawable()
         }
@@ -406,7 +436,13 @@ class GlassBackdropDrawable(
         fallbackDrawable.bounds = bounds
         if (runtimeShader != null) {
             pushBoundsUniforms(runtimeShader, bounds)
+            rebindShader(runtimeShader)
         }
+    }
+
+    private fun rebindShader(shader: RuntimeShader) {
+        shaderPaint.shader = null
+        shaderPaint.shader = shader
     }
 
     override fun draw(canvas: Canvas) {

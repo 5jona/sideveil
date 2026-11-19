@@ -4,7 +4,6 @@ import android.annotation.SuppressLint
 import android.app.Dialog
 import android.content.Context
 import android.content.res.Configuration
-import android.graphics.Color
 import android.graphics.PixelFormat
 import android.util.Log
 import android.view.ContextThemeWrapper
@@ -12,6 +11,7 @@ import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
@@ -22,8 +22,9 @@ import java.util.function.Consumer
 
 /**
  * Warm-resident TYPE_APPLICATION_OVERLAY Dialog container hosting the preloaded panel
- * WebView over a single persistent [GlassBackdropDrawable] and public
- * [android.view.Window.setBackgroundBlurRadius] hardware cross-window blur.
+ * WebView over a two-layer rendering architecture: [BlurMaskDrawable] provides a zero-draw
+ * round-rect outline on [android.view.Window] for hardware cross-window blur, while
+ * [GlassBackdropDrawable] renders AGSL frosted-glass optics directly on [contentContainer].
  */
 @SuppressLint("RtlHardcoded")
 class SidebarPanelWindow(
@@ -90,7 +91,7 @@ class SidebarPanelWindow(
     init {
         preloadHardwareRenderer()
 
-        contentContainer.setBackgroundColor(Color.TRANSPARENT)
+        contentContainer.background = backdropDrawable
         contentContainer.clipToOutline = true
         contentContainer.outlineProvider = GlassBackdropDrawable.createContentOutlineProvider { cornerPx() }
         contentContainer.addView(
@@ -100,13 +101,19 @@ class SidebarPanelWindow(
 
         dialog.setCanceledOnTouchOutside(true)
         dialog.setCancelable(true)
-        dialog.setContentView(contentContainer)
+        dialog.setContentView(
+            contentContainer,
+            ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
+        )
 
         val window = dialog.window ?: error("Overlay dialog window unavailable")
         window.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
         window.setFormat(PixelFormat.TRANSLUCENT)
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-        window.setBackgroundDrawable(backdropDrawable)
+        window.decorView.setPadding(0, 0, 0, 0)
+        val initialCornerPx = cornerPx()
+        lastAppliedCornerPx = initialCornerPx
+        window.setBackgroundDrawable(BlurMaskDrawable(initialCornerPx))
 
         val lp = window.attributes
         lp.title = "SideveilPanelHost"
@@ -142,6 +149,7 @@ class SidebarPanelWindow(
 
     fun onSystemConfigurationChanged() {
         recomputePanelDimensions()
+        backdropDrawable.updateDensity(currentDensity)
         if (panelConfig.colorMode != "light" && panelConfig.colorMode != "dark") {
             syncedColorScheme = resolveSystemScheme()
         }
@@ -427,24 +435,20 @@ class SidebarPanelWindow(
             }
 
         val cornerRadiusPx = cornerPx()
-        val changed =
-            backdropDrawable.updateStyle(
-                GlassBackdropStyle(
-                    themeId = syncedThemeId,
-                    isDark = syncedColorScheme != "light",
-                    blurActive = effectiveBlurRadius > 0,
-                    cornerRadiusPx = cornerRadiusPx,
-                ),
-            )
+        backdropDrawable.updateStyle(
+            GlassBackdropStyle(
+                themeId = syncedThemeId,
+                isDark = syncedColorScheme != "light",
+                blurActive = effectiveBlurRadius > 0,
+                cornerRadiusPx = cornerRadiusPx,
+            ),
+        )
+        applyBlurRadius(window, effectiveBlurRadius)
         if (lastAppliedCornerPx != cornerRadiusPx) {
             lastAppliedCornerPx = cornerRadiusPx
-            // Re-bind the same persistent Drawable so DecorView refreshes BackgroundBlurDrawable corner radius.
-            window.setBackgroundDrawable(backdropDrawable)
-            window.decorView.invalidateOutline()
-        } else if (changed) {
-            window.decorView.invalidateOutline()
+            window.setBackgroundDrawable(BlurMaskDrawable(cornerRadiusPx))
+            contentContainer.invalidateOutline()
         }
-        applyBlurRadius(window, effectiveBlurRadius)
     }
 
     private fun applyBlurRadius(

@@ -2,6 +2,7 @@ package pochita.sideveil.shared
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -105,13 +106,26 @@ class SideveilConfigTest {
         val endpointDecoded = SideveilWireJson.decodeFromString<DaemonEndpoint>(SideveilWireJson.encodeToString(endpoint))
         assertEquals(endpoint, endpointDecoded)
 
-        val syncJson =
+        val minimalSyncJson =
+            """
+            {"type":"syncTheme","payload":{"themeId":"coloros-glass","colorScheme":"light"}}
+            """.trimIndent()
+        val minimalActionDecoded = SideveilWireJson.decodeFromString<ContainerActionPayload>(minimalSyncJson)
+        assertEquals("syncTheme", minimalActionDecoded.type)
+        assertEquals("coloros-glass", minimalActionDecoded.payload?.themeId)
+        assertEquals("light", minimalActionDecoded.payload?.colorScheme)
+        assertNull(minimalActionDecoded.payload?.wantsNativeBlur)
+        assertNull(minimalActionDecoded.payload?.cornerRadiusPx)
+
+        val fullSyncJson =
             """
             {"type":"syncTheme","payload":{"themeId":"modern-saas-dark","colorScheme":"dark","wantsNativeBlur":false,"cornerRadiusPx":48}}
             """.trimIndent()
-        val actionDecoded = SideveilWireJson.decodeFromString<ContainerActionPayload>(syncJson)
-        assertEquals("syncTheme", actionDecoded.type)
-        assertEquals("modern-saas-dark", actionDecoded.payload?.themeId)
-        assertEquals(false, actionDecoded.payload?.wantsNativeBlur)
+        val fullActionDecoded = SideveilWireJson.decodeFromString<ContainerActionPayload>(fullSyncJson)
+        assertEquals("syncTheme", fullActionDecoded.type)
+        assertEquals("modern-saas-dark", fullActionDecoded.payload?.themeId)
+        assertEquals("dark", fullActionDecoded.payload?.colorScheme)
+        assertEquals(false, fullActionDecoded.payload?.wantsNativeBlur)
+        assertEquals(48, fullActionDecoded.payload?.cornerRadiusPx)
     }
 }

@@ -5,6 +5,7 @@ import {
   type BridgeOptions,
   type ContainerAction,
   useBridge,
+  useContainerThemeSync,
 } from '@pochita/bridge';
 import {
   AppShell,
@@ -24,7 +25,6 @@ import {
   type ColorMode,
   type LogEntry,
   type ThemeId,
-  type ThemeSyncPayload,
 } from '@pochita/ui';
 import { cn } from '@pochita/ui';
 import {
@@ -49,26 +49,23 @@ function PanelWorkbench({
   eventsLog,
   onAppendLog,
   onClearLogs,
-  onCornerRadiusDpChange,
-  nativeBlurEnabled,
-  onNativeBlurEnabledChange,
+  onHydrated,
 }: {
   eventsLog: readonly LogEntry[];
   onAppendLog: (level: LogEntry['level'], message: string) => void;
   onClearLogs: () => void;
-  onCornerRadiusDpChange: (dp: number) => void;
-  nativeBlurEnabled: boolean;
-  onNativeBlurEnabledChange: (enabled: boolean) => void;
+  onHydrated: () => void;
 }) {
   const bridge = useBridge();
   const { pushToast } = useToast();
-  const { themeId, colorMode, setThemeId, setColorMode } = useTheme();
+  const { setThemeId, setColorMode } = useTheme();
 
   const [status, setStatus] = useState<DaemonStatus | null>(null);
   const [lastPingMs, setLastPingMs] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [imeText, setImeText] = useState('');
   const [imeFocused, setImeFocused] = useState(false);
+  const [nativeBlurEnabled, setNativeBlurEnabled] = useState(true);
 
   const isNativeHost = bridge.env === 'host';
 
@@ -92,10 +89,11 @@ function PanelWorkbench({
         const cfg = normalizeConfig(res as Partial<SideveilConfig> | null);
         setThemeId(cfg.panel.themeId);
         setColorMode(cfg.panel.colorMode);
-        onNativeBlurEnabledChange(cfg.panel.nativeBlurEnabled);
-        onCornerRadiusDpChange(cfg.panel.cornerRadiusDp);
+        setNativeBlurEnabled(cfg.panel.nativeBlurEnabled);
       } catch (err) {
         onAppendLog('warn', `config.get failed: ${err instanceof Error ? err.message : String(err)}`);
+      } finally {
+        onHydrated();
       }
     };
     void loadDaemonConfig();
@@ -122,8 +120,8 @@ function PanelWorkbench({
       const cfg = normalizeConfig(p.config);
       setThemeId(cfg.panel.themeId);
       setColorMode(cfg.panel.colorMode);
-      onNativeBlurEnabledChange(cfg.panel.nativeBlurEnabled);
-      onCornerRadiusDpChange(cfg.panel.cornerRadiusDp);
+      setNativeBlurEnabled(cfg.panel.nativeBlurEnabled);
+      onHydrated();
       if (typeof p.foregroundPackage === 'string') {
         setStatus((prev) =>
           prev
@@ -154,8 +152,7 @@ function PanelWorkbench({
   }, [
     bridge,
     onAppendLog,
-    onCornerRadiusDpChange,
-    onNativeBlurEnabledChange,
+    onHydrated,
     refreshStatus,
     setColorMode,
     setThemeId,
@@ -181,12 +178,9 @@ function PanelWorkbench({
     }
   };
 
-  const handleThemePatch = (nextThemeId: ThemeId, nextColorMode: ColorMode) => {
+  const handleThemePatch = (patch: { themeId?: ThemeId; colorMode?: ColorMode }) => {
     void bridge
-      .invoke(SIDEVEIL_METHODS.CONFIG_PATCH_APPEARANCE, {
-        themeId: nextThemeId,
-        colorMode: nextColorMode,
-      })
+      .invoke(SIDEVEIL_METHODS.CONFIG_PATCH_APPEARANCE, patch)
       .catch((err) => {
         onAppendLog(
           'warn',
@@ -196,11 +190,9 @@ function PanelWorkbench({
   };
 
   const handleToggleBlur = (checked: boolean) => {
-    onNativeBlurEnabledChange(checked);
+    setNativeBlurEnabled(checked);
     void bridge
       .invoke(SIDEVEIL_METHODS.CONFIG_PATCH_APPEARANCE, {
-        themeId,
-        colorMode,
         nativeBlurEnabled: checked,
       })
       .catch((err) => {
@@ -305,8 +297,8 @@ function PanelWorkbench({
           <Card className="space-y-2.5 p-3">
             <ThemeSwitcher
               compact
-              onThemeChange={(nextTheme) => handleThemePatch(nextTheme, colorMode)}
-              onColorModeChange={(nextMode) => handleThemePatch(themeId, nextMode)}
+              onThemeChange={(nextTheme) => handleThemePatch({ themeId: nextTheme })}
+              onColorModeChange={(nextMode) => handleThemePatch({ colorMode: nextMode })}
             />
             <div className="pochita-divider" />
             <SettingRow
@@ -369,48 +361,16 @@ function PanelThemedContainer({
   onAppendLog: (level: LogEntry['level'], message: string) => void;
   onClearLogs: () => void;
 }) {
-  const bridge = useBridge();
-  const [cornerRadiusDp, setCornerRadiusDp] = useState<number>(22);
-  const [nativeBlurEnabled, setNativeBlurEnabled] = useState<boolean>(true);
-  const lastSyncKeyRef = useRef<string>('');
-  const lastThemePayloadRef = useRef<ThemeSyncPayload | null>(null);
-
-  const handleThemeSync = useCallback(
-    (payload: ThemeSyncPayload) => {
-      lastThemePayloadRef.current = payload;
-      const cornerRadiusPx = Math.round(cornerRadiusDp * (window.devicePixelRatio || 1));
-      const syncPayload: ThemeSyncPayload = {
-        ...payload,
-        wantsNativeBlur: nativeBlurEnabled && payload.wantsNativeBlur,
-        cornerRadiusPx,
-      };
-      const key = `${syncPayload.themeId}:${syncPayload.colorScheme}:${syncPayload.wantsNativeBlur}:${syncPayload.cornerRadiusPx}`;
-      if (lastSyncKeyRef.current === key) return;
-      lastSyncKeyRef.current = key;
-      void bridge.sendContainerAction({ type: 'syncTheme', payload: syncPayload });
-    },
-    [bridge, cornerRadiusDp, nativeBlurEnabled],
-  );
-
-  useEffect(() => {
-    if (!lastThemePayloadRef.current) return;
-    const cornerRadiusPx = Math.round(cornerRadiusDp * (window.devicePixelRatio || 1));
-    const syncPayload: ThemeSyncPayload = {
-      ...lastThemePayloadRef.current,
-      wantsNativeBlur: nativeBlurEnabled && lastThemePayloadRef.current.wantsNativeBlur,
-      cornerRadiusPx,
-    };
-    const key = `${syncPayload.themeId}:${syncPayload.colorScheme}:${syncPayload.wantsNativeBlur}:${syncPayload.cornerRadiusPx}`;
-    if (lastSyncKeyRef.current === key) return;
-    lastSyncKeyRef.current = key;
-    void bridge.sendContainerAction({ type: 'syncTheme', payload: syncPayload });
-  }, [bridge, cornerRadiusDp, nativeBlurEnabled]);
+  const [hydrated, setHydrated] = useState(false);
+  const markHydrated = useCallback(() => setHydrated(true), []);
+  const handleThemeSync = useContainerThemeSync({ includeAppearanceHints: false });
 
   return (
     <ThemeProvider
       defaultTheme="coloros-glass"
       defaultColorMode="system"
       defaultSurfaceMode="native-glass"
+      syncEnabled={hydrated}
       onThemeSync={handleThemeSync}
     >
       <ToastProvider>
@@ -418,9 +378,7 @@ function PanelThemedContainer({
           eventsLog={eventsLog}
           onAppendLog={onAppendLog}
           onClearLogs={onClearLogs}
-          onCornerRadiusDpChange={setCornerRadiusDp}
-          nativeBlurEnabled={nativeBlurEnabled}
-          onNativeBlurEnabledChange={setNativeBlurEnabled}
+          onHydrated={markHydrated}
         />
       </ToastProvider>
     </ThemeProvider>

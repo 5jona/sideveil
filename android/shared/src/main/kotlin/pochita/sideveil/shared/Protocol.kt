@@ -138,12 +138,18 @@ data class PanelCommandPayload(
     val command: PanelCommand,
 )
 
+/**
+ * Payload carried by `syncTheme` container actions.
+ *
+ * [wantsNativeBlur] and [cornerRadiusPx] are optional advisory fields sent by standalone or
+ * external web clients, and are omitted (null) when the host or daemon is authoritative.
+ */
 @Serializable
 data class ContainerThemePayload(
     val themeId: String = "coloros-glass",
     val colorScheme: String = "dark",
-    val wantsNativeBlur: Boolean = true,
-    val cornerRadiusPx: Int = 56,
+    val wantsNativeBlur: Boolean? = null,
+    val cornerRadiusPx: Int? = null,
 )
 
 @Serializable
