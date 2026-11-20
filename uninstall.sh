@@ -16,8 +16,9 @@ terminate_pid() {
 }
 
 for pidfile in \
-    /data/adb/sideveil/run/hostwatch.pid \
     /data/adb/sideveil/run/supervisor.pid \
+    /data/adb/sideveil/run/sideveild.pid \
+    /data/adb/sideveil/run/hostwatch.pid \
     /data/system/sideveil/run/hostwatch.pid \
     /data/system/sideveil/run/supervisor.pid; do
     if [ -f "$pidfile" ] && [ ! -L "$pidfile" ]; then
@@ -26,13 +27,12 @@ for pidfile in \
     fi
 done
 
-if [ -f /data/system/sideveil/run/daemon.env ] && [ ! -L /data/system/sideveil/run/daemon.env ]; then
-    D_PID=$(sed -n 's/^SIDEVEIL_PID=//p' /data/system/sideveil/run/daemon.env 2>/dev/null || true)
-    terminate_pid "$D_PID"
-fi
-
-pkill -TERM -x "sideveil-daemon" 2>/dev/null || true
+pkill -l TERM -x "sideveild" 2>/dev/null || true
+pkill -l TERM -U 1000 -f "sideveil-sensor|pochita\.sideveil\.sensor\.SensorMain" 2>/dev/null || true
+pkill -l TERM -U 1000 -f "sideveil-daemon|pochita\.sideveil\.daemon\.DaemonMain" 2>/dev/null || true
 sleep 0.5
-pkill -9 -x "sideveil-daemon" 2>/dev/null || true
+pkill -l KILL -x "sideveild" 2>/dev/null || true
+pkill -l KILL -U 1000 -f "sideveil-sensor|pochita\.sideveil\.sensor\.SensorMain" 2>/dev/null || true
+pkill -l KILL -U 1000 -f "sideveil-daemon|pochita\.sideveil\.daemon\.DaemonMain" 2>/dev/null || true
 pm uninstall pochita.sideveil.host >/dev/null 2>&1 || pm uninstall-system-updates pochita.sideveil.host >/dev/null 2>&1 || true
 rm -rf /data/system/sideveil /data/adb/sideveil

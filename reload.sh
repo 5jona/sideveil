@@ -52,18 +52,20 @@ adb -s "${TARGET_SERIAL}" shell "su -c '
              ${REMOTE_MOD_DIR}/system/etc/permissions \
              ${REMOTE_MOD_DIR}/system/etc/sysconfig \
              ${REMOTE_STATE_DIR}/run \
+             ${REMOTE_STATE_DIR}/plugins \
+             ${REMOTE_STATE_DIR}/data \
              ${REMOTE_ROOT_RUN_DIR}
-    chown 0:1000 ${REMOTE_STATE_DIR}
+    chown 0:1000 ${REMOTE_STATE_DIR} ${REMOTE_STATE_DIR}/run ${REMOTE_STATE_DIR}/plugins
     chmod 1775 ${REMOTE_STATE_DIR}
-    chown 1000:1000 ${REMOTE_STATE_DIR}/run
-    chmod 0700 ${REMOTE_STATE_DIR}/run
-    chown 0:0 /data/adb/${MODULE_ID} ${REMOTE_ROOT_RUN_DIR}
-    chmod 0700 /data/adb/${MODULE_ID} ${REMOTE_ROOT_RUN_DIR}
+    chmod 0711 ${REMOTE_STATE_DIR}/run
+    chmod 0755 ${REMOTE_STATE_DIR}/plugins
+    chown 0:0 ${REMOTE_STATE_DIR}/data /data/adb/${MODULE_ID} ${REMOTE_ROOT_RUN_DIR}
+    chmod 0700 ${REMOTE_STATE_DIR}/data /data/adb/${MODULE_ID} ${REMOTE_ROOT_RUN_DIR}
 '"
 
-echo "[*] Stopping running supervisor, daemon, and host service..."
+echo "[*] Stopping running supervisor, sideveild, sensor, and host service..."
 adb -s "${TARGET_SERIAL}" shell "su -c '
-    for pidfile in ${REMOTE_ROOT_RUN_DIR}/hostwatch.pid ${REMOTE_ROOT_RUN_DIR}/supervisor.pid ${REMOTE_STATE_DIR}/run/hostwatch.pid ${REMOTE_STATE_DIR}/run/supervisor.pid; do
+    for pidfile in ${REMOTE_ROOT_RUN_DIR}/supervisor.pid ${REMOTE_ROOT_RUN_DIR}/sideveild.pid ${REMOTE_ROOT_RUN_DIR}/hostwatch.pid ${REMOTE_STATE_DIR}/run/hostwatch.pid ${REMOTE_STATE_DIR}/run/supervisor.pid; do
         if [ -f \"\$pidfile\" ] && [ ! -L \"\$pidfile\" ]; then
             P=\$(cat \"\$pidfile\" 2>/dev/null || true)
             if [ -n \"\$P\" ]; then
@@ -73,18 +75,15 @@ adb -s "${TARGET_SERIAL}" shell "su -c '
             fi
         fi
     done
-    if [ -f ${REMOTE_STATE_DIR}/run/daemon.env ] && [ ! -L ${REMOTE_STATE_DIR}/run/daemon.env ]; then
-        D_PID=\$(sed -n \"s/^SIDEVEIL_PID=//p\" ${REMOTE_STATE_DIR}/run/daemon.env 2>/dev/null || true)
-        if [ -n \"\$D_PID\" ]; then
-            kill -TERM \"\$D_PID\" 2>/dev/null || true
-            sleep 0.3
-            kill -9 \"\$D_PID\" 2>/dev/null || true
-        fi
-    fi
-    pkill -TERM -x \"sideveil-daemon\" 2>/dev/null || true
+    pkill -l TERM -x \"sideveild\" 2>/dev/null || true
+    pkill -l TERM -U 1000 -f \"sideveil-sensor|pochita\.sideveil\.sensor\.SensorMain\" 2>/dev/null || true
+    pkill -l TERM -U 1000 -f \"sideveil-daemon|pochita\.sideveil\.daemon\.DaemonMain\" 2>/dev/null || true
     sleep 0.3
-    pkill -9 -x \"sideveil-daemon\" 2>/dev/null || true
+    pkill -l KILL -x \"sideveild\" 2>/dev/null || true
+    pkill -l KILL -U 1000 -f \"sideveil-sensor|pochita\.sideveil\.sensor\.SensorMain\" 2>/dev/null || true
+    pkill -l KILL -U 1000 -f \"sideveil-daemon|pochita\.sideveil\.daemon\.DaemonMain\" 2>/dev/null || true
     am force-stop pochita.sideveil.host 2>/dev/null || true
+    rm -f ${REMOTE_STATE_DIR}/run/hub.sock ${REMOTE_STATE_DIR}/run/app.sock ${REMOTE_STATE_DIR}/run/daemon.env ${REMOTE_STATE_DIR}/run/hostwatch.pid ${REMOTE_STATE_DIR}/run/supervisor.pid
 '"
 
 echo "[*] Pushing build outputs to staging directory..."
@@ -94,9 +93,9 @@ adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/service.sh" "${STAGE_DIR}/service.
 adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/post-fs-data.sh" "${STAGE_DIR}/post-fs-data.sh"
 adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/customize.sh" "${STAGE_DIR}/customize.sh"
 adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/uninstall.sh" "${STAGE_DIR}/uninstall.sh"
+adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/bin/sideveild" "${STAGE_DIR}/sideveild"
 adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/bin/sideveil-ctl" "${STAGE_DIR}/sideveil-ctl"
-adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/bin/sideveil-common.sh" "${STAGE_DIR}/sideveil-common.sh"
-adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/bin/sideveil-daemon.dex" "${STAGE_DIR}/sideveil-daemon.dex"
+adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/bin/sideveil-sensor.dex" "${STAGE_DIR}/sideveil-sensor.dex"
 adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/system/priv-app/SideveilHost/SideveilHost.apk" "${STAGE_DIR}/SideveilHost.apk"
 adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/system/etc/permissions/privapp-permissions-pochita-sideveil.xml" "${STAGE_DIR}/privapp.xml"
 adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/system/etc/sysconfig/sideveil-allowlist.xml" "${STAGE_DIR}/sysconfig.xml"
@@ -113,9 +112,10 @@ adb -s "${TARGET_SERIAL}" shell "su -c '
     cp ${STAGE_DIR}/post-fs-data.sh ${REMOTE_MOD_DIR}/post-fs-data.sh
     cp ${STAGE_DIR}/customize.sh ${REMOTE_MOD_DIR}/customize.sh
     cp ${STAGE_DIR}/uninstall.sh ${REMOTE_MOD_DIR}/uninstall.sh
+    cp ${STAGE_DIR}/sideveild ${REMOTE_MOD_DIR}/bin/sideveild
     cp ${STAGE_DIR}/sideveil-ctl ${REMOTE_MOD_DIR}/bin/sideveil-ctl
-    cp ${STAGE_DIR}/sideveil-common.sh ${REMOTE_MOD_DIR}/bin/sideveil-common.sh
-    cp ${STAGE_DIR}/sideveil-daemon.dex ${REMOTE_MOD_DIR}/bin/sideveil-daemon.dex
+    cp ${STAGE_DIR}/sideveil-sensor.dex ${REMOTE_MOD_DIR}/bin/sideveil-sensor.dex
+    rm -f ${REMOTE_MOD_DIR}/bin/sideveil-common.sh ${REMOTE_MOD_DIR}/bin/sideveil-daemon.dex ${REMOTE_STATE_DIR}/sideveil-daemon.dex
     cp ${STAGE_DIR}/SideveilHost.apk ${REMOTE_MOD_DIR}/system/priv-app/SideveilHost/SideveilHost.apk
     cp ${STAGE_DIR}/privapp.xml ${REMOTE_MOD_DIR}/system/etc/permissions/privapp-permissions-pochita-sideveil.xml
     cp ${STAGE_DIR}/sysconfig.xml ${REMOTE_MOD_DIR}/system/etc/sysconfig/sideveil-allowlist.xml
@@ -124,12 +124,12 @@ adb -s "${TARGET_SERIAL}" shell "su -c '
 
     if [ \"${RESET_CONFIG}\" -eq 1 ] || [ ! -f ${REMOTE_STATE_DIR}/config.json ]; then
         cp ${STAGE_DIR}/config.json ${REMOTE_STATE_DIR}/config.json
-        chown 1000:1000 ${REMOTE_STATE_DIR}/config.json
+        chown 0:1000 ${REMOTE_STATE_DIR}/config.json
         chmod 0644 ${REMOTE_STATE_DIR}/config.json
     fi
 
-    chmod 0755 ${REMOTE_MOD_DIR}/service.sh ${REMOTE_MOD_DIR}/post-fs-data.sh ${REMOTE_MOD_DIR}/customize.sh ${REMOTE_MOD_DIR}/uninstall.sh ${REMOTE_MOD_DIR}/bin/sideveil-ctl
-    chmod 0644 ${REMOTE_MOD_DIR}/module.prop ${REMOTE_MOD_DIR}/config.json ${REMOTE_MOD_DIR}/bin/sideveil-common.sh ${REMOTE_MOD_DIR}/bin/sideveil-daemon.dex ${REMOTE_MOD_DIR}/system/priv-app/SideveilHost/SideveilHost.apk ${REMOTE_MOD_DIR}/system/etc/permissions/privapp-permissions-pochita-sideveil.xml ${REMOTE_MOD_DIR}/system/etc/sysconfig/sideveil-allowlist.xml
+    chmod 0755 ${REMOTE_MOD_DIR}/service.sh ${REMOTE_MOD_DIR}/post-fs-data.sh ${REMOTE_MOD_DIR}/customize.sh ${REMOTE_MOD_DIR}/uninstall.sh ${REMOTE_MOD_DIR}/bin/sideveild ${REMOTE_MOD_DIR}/bin/sideveil-ctl
+    chmod 0644 ${REMOTE_MOD_DIR}/module.prop ${REMOTE_MOD_DIR}/config.json ${REMOTE_MOD_DIR}/bin/sideveil-sensor.dex ${REMOTE_MOD_DIR}/system/priv-app/SideveilHost/SideveilHost.apk ${REMOTE_MOD_DIR}/system/etc/permissions/privapp-permissions-pochita-sideveil.xml ${REMOTE_MOD_DIR}/system/etc/sysconfig/sideveil-allowlist.xml
     find ${REMOTE_MOD_DIR}/webroot -type d -exec chmod 0755 {} +
     find ${REMOTE_MOD_DIR}/webroot -type f -exec chmod 0644 {} +
     rm -rf ${STAGE_DIR}

@@ -3,11 +3,14 @@ android-sdk = "23.0"
 java = "25"
 pnpm = "12.22.0"
 
+[env]
+CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER = "{{config_root}}/hub/scripts/aarch64-android-linker.sh"
+
 [task_config]
 dir = "{{config_root}}"
 
 [tasks.build]
-description = "Build WebUI, daemon DEX, host APK, and KernelSU ZIP archive"
+description = "Build Rust hub binaries, WebUI bundles, sensor DEX, host APK, and KernelSU ZIP archive"
 run = "bash build.sh"
 
 [tasks.reload]
@@ -15,20 +18,44 @@ description = "Build and hot-reload Sideveil onto connected Android device via A
 run = "bash reload.sh"
 
 [tasks."webui:check"]
-description = "Typecheck, test, and build Control Plane and Panel WebUIs"
+description = "Lint, typecheck, test, and build Control Plane and Panel WebUIs"
 dir = "{{config_root}}/webui"
-run = "pnpm typecheck && pnpm test && pnpm build"
+run = "pnpm check"
+
+[tasks."webui:format"]
+description = "Format and auto-fix WebUI files with Biome"
+dir = "{{config_root}}/webui"
+run = "pnpm format"
 
 [tasks."android:check"]
-description = "Run Spotless, JVM unit tests, DEX build, and release APK build"
+description = "Run Spotless, Detekt, Android Lint, JVM unit tests, sensor DEX build, and release APK build"
 dir = "{{config_root}}/android"
-run = "./gradlew spotlessCheck :shared:test :daemon:test :host-app:testDebugUnitTest :daemon:buildDex :host-app:assembleRelease"
+run = "./gradlew spotlessCheck detekt :host-app:lintDebug :protocol:test :sensor:test :host-app:testDebugUnitTest :sensor:buildDex :host-app:assembleRelease"
 
 [tasks."android:format"]
 description = "Format Kotlin, Gradle, and config files with Spotless"
 dir = "{{config_root}}/android"
 run = "./gradlew spotlessApply"
 
+[tasks."hub:check"]
+description = "Run Rust fmt check, clippy (-D warnings), and workspace unit tests"
+dir = "{{config_root}}/hub"
+run = "cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace"
+
+[tasks."hub:format"]
+description = "Format Rust workspace with rustfmt"
+dir = "{{config_root}}/hub"
+run = "cargo fmt --all"
+
+[tasks."hub:build"]
+description = "Cross-compile Rust hub binaries for aarch64-linux-android"
+dir = "{{config_root}}/hub"
+run = "cargo build --release --target aarch64-linux-android"
+
+[tasks.check]
+description = "Run all Rust, WebUI, and Android quality gates"
+run = "mise run hub:check && mise run webui:check && mise run android:check"
+
 [tasks.clean]
-description = "Clean Gradle and WebUI build outputs"
-run = "rm -rf out webroot bin/sideveil-daemon.dex system/priv-app/SideveilHost/SideveilHost.apk android/host-app/src/main/assets/panel && cd android && ./gradlew clean"
+description = "Clean Gradle, Rust, and WebUI build outputs"
+run = "rm -rf out webroot bin/sideveild bin/sideveil-ctl bin/sideveil-sensor.dex system/priv-app/SideveilHost/SideveilHost.apk android/host-app/src/main/assets/panel hub/target && cd android && ./gradlew clean"

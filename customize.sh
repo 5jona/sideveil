@@ -15,9 +15,9 @@ ui_print "- Setting module file permissions..."
 set_perm "$MODPATH/service.sh" 0 0 0755
 set_perm "$MODPATH/post-fs-data.sh" 0 0 0755
 set_perm "$MODPATH/uninstall.sh" 0 0 0755
+set_perm "$MODPATH/bin/sideveild" 0 0 0755
 set_perm "$MODPATH/bin/sideveil-ctl" 0 0 0755
-set_perm "$MODPATH/bin/sideveil-common.sh" 0 0 0644
-set_perm "$MODPATH/bin/sideveil-daemon.dex" 0 0 0644
+set_perm "$MODPATH/bin/sideveil-sensor.dex" 0 0 0644
 set_perm "$MODPATH/module.prop" 0 0 0644
 set_perm "$MODPATH/config.json" 0 0 0644
 
@@ -26,18 +26,20 @@ set_perm_recursive "$MODPATH/webroot" 0 0 0755 0644
 
 STATE_DIR="/data/system/sideveil"
 RUN_DIR="${STATE_DIR}/run"
+PLUGINS_DIR="${STATE_DIR}/plugins"
+DATA_DIR="${STATE_DIR}/data"
 ROOT_RUN_DIR="/data/adb/sideveil/run"
-mkdir -p "$STATE_DIR" "$RUN_DIR" "$ROOT_RUN_DIR"
-chown 0:1000 "$STATE_DIR"
+mkdir -p "$STATE_DIR" "$RUN_DIR" "$PLUGINS_DIR" "$DATA_DIR" "$ROOT_RUN_DIR"
+chown 0:1000 "$STATE_DIR" "$RUN_DIR" "$PLUGINS_DIR"
 chmod 1775 "$STATE_DIR"
-chown 1000:1000 "$RUN_DIR"
-chmod 0700 "$RUN_DIR"
-chown 0:0 "/data/adb/sideveil" "$ROOT_RUN_DIR"
-chmod 0700 "/data/adb/sideveil" "$ROOT_RUN_DIR"
+chmod 0711 "$RUN_DIR"
+chmod 0755 "$PLUGINS_DIR"
+chown 0:0 "$DATA_DIR" "/data/adb/sideveil" "$ROOT_RUN_DIR"
+chmod 0700 "$DATA_DIR" "/data/adb/sideveil" "$ROOT_RUN_DIR"
 
 if [ ! -f "${STATE_DIR}/config.json" ] && [ -f "${MODPATH}/config.json" ]; then
     cp "${MODPATH}/config.json" "${STATE_DIR}/config.json"
-    chown 1000:1000 "${STATE_DIR}/config.json"
+    chown 0:1000 "${STATE_DIR}/config.json"
     chmod 0644 "${STATE_DIR}/config.json"
     ui_print "- Seeded default config to ${STATE_DIR}/config.json"
 else
