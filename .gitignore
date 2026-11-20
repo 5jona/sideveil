@@ -6,20 +6,29 @@ out/
 *.zip
 *.tar.gz
 webroot/
+bin/sideveild
+bin/sideveil-ctl
+bin/sideveil-sensor.dex
 bin/sideveil-daemon.dex
 system/priv-app/SideveilHost/SideveilHost.apk
 android/host-app/src/main/assets/panel/
 
 # Gradle and Android build artifacts
 android/.gradle/
+android/*/.gradle/
 android/.kotlin/
-android/**/build/
+android/*/.kotlin/
+android/build/
+android/*/build/
 android/local.properties
 android/keystore.properties
 
 # WebUI dependencies and build artifacts
 webui/node_modules/
 webui/dist/
+
+# Rust workspace build artifacts
+hub/target/
 
 # Editor and OS files
 *.tmp

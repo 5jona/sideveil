@@ -1,0 +1,57 @@
+# Sideveil Detekt configuration (Detekt 2.x, builds upon default config).
+# Formatting is enforced exclusively by Spotless + ktlint.
+config:
+  validation: true
+  warningsAsErrors: true
+
+style:
+  MaxLineLength:
+    active: false
+  MagicNumber:
+    active: false
+  WildcardImport:
+    active: true
+  ReturnCount:
+    active: true
+    max: 5
+    excludeGuardClauses: true
+  ThrowsCount:
+    active: true
+    max: 4
+  FunctionOnlyReturningConstant:
+    active: true
+    ignoreAnnotated:
+      - JavascriptInterface
+
+empty-blocks:
+  EmptyFunctionBlock:
+    active: true
+    ignoreOverridden: true
+
+complexity:
+  TooManyFunctions:
+    active: true
+    allowedFunctionsPerFile: 25
+    allowedFunctionsPerClass: 25
+    allowedFunctionsPerObject: 25
+  LargeClass:
+    active: true
+    allowedLines: 400
+  LongMethod:
+    active: true
+    allowedLines: 80
+  CyclomaticComplexMethod:
+    active: true
+    allowedComplexity: 18
+  NestedBlockDepth:
+    active: true
+    allowedDepth: 5
+
+exceptions:
+  TooGenericExceptionCaught:
+    active: false
+  SwallowedException:
+    active: true
+    ignoredExceptionTypes:
+      - InterruptedException
+      - NumberFormatException
