@@ -109,7 +109,8 @@ async fn plugin_registry_assets_backend_rpc_and_acls_work_end_to_end() {
         "<h1>Beta Panel</h1>",
     );
 
-    // Plant a symlink inside alpha pointing outside the plugin root to verify escape blocking.
+    // Plant a sibling file outside web/ and a symlink inside web/ escaping the plugin root.
+    fs::write(plugins_dir.join("com.example.alpha/private.key"), "secret").unwrap();
     let outside_secret = dir.join("secret.txt");
     fs::write(&outside_secret, "top-secret").unwrap();
     symlink(
@@ -213,6 +214,15 @@ async fn plugin_registry_assets_backend_rpc_and_acls_work_end_to_end() {
     )
     .await;
     assert!(manifest_blocked.starts_with("HTTP/1.1 403"));
+
+    let sibling_blocked = http_get(
+        port,
+        "/plugins/com.example.alpha/private.key",
+        Some(tok),
+        None,
+    )
+    .await;
+    assert!(sibling_blocked.starts_with("HTTP/1.1 403"));
 
     let traversal_blocked = http_get(
         port,

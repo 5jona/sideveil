@@ -1,12 +1,12 @@
 //! Authenticated loopback HTTP static asset server for isolated plugin bundles (`GET /plugins/<id>/<path>`).
 
-use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use sideveil_protocol::plugin::validate_plugin_id;
+use tokio::fs;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 
@@ -66,12 +66,12 @@ pub async fn handle_http_asset(stream: TcpStream, state: Arc<HubState>) {
         return;
     };
 
-    let Ok(file_path) = resolve_asset_file(&plugin_root, raw_rel) else {
+    let Ok(file_path) = resolve_asset_file(&plugin_root, raw_rel).await else {
         let _ = write_error(&mut write_half, 403, "Forbidden").await;
         return;
     };
 
-    let Ok(meta) = fs::metadata(&file_path) else {
+    let Ok(meta) = fs::metadata(&file_path).await else {
         let _ = write_error(&mut write_half, 404, "Not Found").await;
         return;
     };
@@ -80,7 +80,7 @@ pub async fn handle_http_asset(stream: TcpStream, state: Arc<HubState>) {
         return;
     }
 
-    let Ok(bytes) = fs::read(&file_path) else {
+    let Ok(bytes) = fs::read(&file_path).await else {
         let _ = write_error(&mut write_half, 500, "Internal Server Error").await;
         return;
     };
@@ -158,15 +158,20 @@ async fn parse_http_headers(
     })
 }
 
-/// Resolves `raw_rel` inside `plugin_root`, rejecting `..`, manifest reads, and symlink escapes.
-pub fn resolve_asset_file(plugin_root: &Path, raw_rel: &str) -> Result<PathBuf, &'static str> {
+/// Resolves `raw_rel` strictly inside `<plugin_root>/web/`, rejecting `..`, hidden files,
+/// sibling files outside `web/`, and symlink escapes.
+pub async fn resolve_asset_file(
+    plugin_root: &Path,
+    raw_rel: &str,
+) -> Result<PathBuf, &'static str> {
     let decoded = percent_decode(raw_rel)?;
     let trimmed = decoded.trim_start_matches('/');
-    if trimmed.is_empty() || trimmed.contains('\\') || trimmed == "manifest.json" {
+    if trimmed.is_empty() || trimmed.contains('\\') {
         return Err("invalid asset path");
     }
 
     let mut clean_rel = PathBuf::new();
+    let mut first_segment: Option<String> = None;
     for comp in Path::new(trimmed).components() {
         match comp {
             Component::Normal(seg) => {
@@ -174,16 +179,30 @@ pub fn resolve_asset_file(plugin_root: &Path, raw_rel: &str) -> Result<PathBuf, 
                 if s.starts_with('.') {
                     return Err("hidden files are forbidden");
                 }
+                if first_segment.is_none() {
+                    first_segment = Some(s.into_owned());
+                }
                 clean_rel.push(seg);
             }
             _ => return Err("directory traversal forbidden"),
         }
     }
 
-    let canonical_root = fs::canonicalize(plugin_root).map_err(|_| "plugin root missing")?;
-    let candidate = canonical_root.join(&clean_rel);
-    let canonical_target = fs::canonicalize(&candidate).map_err(|_| "asset missing")?;
-    if !canonical_target.starts_with(&canonical_root) {
+    if first_segment.as_deref() != Some("web") {
+        return Err("assets must reside under web/");
+    }
+
+    let canonical_web_root = fs::canonicalize(plugin_root.join("web"))
+        .await
+        .map_err(|_| "plugin web root missing")?;
+    let rel_inside_web = clean_rel
+        .strip_prefix("web")
+        .map_err(|_| "invalid web asset path")?;
+    let candidate = canonical_web_root.join(rel_inside_web);
+    let canonical_target = fs::canonicalize(&candidate)
+        .await
+        .map_err(|_| "asset missing")?;
+    if !canonical_target.starts_with(&canonical_web_root) {
         return Err("symlink escape forbidden");
     }
     Ok(canonical_target)
