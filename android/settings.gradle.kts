@@ -30,4 +30,4 @@ plugins {
 }
 
 rootProject.name = "sideveil"
-include(":hidden-stubs", ":shared", ":daemon", ":host-app")
+include(":hidden-stubs", ":protocol", ":sensor", ":host-app")

@@ -11,9 +11,9 @@ import android.view.View
 import android.view.WindowInsets
 import android.view.WindowManager
 import android.widget.FrameLayout
-import pochita.sideveil.shared.EdgeConfig
-import pochita.sideveil.shared.EdgeSide
-import pochita.sideveil.shared.PanelState
+import pochita.sideveil.protocol.EdgeConfig
+import pochita.sideveil.protocol.EdgeSide
+import pochita.sideveil.protocol.PanelState
 
 /**
  * Click-through TYPE_APPLICATION_OVERLAY capsule indicator positioned flush along the

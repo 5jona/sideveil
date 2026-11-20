@@ -4,6 +4,7 @@ import java.util.Properties
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.detekt)
 }
 
 val keystoreProps =
@@ -93,6 +94,12 @@ android {
         includeInBundle = false
     }
 
+    lint {
+        abortOnError = true
+        warningsAsErrors = true
+        checkDependencies = false
+    }
+
     packaging {
         resources {
             excludes +=
@@ -112,7 +119,7 @@ kotlin {
 }
 
 dependencies {
-    implementation(project(":shared"))
+    implementation(project(":protocol"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.dynamicanimation)
     implementation(libs.androidx.lifecycle.runtime.ktx)

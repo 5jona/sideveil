@@ -12,13 +12,13 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
-import pochita.sideveil.shared.HostEventEnvelope
-import pochita.sideveil.shared.RpcError
-import pochita.sideveil.shared.RpcRequest
-import pochita.sideveil.shared.RpcResponse
-import pochita.sideveil.shared.SideveilWireJson
-import pochita.sideveil.shared.WebSocketCodec
-import pochita.sideveil.shared.WsOpcode
+import pochita.sideveil.protocol.HostEventEnvelope
+import pochita.sideveil.protocol.RpcError
+import pochita.sideveil.protocol.RpcRequest
+import pochita.sideveil.protocol.RpcResponse
+import pochita.sideveil.protocol.SideveilWireJson
+import pochita.sideveil.protocol.WebSocketCodec
+import pochita.sideveil.protocol.WsOpcode
 import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -50,6 +50,7 @@ class DaemonClient(
         )
     private val pendingRpcs = ConcurrentHashMap<String, CompletableDeferred<RpcResponse>>()
     private val generationCounter = AtomicLong(0L)
+    private val rpcSeq = AtomicLong(0L)
 
     @Volatile
     private var port: Int = 0
@@ -66,6 +67,12 @@ class DaemonClient(
     private var connectionJob: Job? = null
 
     fun isConnected(): Boolean = activeSocket?.let { !it.isClosed && it.isConnected } == true
+
+    fun currentEndpoint(): Pair<Int, String>? {
+        val currentPort = port
+        val currentToken = token
+        return if (currentPort in 1..65535 && currentToken.isNotBlank()) currentPort to currentToken else null
+    }
 
     @Synchronized
     fun updateEndpoint(
@@ -92,31 +99,27 @@ class DaemonClient(
         sendTextFrame(wire)
     }
 
-    suspend fun forwardRpc(rawRequestJson: String): RpcResponse {
-        val req =
-            runCatching { SideveilWireJson.decodeFromString<RpcRequest>(rawRequestJson) }
-                .getOrElse { err ->
-                    return RpcResponse(id = "0", error = RpcError(-32700, "Invalid RPC payload: ${err.message}"))
-                }
-
+    suspend fun forwardRpc(req: RpcRequest): RpcResponse {
         if (!isConnected()) {
             return RpcResponse(id = req.id, error = RpcError(-32001, "Daemon WebSocket disconnected"))
         }
 
+        val wireId = "h${rpcSeq.incrementAndGet()}_${req.id}"
+        val wireJson = SideveilWireJson.encodeToString(req.copy(id = wireId))
         val deferred = CompletableDeferred<RpcResponse>()
-        pendingRpcs[req.id] = deferred
+        pendingRpcs[wireId] = deferred
 
         return try {
-            if (!sendTextFrame(rawRequestJson)) {
+            if (!sendTextFrame(wireJson)) {
                 RpcResponse(id = req.id, error = RpcError(-32001, "Failed to transmit RPC to daemon"))
             } else {
-                withTimeout(8_000L) { deferred.await() }
+                withTimeout(8_000L) { deferred.await() }.copy(id = req.id)
             }
         } catch (t: Throwable) {
             if (t is CancellationException) throw t
             RpcResponse(id = req.id, error = RpcError(-32002, t.message ?: "RPC timed out"))
         } finally {
-            pendingRpcs.remove(req.id)
+            pendingRpcs.remove(wireId)
         }
     }
 
@@ -180,7 +183,7 @@ class DaemonClient(
                         }
 
                         WsOpcode.PONG -> {
-                            Unit
+                            // Heartbeat pong acknowledged.
                         }
 
                         WsOpcode.BINARY -> {

@@ -5,6 +5,7 @@ androidxDynamicAnimation = "1.1.0"
 androidxLifecycle = "2.11.0"
 androidxWebkit = "1.14.0"
 coroutines = "1.10.2"
+detekt = "2.0.0-alpha.6"
 junit = "4.13.2"
 kotlin = "2.4.20"
 kotlinxSerialization = "1.10.0"
@@ -25,6 +26,7 @@ kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serializa
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "androidGradlePlugin" }
+detekt = { id = "dev.detekt", version.ref = "detekt" }
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }

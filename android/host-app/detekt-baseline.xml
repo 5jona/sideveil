@@ -1,0 +1,17 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>ComplexCondition:DaemonClient.kt:DaemonClient$scope.isActive &amp;&amp; generation == generationCounter.get() &amp;&amp; port &gt; 0 &amp;&amp; token.isNotEmpty()</ID>
+    <ID>ComplexCondition:SidebarPanelWindow.kt:SidebarPanelWindow$isVisible &amp;&amp; panelConfig.nativeBlurEnabled &amp;&amp; systemBlurSupported &amp;&amp; panelConfig.blurRadiusPx &gt; 0</ID>
+    <ID>ComplexCondition:SidebarPanelWindow.kt:SidebarPanelWindow$lp.x != xPx || lp.flags != nextFlags || lp.width != cachedWidthPx || lp.height != cachedHeightPx</ID>
+    <ID>CyclomaticComplexMethod:DaemonClient.kt:DaemonClient$private suspend fun connectLoop</ID>
+    <ID>CyclomaticComplexMethod:GlassBackdropDrawable.kt:GlassOpticalPalette.Companion$fun from: GlassOpticalPalette</ID>
+    <ID>CyclomaticComplexMethod:HostService.kt:HostService$private fun dispatchDaemonEvent</ID>
+    <ID>LongMethod:DaemonClient.kt:DaemonClient$private suspend fun connectLoop</ID>
+    <ID>LongMethod:GlassBackdropDrawable.kt:GlassOpticalPalette.Companion$fun from: GlassOpticalPalette</ID>
+    <ID>LongMethod:HostService.kt:HostService$override fun onCreate</ID>
+    <ID>LoopWithTooManyJumpStatements:DaemonClient.kt:DaemonClient$while</ID>
+    <ID>TooManyFunctions:SidebarPanelWindow.kt:SidebarPanelWindow</ID>
+  </CurrentIssues>
+</SmellBaseline>

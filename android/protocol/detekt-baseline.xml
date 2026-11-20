@@ -1,0 +1,10 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>CyclomaticComplexMethod:WebSocketCodec.kt:WebSocketCodec$fun readFrame: WsFrame?</ID>
+    <ID>CyclomaticComplexMethod:WebSocketCodec.kt:WebSocketCodec$fun readHttpHeaderBlock: HttpHeaderBlock?</ID>
+    <ID>LongMethod:WebSocketCodec.kt:WebSocketCodec$fun readFrame: WsFrame?</ID>
+    <ID>ThrowsCount:WebSocketCodec.kt:WebSocketCodec$fun readFrame: WsFrame?</ID>
+  </CurrentIssues>
+</SmellBaseline>

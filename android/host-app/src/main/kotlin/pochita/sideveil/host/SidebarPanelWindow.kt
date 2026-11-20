@@ -3,7 +3,6 @@ package pochita.sideveil.host
 import android.annotation.SuppressLint
 import android.app.Dialog
 import android.content.Context
-import android.content.res.Configuration
 import android.graphics.PixelFormat
 import android.util.Log
 import android.view.ContextThemeWrapper
@@ -14,41 +13,37 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
+import android.webkit.WebView
 import android.widget.FrameLayout
-import pochita.sideveil.shared.EdgeSide
-import pochita.sideveil.shared.PanelConfig
-import pochita.sideveil.shared.PanelState
-import java.util.function.Consumer
+import pochita.sideveil.protocol.EdgeSide
+import pochita.sideveil.protocol.PanelConfig
+import pochita.sideveil.protocol.PanelState
+import pochita.sideveil.protocol.PluginSurfaceBackdrop
 
 /**
- * Warm-resident TYPE_APPLICATION_OVERLAY Dialog container hosting the preloaded panel
- * WebView over a two-layer rendering architecture: [BlurMaskDrawable] provides a zero-draw
- * round-rect outline on [android.view.Window] for hardware cross-window blur, while
- * [GlassBackdropDrawable] renders AGSL frosted-glass optics directly on [contentContainer].
+ * Warm-resident TYPE_APPLICATION_OVERLAY Dialog container hosting the active plugin
+ * WebView over a two-layer rendering architecture coordinated by [PanelBackdropController].
  */
 @SuppressLint("RtlHardcoded")
 class SidebarPanelWindow(
     private val context: Context,
     private val windowManager: WindowManager,
-    private val webBridge: PanelWebViewBridge,
     private val onPanelStateChanged: (PanelState) -> Unit,
+    private val onBackPressedIntercept: () -> Boolean = { false },
 ) {
     private val currentDensity: Float
         get() = context.resources.displayMetrics.density
     private val themedContext = ContextThemeWrapper(context, R.style.Theme_Sideveil_OverlayDialog)
-    private val backdropDrawable = GlassBackdropDrawable(currentDensity)
     private val springController = PanelSpringController()
 
+    private var activeWebView: WebView? = null
     private var currentState: PanelState = PanelState.CLOSED
     private var closingInProgress = false
     private var attached = false
     private var edgeSide = EdgeSide.RIGHT
+    private var railInsetDp = 0
     private var panelConfig = PanelConfig()
-    private var syncedThemeId = "coloros-glass"
-    private var syncedColorScheme = resolveSystemScheme()
-    private var systemBlurSupported = queryCrossWindowBlurEnabled()
-    private var lastAppliedBlurRadius = -1
-    private var lastAppliedCornerPx = -1f
+    private var pluginSizeOverride = PluginSizeOverride()
 
     private val contentContainer = FrameLayout(themedContext)
     private var cachedWidthPx: Int = dp(340f)
@@ -65,7 +60,9 @@ class SidebarPanelWindow(
                     event.action == KeyEvent.ACTION_UP &&
                     currentState == PanelState.OPEN
                 ) {
-                    close()
+                    if (!onBackPressedIntercept()) {
+                        close()
+                    }
                     return true
                 }
                 return super.dispatchKeyEvent(event)
@@ -80,24 +77,17 @@ class SidebarPanelWindow(
             }
         }
 
-    private val blurEnabledListener =
-        Consumer<Boolean> { enabled ->
-            if (systemBlurSupported != enabled) {
-                systemBlurSupported = enabled
-                applyPanelBackdrop()
-            }
-        }
+    private val backdropController =
+        PanelBackdropController(
+            context = context,
+            windowManager = windowManager,
+            contentContainer = contentContainer,
+            cornerRadiusProvider = ::cornerPx,
+            windowProvider = { dialog.window },
+        )
 
     init {
-        preloadHardwareRenderer()
-
-        contentContainer.background = backdropDrawable
-        contentContainer.clipToOutline = true
-        contentContainer.outlineProvider = GlassBackdropDrawable.createContentOutlineProvider { cornerPx() }
-        contentContainer.addView(
-            webBridge.webView,
-            FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT),
-        )
+        OverlayWindowFlags.preloadHardwareRenderer()
 
         dialog.setCanceledOnTouchOutside(true)
         dialog.setCancelable(true)
@@ -111,9 +101,7 @@ class SidebarPanelWindow(
         window.setFormat(PixelFormat.TRANSLUCENT)
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         window.decorView.setPadding(0, 0, 0, 0)
-        val initialCornerPx = cornerPx()
-        lastAppliedCornerPx = initialCornerPx
-        window.setBackgroundDrawable(BlurMaskDrawable(initialCornerPx))
+        backdropController.attachToWindow(window)
 
         val lp = window.attributes
         lp.title = "SideveilPanelHost"
@@ -128,11 +116,50 @@ class SidebarPanelWindow(
         window.attributes = lp
     }
 
-    fun isSystemBlurSupported(): Boolean = systemBlurSupported
+    fun isSystemBlurSupported(): Boolean = backdropController.systemBlurSupported
 
-    fun isDarkSurfaceActive(): Boolean = syncedColorScheme != "light"
+    fun isDarkSurfaceActive(): Boolean = backdropController.colorScheme != "light"
 
     fun getCurrentState(): PanelState = currentState
+
+    fun setContentWebView(webView: WebView) {
+        if (activeWebView === webView && webView.parent === contentContainer) {
+            return
+        }
+        (webView.parent as? ViewGroup)?.removeView(webView)
+        contentContainer.removeAllViews()
+        contentContainer.addView(
+            webView,
+            FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT),
+        )
+        activeWebView = webView
+        if (currentState == PanelState.OPEN && attached) {
+            webView.requestFocus()
+        }
+    }
+
+    fun setRailInsetDp(insetDp: Int) {
+        val clamped = insetDp.coerceIn(0, 80)
+        if (railInsetDp == clamped) return
+        railInsetDp = clamped
+        recomputePanelDimensions()
+        if (currentState == PanelState.OPEN && attached) {
+            applyOpenLayout(settled = true)
+        }
+    }
+
+    fun setPluginSizeOverride(override: PluginSizeOverride) {
+        if (pluginSizeOverride == override) return
+        pluginSizeOverride = override
+        recomputePanelDimensions()
+        if (currentState == PanelState.OPEN && attached) {
+            applyOpenLayout(settled = true)
+        }
+    }
+
+    fun setPluginBackdrop(backdrop: PluginSurfaceBackdrop) {
+        backdropController.setPluginBackdrop(backdrop)
+    }
 
     fun attachWarm() {
         if (attached) return
@@ -140,8 +167,8 @@ class SidebarPanelWindow(
             dialog.show()
             attached = true
             collapseToWarmInvisible()
-            registerBlurListener()
-            applyPanelBackdrop()
+            backdropController.registerBlurListener()
+            backdropController.apply()
         }.onFailure { err ->
             Log.e(TAG, "Failed to attach warm panel dialog overlay", err)
         }
@@ -149,12 +176,7 @@ class SidebarPanelWindow(
 
     fun onSystemConfigurationChanged() {
         recomputePanelDimensions()
-        backdropDrawable.updateDensity(currentDensity)
-        if (panelConfig.colorMode != "light" && panelConfig.colorMode != "dark") {
-            syncedColorScheme = resolveSystemScheme()
-        }
-        contentContainer.invalidateOutline()
-        applyPanelBackdrop()
+        backdropController.onSystemConfigurationChanged()
         if (currentState == PanelState.OPEN && attached) {
             applyOpenLayout(settled = true)
         }
@@ -166,16 +188,8 @@ class SidebarPanelWindow(
     ) {
         edgeSide = side
         panelConfig = config
-        syncedThemeId = config.themeId
-        syncedColorScheme =
-            if (config.colorMode == "light" || config.colorMode == "dark") {
-                config.colorMode
-            } else {
-                resolveSystemScheme()
-            }
         recomputePanelDimensions()
-        contentContainer.invalidateOutline()
-        applyPanelBackdrop()
+        backdropController.updateConfig(config)
         if (currentState == PanelState.OPEN && attached) {
             applyOpenLayout(settled = true)
         }
@@ -185,11 +199,7 @@ class SidebarPanelWindow(
         themeId: String,
         colorScheme: String,
     ) {
-        // Authoritative blur and corner radius come from SideveilConfig via config.updated.
-        syncedThemeId = themeId
-        syncedColorScheme = colorScheme
-        contentContainer.invalidateOutline()
-        applyPanelBackdrop()
+        backdropController.syncRuntimeAppearance(themeId, colorScheme)
     }
 
     fun onGestureStart() {
@@ -253,7 +263,7 @@ class SidebarPanelWindow(
                 }
             },
         )
-        webBridge.webView.requestFocus()
+        activeWebView?.requestFocus()
     }
 
     fun close(initialVelocityPx: Float = 0f) {
@@ -287,19 +297,20 @@ class SidebarPanelWindow(
 
     fun setImeFocused(focused: Boolean) {
         if (!attached || currentState == PanelState.CLOSED) return
+        val webView = activeWebView ?: return
         val imm = context.getSystemService(InputMethodManager::class.java)
         if (focused) {
             updateWindowFlags(focusable = true, allowOffscreen = false)
-            webBridge.webView.requestFocus()
-            imm?.showSoftInput(webBridge.webView, InputMethodManager.SHOW_IMPLICIT)
+            webView.requestFocus()
+            imm?.showSoftInput(webView, InputMethodManager.SHOW_IMPLICIT)
         } else {
-            imm?.hideSoftInputFromWindow(webBridge.webView.windowToken, 0)
+            imm?.hideSoftInputFromWindow(webView.windowToken, 0)
         }
     }
 
     fun detach() {
         springController.cancel()
-        runCatching { windowManager.removeCrossWindowBlurEnabledListener(blurEnabledListener) }
+        backdropController.unregisterBlurListener()
         if (attached) {
             runCatching { dialog.dismiss() }
             attached = false
@@ -324,7 +335,7 @@ class SidebarPanelWindow(
         OverlayWindowFlags.disableMoveAnimation(lp)
         window.attributes = lp
         window.decorView.visibility = View.VISIBLE
-        applyPanelBackdrop()
+        backdropController.apply()
     }
 
     private fun updateWindowPosition(
@@ -370,7 +381,7 @@ class SidebarPanelWindow(
         closingInProgress = false
         val window = dialog.window ?: return
         window.decorView.visibility = View.INVISIBLE
-        applyBlurRadius(window, 0)
+        backdropController.clearWindowBlur(window)
         val lp = window.attributes
         lp.gravity = Gravity.TOP or Gravity.LEFT
         lp.width = 1
@@ -406,79 +417,40 @@ class SidebarPanelWindow(
     }
 
     private fun recomputePanelDimensions() {
-        backdropDrawable.updateDensity(currentDensity)
         val bounds = runCatching { windowManager.currentWindowMetrics.bounds }.getOrNull()
         val screenW = bounds?.width() ?: context.resources.displayMetrics.widthPixels
         val screenH = bounds?.height() ?: context.resources.displayMetrics.heightPixels
-        val maxW = (screenW - dp(24f)).coerceAtLeast(dp(260f))
-        cachedWidthPx = dp(panelConfig.widthDp.toFloat()).coerceAtMost(maxW)
-        cachedHeightPx =
-            (screenH * (panelConfig.heightPercent / 100f))
-                .toInt()
-                .coerceIn(dp(280f), (screenH - dp(32f)).coerceAtLeast(dp(280f)))
+        val reservedHorizontal = dp((24 + railInsetDp).toFloat())
+        val maxW = (screenW - reservedHorizontal).coerceAtLeast(dp(240f))
+        val targetWidthDp = (pluginSizeOverride.widthDp ?: panelConfig.widthDp).coerceIn(260, 480)
+        cachedWidthPx = dp(targetWidthDp.toFloat()).coerceAtMost(maxW)
+
+        val maxH = (screenH - dp(32f)).coerceAtLeast(dp(280f))
+        val overrideHeightDp = pluginSizeOverride.heightDp
+        val overrideHeightPercent = pluginSizeOverride.heightPercent
+        val desiredHeightPx =
+            when {
+                overrideHeightDp != null -> {
+                    dp(overrideHeightDp.coerceIn(240, 960).toFloat())
+                }
+
+                overrideHeightPercent != null -> {
+                    val pct = overrideHeightPercent.coerceIn(40, 92)
+                    (screenH * (pct / 100f)).toInt()
+                }
+
+                else -> {
+                    (screenH * (panelConfig.heightPercent / 100f)).toInt()
+                }
+            }
+        cachedHeightPx = desiredHeightPx.coerceIn(dp(280f), maxH)
     }
 
-    private fun openMarginPx(): Int = dp(12f)
+    private fun openMarginPx(): Int = dp((12 + railInsetDp).toFloat())
 
     private fun hiddenOffsetX(): Int = -(cachedWidthPx + dp(24f))
 
     private fun cornerPx(): Float = dp(panelConfig.cornerRadiusDp.toFloat()).toFloat()
-
-    private fun applyPanelBackdrop() {
-        val window = dialog.window ?: return
-        val isVisible = window.decorView.visibility == View.VISIBLE
-        val effectiveBlurRadius =
-            if (isVisible && panelConfig.nativeBlurEnabled && systemBlurSupported && panelConfig.blurRadiusPx > 0) {
-                panelConfig.blurRadiusPx
-            } else {
-                0
-            }
-
-        val cornerRadiusPx = cornerPx()
-        backdropDrawable.updateStyle(
-            GlassBackdropStyle(
-                themeId = syncedThemeId,
-                isDark = syncedColorScheme != "light",
-                blurActive = effectiveBlurRadius > 0,
-                cornerRadiusPx = cornerRadiusPx,
-            ),
-        )
-        applyBlurRadius(window, effectiveBlurRadius)
-        if (lastAppliedCornerPx != cornerRadiusPx) {
-            lastAppliedCornerPx = cornerRadiusPx
-            window.setBackgroundDrawable(BlurMaskDrawable(cornerRadiusPx))
-            contentContainer.invalidateOutline()
-        }
-    }
-
-    private fun applyBlurRadius(
-        window: android.view.Window,
-        radiusPx: Int,
-    ) {
-        if (lastAppliedBlurRadius != radiusPx) {
-            lastAppliedBlurRadius = radiusPx
-            window.setBackgroundBlurRadius(radiusPx)
-        }
-    }
-
-    private fun registerBlurListener() {
-        runCatching {
-            windowManager.addCrossWindowBlurEnabledListener(context.mainExecutor, blurEnabledListener)
-        }
-    }
-
-    private fun queryCrossWindowBlurEnabled(): Boolean = runCatching { windowManager.isCrossWindowBlurEnabled }.getOrDefault(false)
-
-    private fun preloadHardwareRenderer() {
-        runCatching {
-            Class.forName("android.graphics.HardwareRenderer").getMethod("preload").invoke(null)
-        }
-    }
-
-    private fun resolveSystemScheme(): String {
-        val nightMask = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
-        return if (nightMask == Configuration.UI_MODE_NIGHT_YES) "dark" else "light"
-    }
 
     private fun setState(next: PanelState) {
         if (currentState != next) {
@@ -497,22 +469,5 @@ class SidebarPanelWindow(
                 WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                 WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
-    }
-}
-
-internal object OverlayWindowFlags {
-    private const val PRIVATE_FLAG_NO_MOVE_ANIMATION = 0x00000040
-
-    private val privateFlagsField by lazy {
-        runCatching {
-            WindowManager.LayoutParams::class.java.getField("privateFlags")
-        }.getOrNull()
-    }
-
-    fun disableMoveAnimation(lp: WindowManager.LayoutParams) {
-        val field = privateFlagsField ?: return
-        runCatching {
-            field.setInt(lp, field.getInt(lp) or PRIVATE_FLAG_NO_MOVE_ANIMATION)
-        }
     }
 }
