@@ -19,15 +19,11 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.serialization.json.encodeToJsonElement
 import pochita.sideveil.protocol.ConfigUpdatedPayload
 import pochita.sideveil.protocol.DaemonEndpoint
-import pochita.sideveil.protocol.GestureDragEndPayload
-import pochita.sideveil.protocol.GestureDragMovePayload
 import pochita.sideveil.protocol.HostEventEnvelope
 import pochita.sideveil.protocol.HostHelloPayload
 import pochita.sideveil.protocol.PanelCommand
-import pochita.sideveil.protocol.PanelCommandPayload
 import pochita.sideveil.protocol.PanelState
 import pochita.sideveil.protocol.PanelStateChangedPayload
-import pochita.sideveil.protocol.PluginActiveChangedPayload
 import pochita.sideveil.protocol.PluginBackendStatePayload
 import pochita.sideveil.protocol.PluginDescriptor
 import pochita.sideveil.protocol.PluginScopedEventPayload
@@ -54,6 +50,7 @@ class HostService : LifecycleService() {
     private lateinit var pluginRail: PluginRailWindow
     private lateinit var panelWindow: SidebarPanelWindow
     private lateinit var pluginManager: PluginWebViewManager
+    private lateinit var eventDispatcher: HostEventDispatcher
 
     private var latestConfig: SideveilConfig = SideveilConfig.DEFAULT
     private var latestScopeActive: Boolean = false
@@ -67,165 +64,10 @@ class HostService : LifecycleService() {
         latestDarkSurface = resolveDarkSurface(latestConfig)
         latestThemeId = latestConfig.panel.themeId
         promoteForeground()
-
-        daemonClient = createDaemonClient()
-        edgeIndicator = EdgeIndicatorWindow(this, windowManager)
-        pluginRail =
-            PluginRailWindow(
-                context = this,
-                windowManager = windowManager,
-                onSelectPlugin = { pluginId ->
-                    if (pluginManager.selectPlugin(pluginId)) {
-                        daemonClient.sendEvent(
-                            SideveilEvents.HOST_SELECT_PLUGIN,
-                            SideveilWireJson.encodeToJsonElement(
-                                PluginSelectEventPayload(
-                                    pluginId = pluginId,
-                                    packageName = latestForegroundPackage.ifBlank { null },
-                                ),
-                            ),
-                        )
-                    }
-                },
-            )
-        panelWindow =
-            SidebarPanelWindow(
-                context = this,
-                windowManager = windowManager,
-                onPanelStateChanged = { state -> handlePanelStateChanged(state) },
-                onBackPressedIntercept = { pluginManager.dispatchBackPress() },
-            )
-        pluginManager =
-            PluginWebViewManager(
-                context = this,
-                scope = lifecycleScope,
-                daemonClient = daemonClient,
-                surfaceDelegate = createSurfaceDelegate(),
-            )
-
-        edgeIndicator.attach()
-        pluginRail.attachWarm()
-        panelWindow.attachWarm()
-        pluginManager.warmStartDefault()
+        initializeRuntimeComponents()
+        attachWarmWindows()
         syncEndpointFromDisk()
         Log.i(TAG, "HostService created (pid=${Process.myPid()}, uid=${Process.myUid()})")
-    }
-
-    private fun createDaemonClient(): DaemonClient =
-        DaemonClient(
-            scope = lifecycleScope,
-            onConnected = {
-                mainHandler.post {
-                    daemonClient.sendEvent(
-                        SideveilEvents.HOST_HELLO,
-                        SideveilWireJson.encodeToJsonElement(
-                            HostHelloPayload(
-                                pid = Process.myPid(),
-                                version = HOST_VERSION,
-                                crossWindowBlurSupported = panelWindow.isSystemBlurSupported(),
-                            ),
-                        ),
-                    )
-                    val currentState = panelWindow.getCurrentState()
-                    if (currentState != PanelState.CLOSED) {
-                        daemonClient.sendEvent(
-                            SideveilEvents.PANEL_STATE_CHANGED,
-                            SideveilWireJson.encodeToJsonElement(PanelStateChangedPayload(currentState)),
-                        )
-                    }
-                }
-            },
-            onDisconnected = {
-                mainHandler.post {
-                    latestScopeActive = false
-                    pluginRail.setPanelOpen(false)
-                    if (panelWindow.getCurrentState() != PanelState.CLOSED) {
-                        panelWindow.close()
-                    }
-                    edgeIndicator.update(
-                        latestConfig.edge,
-                        scopeActive = false,
-                        panelState = panelWindow.getCurrentState(),
-                        isDarkSurface = latestDarkSurface,
-                    )
-                }
-            },
-            onEvent = { env ->
-                mainHandler.post { dispatchDaemonEvent(env) }
-            },
-        )
-
-    private fun createSurfaceDelegate(): PluginHostSurfaceDelegate =
-        object : PluginHostSurfaceDelegate {
-            override fun mountPluginWebView(
-                webView: WebView,
-                backdrop: PluginSurfaceBackdrop,
-                sizeOverride: PluginSizeOverride,
-            ) {
-                panelWindow.setContentWebView(webView)
-                panelWindow.setPluginBackdrop(backdrop)
-                panelWindow.setPluginSizeOverride(sizeOverride)
-            }
-
-            override fun onDismissPanel() {
-                panelWindow.close()
-            }
-
-            override fun onSetImeFocused(focused: Boolean) {
-                panelWindow.setImeFocused(focused)
-            }
-
-            override fun onSyncAppearance(
-                themeId: String,
-                colorScheme: String,
-            ) {
-                latestThemeId = themeId
-                latestDarkSurface = colorScheme != "light"
-                panelWindow.syncRuntimeAppearance(themeId, colorScheme)
-                refreshPluginRailStyle()
-                edgeIndicator.update(
-                    latestConfig.edge,
-                    latestScopeActive,
-                    panelWindow.getCurrentState(),
-                    latestDarkSurface,
-                )
-            }
-
-            override fun onPluginSizeChanged(sizeOverride: PluginSizeOverride) {
-                panelWindow.setPluginSizeOverride(sizeOverride)
-            }
-
-            override fun onPluginBackdropChanged(backdrop: PluginSurfaceBackdrop) {
-                panelWindow.setPluginBackdrop(backdrop)
-            }
-
-            override fun onMatchedPluginsUpdated(
-                matchedPlugins: List<PluginDescriptor>,
-                activePluginId: String,
-            ) {
-                pluginRail.updatePlugins(matchedPlugins, activePluginId)
-                panelWindow.setRailInsetDp(pluginRail.railInsetDp())
-            }
-        }
-
-    private fun handlePanelStateChanged(state: PanelState) {
-        daemonClient.sendEvent(
-            SideveilEvents.PANEL_STATE_CHANGED,
-            SideveilWireJson.encodeToJsonElement(PanelStateChangedPayload(state)),
-        )
-        pluginRail.setPanelOpen(state == PanelState.OPEN)
-        edgeIndicator.update(latestConfig.edge, latestScopeActive, state, latestDarkSurface)
-        pluginManager.onPanelStateChanged(state)
-    }
-
-    private fun refreshPluginRailStyle() {
-        pluginRail.updateStyle(
-            side = latestConfig.edge.side,
-            config = latestConfig.panel,
-            themeId = latestThemeId,
-            dark = latestDarkSurface,
-            blurSupported = panelWindow.isSystemBlurSupported(),
-        )
     }
 
     override fun onStartCommand(
@@ -244,14 +86,8 @@ class HostService : LifecycleService() {
         super.onConfigurationChanged(newConfig)
         latestDarkSurface = resolveDarkSurface(latestConfig, newConfig)
         panelWindow.onSystemConfigurationChanged()
-        panelWindow.updateConfig(latestConfig.edge.side, latestConfig.panel)
         refreshPluginRailStyle()
-        edgeIndicator.update(
-            latestConfig.edge,
-            latestScopeActive,
-            panelWindow.getCurrentState(),
-            latestDarkSurface,
-        )
+        refreshEdgeIndicator()
     }
 
     override fun onDestroy() {
@@ -263,68 +99,210 @@ class HostService : LifecycleService() {
         super.onDestroy()
     }
 
-    private fun dispatchDaemonEvent(envelope: HostEventEnvelope) {
-        when (envelope.event) {
-            SideveilEvents.CONFIG_UPDATED -> handleConfigUpdated(envelope)
-            SideveilEvents.SCOPE_CHANGED -> handleScopeChanged(envelope)
-            SideveilEvents.PLUGINS_UPDATED -> handlePluginsUpdated(envelope)
-            SideveilEvents.PLUGINS_ACTIVE_CHANGED -> handlePluginActiveChanged(envelope)
-            SideveilEvents.PLUGIN_BACKEND_STATE -> handlePluginBackendState(envelope)
-            SideveilEvents.PLUGIN_EVENT -> handlePluginScopedEvent(envelope)
-            SideveilEvents.GESTURE_DRAG_START -> panelWindow.onGestureStart()
-            SideveilEvents.GESTURE_DRAG_MOVE -> handleGestureMove(envelope)
-            SideveilEvents.GESTURE_DRAG_END -> handleGestureEnd(envelope)
-            SideveilEvents.PANEL_COMMAND -> handlePanelCommand(envelope)
-            else -> pluginManager.broadcastGlobalEvent(envelope)
+    private fun initializeRuntimeComponents() {
+        daemonClient = createDaemonClient()
+        edgeIndicator = EdgeIndicatorWindow(this, windowManager)
+        pluginRail = PluginRailWindow(this, windowManager, ::handleRailPluginSelected)
+        panelWindow =
+            SidebarPanelWindow(
+                context = this,
+                windowManager = windowManager,
+                onPanelStateChanged = ::handlePanelStateChanged,
+                onBackPressedIntercept = { pluginManager.dispatchBackPress() },
+            )
+        pluginManager =
+            PluginWebViewManager(
+                context = this,
+                scope = lifecycleScope,
+                daemonClient = daemonClient,
+                surfaceDelegate = createSurfaceDelegate(),
+            )
+        eventDispatcher = HostEventDispatcher(createEventCallbacks())
+    }
+
+    private fun attachWarmWindows() {
+        edgeIndicator.attach()
+        pluginRail.attachWarm()
+        panelWindow.attachWarm()
+        pluginManager.warmStartDefault()
+    }
+
+    private fun handleRailPluginSelected(pluginId: String) {
+        if (!pluginManager.selectPlugin(pluginId)) return
+        daemonClient.sendEvent(
+            SideveilEvents.HOST_SELECT_PLUGIN,
+            SideveilWireJson.encodeToJsonElement(
+                PluginSelectEventPayload(
+                    pluginId = pluginId,
+                    packageName = latestForegroundPackage.ifBlank { null },
+                ),
+            ),
+        )
+    }
+
+    private fun createDaemonClient(): DaemonClient =
+        DaemonClient(
+            scope = lifecycleScope,
+            onConnected = {
+                mainHandler.post { sendHostConnectedState() }
+            },
+            onDisconnected = {
+                mainHandler.post { handleDaemonDisconnected() }
+            },
+            onEvent = { env ->
+                mainHandler.post { eventDispatcher.dispatch(env) }
+            },
+        )
+
+    private fun sendHostConnectedState() {
+        daemonClient.sendEvent(
+            SideveilEvents.HOST_HELLO,
+            SideveilWireJson.encodeToJsonElement(
+                HostHelloPayload(
+                    pid = Process.myPid(),
+                    version = BuildConfig.VERSION_NAME,
+                    crossWindowBlurSupported = panelWindow.isSystemBlurSupported(),
+                ),
+            ),
+        )
+        val currentState = panelWindow.getCurrentState()
+        if (currentState != PanelState.CLOSED) {
+            daemonClient.sendEvent(
+                SideveilEvents.PANEL_STATE_CHANGED,
+                SideveilWireJson.encodeToJsonElement(PanelStateChangedPayload(currentState)),
+            )
         }
     }
 
-    private fun handleConfigUpdated(envelope: HostEventEnvelope) {
-        val decoded =
-            envelope.payload?.let {
-                runCatching { SideveilWireJson.decodeFromJsonElement(ConfigUpdatedPayload.serializer(), it) }.getOrNull()
-            } ?: return
-        latestConfig = decoded.config
-        latestScopeActive = decoded.scopeActive
-        latestForegroundPackage = decoded.foregroundPackage
-        latestThemeId = decoded.config.panel.themeId
-        latestDarkSurface = resolveDarkSurface(decoded.config)
-        panelWindow.updateConfig(decoded.config.edge.side, decoded.config.panel)
-        refreshPluginRailStyle()
-        edgeIndicator.update(
-            decoded.config.edge,
-            decoded.scopeActive,
-            panelWindow.getCurrentState(),
-            latestDarkSurface,
-        )
-        pluginManager.broadcastGlobalEvent(envelope)
+    private fun handleDaemonDisconnected() {
+        latestScopeActive = false
+        pluginRail.setPanelOpen(false)
+        if (panelWindow.getCurrentState() != PanelState.CLOSED) {
+            panelWindow.close()
+        }
+        refreshEdgeIndicator()
     }
 
-    private fun handleScopeChanged(envelope: HostEventEnvelope) {
-        val decoded =
-            envelope.payload?.let {
-                runCatching { SideveilWireJson.decodeFromJsonElement(ScopeChangedPayload.serializer(), it) }.getOrNull()
-            } ?: return
-        latestScopeActive = decoded.active
-        latestForegroundPackage = decoded.foregroundPackage
-        edgeIndicator.update(
-            latestConfig.edge,
-            decoded.active,
-            panelWindow.getCurrentState(),
-            latestDarkSurface,
+    private fun createSurfaceDelegate(): PluginHostSurfaceDelegate =
+        object : PluginHostSurfaceDelegate {
+            override fun mountPluginWebView(
+                webView: WebView,
+                backdrop: PluginSurfaceBackdrop,
+                sizeOverride: PluginSizeOverride,
+            ) {
+                panelWindow.setContentWebView(webView)
+                panelWindow.setPluginBackdrop(backdrop)
+                panelWindow.setPluginSizeOverride(sizeOverride)
+            }
+
+            override fun onDismissPanel() = panelWindow.close()
+
+            override fun onSetImeFocused(focused: Boolean) = panelWindow.setImeFocused(focused)
+
+            override fun onSyncAppearance(
+                themeId: String,
+                colorScheme: String,
+            ) {
+                latestThemeId = themeId
+                latestDarkSurface = colorScheme != "light"
+                panelWindow.syncRuntimeAppearance(themeId, colorScheme)
+                refreshPluginRailStyle()
+                refreshEdgeIndicator()
+            }
+
+            override fun onPluginSizeChanged(sizeOverride: PluginSizeOverride) = panelWindow.setPluginSizeOverride(sizeOverride)
+
+            override fun onPluginBackdropChanged(backdrop: PluginSurfaceBackdrop) = panelWindow.setPluginBackdrop(backdrop)
+
+            override fun onMatchedPluginsUpdated(
+                matchedPlugins: List<PluginDescriptor>,
+                activePluginId: String,
+            ) {
+                pluginRail.updatePlugins(matchedPlugins, activePluginId)
+                panelWindow.setRailInsetDp(pluginRail.railInsetDp())
+            }
+        }
+
+    private fun createEventCallbacks(): HostEventCallbacks =
+        object : HostEventCallbacks {
+            override fun onConfigUpdated(
+                decoded: ConfigUpdatedPayload,
+                rawEnvelope: HostEventEnvelope,
+            ) {
+                latestConfig = decoded.config
+                latestScopeActive = decoded.scopeActive
+                latestForegroundPackage = decoded.foregroundPackage
+                latestThemeId = decoded.config.panel.themeId
+                latestDarkSurface = resolveDarkSurface(decoded.config)
+                panelWindow.updateConfig(decoded.config.edge.side, decoded.config.panel)
+                refreshPluginRailStyle()
+                refreshEdgeIndicator()
+                pluginManager.broadcastGlobalEvent(rawEnvelope)
+            }
+
+            override fun onScopeChanged(
+                decoded: ScopeChangedPayload,
+                rawEnvelope: HostEventEnvelope,
+            ) {
+                latestScopeActive = decoded.active
+                latestForegroundPackage = decoded.foregroundPackage
+                refreshEdgeIndicator()
+                pluginManager.broadcastGlobalEvent(rawEnvelope)
+            }
+
+            override fun onPluginsUpdated(decoded: PluginsSnapshotPayload) {
+                latestForegroundPackage = decoded.foregroundPackage
+                latestScopeActive = decoded.matchedPluginIds.isNotEmpty()
+                pluginManager.onPluginsSnapshot(decoded)
+                refreshPluginRailStyle()
+                refreshEdgeIndicator()
+            }
+
+            override fun onPluginActiveChanged(pluginId: String) {
+                pluginManager.selectPlugin(pluginId)
+            }
+
+            override fun onPluginBackendState(decoded: PluginBackendStatePayload) = pluginManager.routeBackendState(decoded)
+
+            override fun onPluginScopedEvent(decoded: PluginScopedEventPayload) = pluginManager.routePluginScopedEvent(decoded)
+
+            override fun onGestureStart() = panelWindow.onGestureStart()
+
+            override fun onGestureMove(progress: Float) {
+                edgeIndicator.setDragPulse(progress)
+                panelWindow.onGestureMove(progress)
+            }
+
+            override fun onGestureEnd(
+                shouldOpen: Boolean,
+                velocityPxPerSec: Float,
+            ) {
+                edgeIndicator.setDragPulse(0f)
+                panelWindow.onGestureEnd(shouldOpen, velocityPxPerSec)
+            }
+
+            override fun onPanelCommand(command: PanelCommand) {
+                when (command) {
+                    PanelCommand.OPEN -> panelWindow.open()
+                    PanelCommand.CLOSE -> panelWindow.close()
+                    PanelCommand.TOGGLE -> panelWindow.toggle()
+                }
+            }
+
+            override fun onFallbackGlobalEvent(envelope: HostEventEnvelope) = pluginManager.broadcastGlobalEvent(envelope)
+        }
+
+    private fun handlePanelStateChanged(state: PanelState) {
+        daemonClient.sendEvent(
+            SideveilEvents.PANEL_STATE_CHANGED,
+            SideveilWireJson.encodeToJsonElement(PanelStateChangedPayload(state)),
         )
-        pluginManager.broadcastGlobalEvent(envelope)
+        pluginRail.setPanelOpen(state == PanelState.OPEN)
+        refreshEdgeIndicator()
+        pluginManager.onPanelStateChanged(state)
     }
 
-    private fun handlePluginsUpdated(envelope: HostEventEnvelope) {
-        val decoded =
-            envelope.payload?.let {
-                runCatching { SideveilWireJson.decodeFromJsonElement(PluginsSnapshotPayload.serializer(), it) }.getOrNull()
-            } ?: return
-        latestForegroundPackage = decoded.foregroundPackage
-        latestScopeActive = decoded.matchedPluginIds.isNotEmpty()
-        pluginManager.onPluginsSnapshot(decoded)
-        refreshPluginRailStyle()
+    private fun refreshEdgeIndicator() {
         edgeIndicator.update(
             latestConfig.edge,
             latestScopeActive,
@@ -333,58 +311,14 @@ class HostService : LifecycleService() {
         )
     }
 
-    private fun handlePluginActiveChanged(envelope: HostEventEnvelope) {
-        val decoded =
-            envelope.payload?.let {
-                runCatching { SideveilWireJson.decodeFromJsonElement(PluginActiveChangedPayload.serializer(), it) }.getOrNull()
-            } ?: return
-        pluginManager.selectPlugin(decoded.pluginId)
-    }
-
-    private fun handlePluginBackendState(envelope: HostEventEnvelope) {
-        val decoded =
-            envelope.payload?.let {
-                runCatching { SideveilWireJson.decodeFromJsonElement(PluginBackendStatePayload.serializer(), it) }.getOrNull()
-            } ?: return
-        pluginManager.routeBackendState(decoded)
-    }
-
-    private fun handlePluginScopedEvent(envelope: HostEventEnvelope) {
-        val decoded =
-            envelope.payload?.let {
-                runCatching { SideveilWireJson.decodeFromJsonElement(PluginScopedEventPayload.serializer(), it) }.getOrNull()
-            } ?: return
-        pluginManager.routePluginScopedEvent(decoded)
-    }
-
-    private fun handleGestureMove(envelope: HostEventEnvelope) {
-        val decoded =
-            envelope.payload?.let {
-                runCatching { SideveilWireJson.decodeFromJsonElement(GestureDragMovePayload.serializer(), it) }.getOrNull()
-            } ?: return
-        edgeIndicator.setDragPulse(decoded.progress)
-        panelWindow.onGestureMove(decoded.progress)
-    }
-
-    private fun handleGestureEnd(envelope: HostEventEnvelope) {
-        val decoded =
-            envelope.payload?.let {
-                runCatching { SideveilWireJson.decodeFromJsonElement(GestureDragEndPayload.serializer(), it) }.getOrNull()
-            } ?: return
-        edgeIndicator.setDragPulse(0f)
-        panelWindow.onGestureEnd(decoded.shouldOpen, decoded.velocityPxPerSec)
-    }
-
-    private fun handlePanelCommand(envelope: HostEventEnvelope) {
-        val decoded =
-            envelope.payload?.let {
-                runCatching { SideveilWireJson.decodeFromJsonElement(PanelCommandPayload.serializer(), it) }.getOrNull()
-            } ?: return
-        when (decoded.command) {
-            PanelCommand.OPEN -> panelWindow.open()
-            PanelCommand.CLOSE -> panelWindow.close()
-            PanelCommand.TOGGLE -> panelWindow.toggle()
-        }
+    private fun refreshPluginRailStyle() {
+        pluginRail.updateStyle(
+            side = latestConfig.edge.side,
+            config = latestConfig.panel,
+            themeId = latestThemeId,
+            dark = latestDarkSurface,
+            blurSupported = panelWindow.isSystemBlurSupported(),
+        )
     }
 
     private fun promoteForeground() {
@@ -443,7 +377,6 @@ class HostService : LifecycleService() {
 
     companion object {
         private const val TAG = "SideveilHostService"
-        private const val HOST_VERSION = "0.1.0"
         private const val CHANNEL_ID = "sideveil_host_channel"
         private const val NOTIF_ID = 1001
         private const val ENDPOINT_FILE_NAME = "daemon_endpoint.json"

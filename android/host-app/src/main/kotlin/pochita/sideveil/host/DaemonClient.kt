@@ -134,99 +134,144 @@ class DaemonClient(
 
     private suspend fun connectLoop(generation: Long) {
         var attempt = 0
-        while (scope.isActive && generation == generationCounter.get() && port > 0 && token.isNotEmpty()) {
-            val currentPort = port
-            val currentToken = token
-            var loopSocket: Socket? = null
-            var connectedInThisAttempt = false
-            try {
-                val socket = Socket()
-                loopSocket = socket
-                socket.tcpNoDelay = true
-                socket.connect(InetSocketAddress("127.0.0.1", currentPort), 3_000)
-                socket.soTimeout = 45_000
-
-                val input = socket.getInputStream()
-                val output = socket.getOutputStream()
-                WebSocketCodec.performClientHandshake(
-                    input = input,
-                    output = output,
-                    path = "/ws",
-                    hostHeader = "127.0.0.1:$currentPort",
-                    extraHeaders = mapOf("Authorization" to "Bearer $currentToken"),
-                )
-
-                if (generation != generationCounter.get()) {
-                    runCatching { socket.close() }
-                    break
-                }
-
-                synchronized(writeLock) {
-                    activeSocket = socket
-                    activeOutput = output
-                }
-                connectedInThisAttempt = true
+        while (canContinueConnecting(generation)) {
+            val connected = runSingleSession(generation)
+            if (connected) {
                 attempt = 0
-                Log.i(TAG, "Connected full-duplex WebSocket to 127.0.0.1:$currentPort")
-                onConnected()
-
-                while (scope.isActive && generation == generationCounter.get() && !socket.isClosed) {
-                    val frame = WebSocketCodec.readFrame(input, requireMasked = false) ?: break
-                    when (frame.opcode) {
-                        WsOpcode.CLOSE -> {
-                            sendCloseFrame()
-                            break
-                        }
-
-                        WsOpcode.PING -> {
-                            sendPongFrame(frame.payload)
-                        }
-
-                        WsOpcode.PONG -> {
-                            // Heartbeat pong acknowledged.
-                        }
-
-                        WsOpcode.BINARY -> {
-                            Log.d(TAG, "Received binary frame (${frame.payload.size} bytes)")
-                        }
-
-                        WsOpcode.TEXT -> {
-                            val text = frame.textOrNull() ?: continue
-                            handleIncomingText(text)
-                        }
-                    }
-                }
-            } catch (c: CancellationException) {
-                throw c
-            } catch (t: Throwable) {
-                if (generation == generationCounter.get()) {
-                    Log.w(TAG, "WebSocket loop error: ${t.message}")
-                }
-            } finally {
-                runCatching { loopSocket?.getInputStream()?.let(WebSocketCodec::clearStreamState) }
-                var detachedActive = false
-                synchronized(writeLock) {
-                    if (loopSocket != null && activeSocket === loopSocket) {
-                        activeSocket = null
-                        activeOutput = null
-                        detachedActive = true
-                    }
-                }
-                runCatching { loopSocket?.close() }
-                if (detachedActive || generation == generationCounter.get()) {
-                    failAllPending("Daemon WebSocket connection lost")
-                }
-                if (connectedInThisAttempt && (detachedActive || generation == generationCounter.get())) {
-                    onDisconnected()
-                }
             }
-
             if (generation != generationCounter.get()) {
                 break
             }
             val delayMs = BACKOFF_MS[attempt.coerceAtMost(BACKOFF_MS.lastIndex)]
             attempt++
             delay(delayMs)
+        }
+    }
+
+    private fun canContinueConnecting(generation: Long): Boolean {
+        val currentGeneration = generation == generationCounter.get()
+        val hasEndpoint = port > 0 && token.isNotEmpty()
+        return scope.isActive && currentGeneration && hasEndpoint
+    }
+
+    private fun runSingleSession(generation: Long): Boolean {
+        val currentPort = port
+        val currentToken = token
+        var loopSocket: Socket? = null
+        var connected = false
+        try {
+            val socket = openHandshakeSocket(currentPort, currentToken)
+            loopSocket = socket
+            if (generation != generationCounter.get()) {
+                return false
+            }
+            attachActiveSocket(socket)
+            connected = true
+            Log.i(TAG, "Connected full-duplex WebSocket to 127.0.0.1:$currentPort")
+            onConnected()
+            readIncomingFrames(socket, generation)
+        } catch (c: CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            if (generation == generationCounter.get()) {
+                Log.w(TAG, "WebSocket loop error: ${t.message}")
+            }
+        } finally {
+            cleanupSession(loopSocket, generation, connected)
+        }
+        return connected
+    }
+
+    private fun openHandshakeSocket(
+        currentPort: Int,
+        currentToken: String,
+    ): Socket {
+        val socket = Socket()
+        socket.tcpNoDelay = true
+        socket.connect(InetSocketAddress("127.0.0.1", currentPort), 3_000)
+        socket.soTimeout = 45_000
+        WebSocketCodec.performClientHandshake(
+            input = socket.getInputStream(),
+            output = socket.getOutputStream(),
+            path = "/ws",
+            hostHeader = "127.0.0.1:$currentPort",
+            extraHeaders = mapOf("Authorization" to "Bearer $currentToken"),
+        )
+        return socket
+    }
+
+    private fun attachActiveSocket(socket: Socket) {
+        synchronized(writeLock) {
+            activeSocket = socket
+            activeOutput = socket.getOutputStream()
+        }
+    }
+
+    private fun readIncomingFrames(
+        socket: Socket,
+        generation: Long,
+    ) {
+        val input = socket.getInputStream()
+        var running = true
+        while (running && isReaderActive(socket, generation)) {
+            val frame = WebSocketCodec.readFrame(input, requireMasked = false)
+            running = frame != null && handleFrame(frame)
+        }
+    }
+
+    private fun isReaderActive(
+        socket: Socket,
+        generation: Long,
+    ): Boolean = scope.isActive && generation == generationCounter.get() && !socket.isClosed
+
+    private fun handleFrame(frame: pochita.sideveil.protocol.WsFrame): Boolean =
+        when (frame.opcode) {
+            WsOpcode.CLOSE -> {
+                sendCloseFrame()
+                false
+            }
+
+            WsOpcode.PING -> {
+                sendPongFrame(frame.payload)
+                true
+            }
+
+            WsOpcode.PONG -> {
+                true
+            }
+
+            WsOpcode.BINARY -> {
+                Log.d(TAG, "Received binary frame (${frame.payload.size} bytes)")
+                true
+            }
+
+            WsOpcode.TEXT -> {
+                frame.textOrNull()?.let(::handleIncomingText)
+                true
+            }
+        }
+
+    private fun cleanupSession(
+        loopSocket: Socket?,
+        generation: Long,
+        connected: Boolean,
+    ) {
+        runCatching { loopSocket?.getInputStream()?.let(WebSocketCodec::clearStreamState) }
+        var detachedActive = false
+        synchronized(writeLock) {
+            if (loopSocket != null && activeSocket === loopSocket) {
+                activeSocket = null
+                activeOutput = null
+                detachedActive = true
+            }
+        }
+        runCatching { loopSocket?.close() }
+        val isCurrentGen = generation == generationCounter.get()
+        if (detachedActive || isCurrentGen) {
+            failAllPending("Daemon WebSocket connection lost")
+        }
+        if (connected && (detachedActive || isCurrentGen)) {
+            onDisconnected()
         }
     }
 

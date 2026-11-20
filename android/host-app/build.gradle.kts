@@ -7,6 +7,24 @@ plugins {
     alias(libs.plugins.detekt)
 }
 
+val moduleProps =
+    Properties().apply {
+        providers
+            .fileContents(rootProject.layout.projectDirectory.file("../module.prop"))
+            .asText
+            .orNull
+            ?.let { load(it.reader()) }
+    }
+
+val moduleVersionName: String =
+    moduleProps
+        .getProperty("version")
+        ?.trim()
+        ?.removePrefix("v")
+        ?.ifEmpty { "0.1.0" } ?: "0.1.0"
+val moduleVersionCode: Int =
+    moduleProps.getProperty("versionCode")?.trim()?.toIntOrNull() ?: 100
+
 val keystoreProps =
     Properties().apply {
         providers
@@ -28,8 +46,8 @@ android {
         applicationId = "pochita.sideveil.host"
         minSdk = 36
         targetSdk = 37
-        versionCode = 100
-        versionName = "0.1.0"
+        versionCode = moduleVersionCode
+        versionName = moduleVersionName
     }
 
     signingConfigs {
@@ -85,7 +103,7 @@ android {
     buildFeatures {
         compose = false
         aidl = false
-        buildConfig = false
+        buildConfig = true
         shaders = false
     }
 

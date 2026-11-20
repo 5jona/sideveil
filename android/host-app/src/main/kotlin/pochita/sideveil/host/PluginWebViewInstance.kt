@@ -6,49 +6,31 @@ import android.graphics.Color
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import android.webkit.JavascriptInterface
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.Toast
 import androidx.core.net.toUri
-import androidx.webkit.WebMessageCompat
-import androidx.webkit.WebMessagePortCompat
-import androidx.webkit.WebViewCompat
-import androidx.webkit.WebViewFeature
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.decodeFromJsonElement
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import org.json.JSONObject
 import pochita.sideveil.protocol.ContainerActionPayload
 import pochita.sideveil.protocol.HostEventEnvelope
-import pochita.sideveil.protocol.PluginCapability
 import pochita.sideveil.protocol.PluginDescriptor
 import pochita.sideveil.protocol.PluginSurfaceBackdrop
-import pochita.sideveil.protocol.RpcError
-import pochita.sideveil.protocol.RpcRequest
-import pochita.sideveil.protocol.RpcResponse
-import pochita.sideveil.protocol.SideveilMethods
 import pochita.sideveil.protocol.SideveilWireJson
 
 /**
  * Isolated WebView sandbox instance for a single Sideveil plugin under
  * `https://<pluginId>.plugins.sideveil.local/` with `onRenderProcessGone` crash recovery,
- * dedicated `WebMessagePort`, per-plugin container preferences, and server-stamped RPC identity.
+ * per-plugin container preferences, and [PluginWebMessageBridge] IPC routing.
  */
 @SuppressLint("SetJavaScriptEnabled")
 class PluginWebViewInstance(
-    private val context: Context,
-    private val scope: CoroutineScope,
-    private val daemonClient: DaemonClient,
+    context: Context,
+    scope: CoroutineScope,
+    daemonClient: DaemonClient,
     private val assetFetcher: PluginAssetFetcher,
     initialDescriptor: PluginDescriptor,
     private val callbacks: PluginContainerCallbacks,
@@ -76,14 +58,16 @@ class PluginWebViewInstance(
         )
         private set
 
-    @Volatile
-    private var activePort: WebMessagePortCompat? = null
-
-    @Volatile
-    private var pageReady: Boolean = false
-
-    private val pendingEventsBeforeReady = ArrayDeque<String>(12)
-    private val pluginOrigin: String = assetFetcher.originFor(initialDescriptor.id)
+    private val messageBridge =
+        PluginWebMessageBridge(
+            context = context,
+            scope = scope,
+            daemonClient = daemonClient,
+            webView = webView,
+            pluginOrigin = assetFetcher.originFor(initialDescriptor.id),
+            descriptorProvider = { descriptor },
+            onContainerAction = ::applyContainerAction,
+        )
 
     init {
         webView.setBackgroundColor(Color.TRANSPARENT)
@@ -104,42 +88,8 @@ class PluginWebViewInstance(
             loadWithOverviewMode = false
         }
 
-        webView.addJavascriptInterface(JsHostObject(), "__POCHITA_HOST__")
-        webView.webViewClient =
-            object : WebViewClient() {
-                override fun shouldOverrideUrlLoading(
-                    view: WebView,
-                    request: WebResourceRequest,
-                ): Boolean = !assetFetcher.isAllowedPluginUri(request.url, descriptor.id)
-
-                override fun shouldInterceptRequest(
-                    view: WebView,
-                    request: WebResourceRequest,
-                ): WebResourceResponse = assetFetcher.fetch(descriptor, request.url)
-
-                override fun onPageFinished(
-                    view: WebView,
-                    url: String?,
-                ) {
-                    super.onPageFinished(view, url)
-                    if (url != null && assetFetcher.isAllowedPluginUri(url.toUri(), descriptor.id)) {
-                        installMessageChannel()
-                    }
-                }
-
-                override fun onRenderProcessGone(
-                    view: WebView,
-                    detail: RenderProcessGoneDetail,
-                ): Boolean {
-                    Log.e(
-                        TAG,
-                        "WebView render process gone for plugin=${descriptor.id} " +
-                            "didCrash=${detail.didCrash()} priority=${detail.rendererPriorityAtExit()}",
-                    )
-                    mainHandler.post { callbacks.onRenderProcessCrashed(descriptor.id) }
-                    return true
-                }
-            }
+        webView.addJavascriptInterface(messageBridge.createJsHostObject(), "__POCHITA_HOST__")
+        webView.webViewClient = createWebViewClient()
     }
 
     fun updateDescriptor(next: PluginDescriptor) {
@@ -147,8 +97,7 @@ class PluginWebViewInstance(
     }
 
     fun loadEntry() {
-        pageReady = false
-        closeActivePort()
+        messageBridge.resetBeforeLoad()
         webView.loadUrl(assetFetcher.entryUrlFor(descriptor))
     }
 
@@ -157,152 +106,54 @@ class PluginWebViewInstance(
         payload: JsonElement?,
     ) {
         val raw = SideveilWireJson.encodeToString(HostEventEnvelope(event = event, payload = payload))
-        mainHandler.post { sendToWebView(raw) }
+        messageBridge.postRawAsync(raw)
     }
 
     fun pushEnvelope(envelope: HostEventEnvelope) {
-        val raw = SideveilWireJson.encodeToString(envelope)
-        mainHandler.post { sendToWebView(raw) }
+        messageBridge.postRawAsync(SideveilWireJson.encodeToString(envelope))
     }
 
     fun destroy() {
-        closeActivePort()
+        messageBridge.closeActivePort()
         webView.stopLoading()
         webView.destroy()
     }
 
-    private fun closeActivePort() {
-        val port = activePort ?: return
-        activePort = null
-        if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_PORT_CLOSE)) {
-            runCatching { port.close() }
-        }
-    }
+    private fun createWebViewClient(): WebViewClient =
+        object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(
+                view: WebView,
+                request: WebResourceRequest,
+            ): Boolean = !assetFetcher.isAllowedPluginUri(request.url, descriptor.id)
 
-    private fun installMessageChannel() {
-        if (!WebViewFeature.isFeatureSupported(WebViewFeature.CREATE_WEB_MESSAGE_CHANNEL)) {
-            fallbackToEvaluateJavascript("CREATE_WEB_MESSAGE_CHANNEL unavailable")
-            return
-        }
-        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_PORT_SET_MESSAGE_CALLBACK)) {
-            fallbackToEvaluateJavascript("WEB_MESSAGE_PORT_SET_MESSAGE_CALLBACK unavailable")
-            return
-        }
-        if (!WebViewFeature.isFeatureSupported(WebViewFeature.POST_WEB_MESSAGE)) {
-            fallbackToEvaluateJavascript("POST_WEB_MESSAGE unavailable")
-            return
-        }
+            override fun shouldInterceptRequest(
+                view: WebView,
+                request: WebResourceRequest,
+            ): WebResourceResponse = assetFetcher.fetch(descriptor, request.url)
 
-        runCatching {
-            val channel =
-                if (WebViewFeature.isFeatureSupported(WebViewFeature.CREATE_WEB_MESSAGE_CHANNEL)) {
-                    WebViewCompat.createWebMessageChannel(webView)
-                } else {
-                    return@runCatching
-                }
-            val hostPort = channel[0]
-            val pagePort = channel[1]
-
-            closeActivePort()
-            activePort = hostPort
-            if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_PORT_SET_MESSAGE_CALLBACK)) {
-                hostPort.setWebMessageCallback(
-                    object : WebMessagePortCompat.WebMessageCallbackCompat() {
-                        override fun onMessage(
-                            port: WebMessagePortCompat,
-                            message: WebMessageCompat?,
-                        ) {
-                            val data = message?.data ?: return
-                            handleMessageFromWebView(data)
-                        }
-                    },
-                )
-            }
-            if (WebViewFeature.isFeatureSupported(WebViewFeature.POST_WEB_MESSAGE)) {
-                WebViewCompat.postWebMessage(
-                    webView,
-                    WebMessageCompat("", arrayOf(pagePort)),
-                    pluginOrigin.toUri(),
-                )
-            }
-            pageReady = true
-            flushQueuedEvents()
-        }.onFailure { err ->
-            Log.w(TAG, "WebMessagePort setup failed for ${descriptor.id}: ${err.message}")
-            fallbackToEvaluateJavascript("WebMessagePort setup failed")
-        }
-    }
-
-    private fun fallbackToEvaluateJavascript(reason: String) {
-        Log.w(TAG, "$reason for ${descriptor.id}, using evaluateJavascript fallback")
-        pageReady = true
-        flushQueuedEvents()
-    }
-
-    private fun handleMessageFromWebView(raw: String) {
-        val req =
-            runCatching { SideveilWireJson.decodeFromString<RpcRequest>(raw) }.getOrNull()
-                ?: return
-
-        when (req.method) {
-            SideveilMethods.CONTAINER_ACTION -> {
-                handleContainerAction(req)
-            }
-
-            SideveilMethods.UI_TOAST -> {
-                handleToastRpc(req)
-            }
-
-            else -> {
-                // Stamp authenticated pluginId on the host side so WebView JS cannot spoof identity.
-                val stamped = req.copy(pluginId = descriptor.id)
-                scope.launch {
-                    val response = daemonClient.forwardRpc(stamped)
-                    val encoded = SideveilWireJson.encodeToString(response)
-                    mainHandler.post { sendToWebView(encoded) }
+            override fun onPageFinished(
+                view: WebView,
+                url: String?,
+            ) {
+                super.onPageFinished(view, url)
+                if (url != null && assetFetcher.isAllowedPluginUri(url.toUri(), descriptor.id)) {
+                    messageBridge.installChannel()
                 }
             }
-        }
-    }
 
-    private fun handleToastRpc(req: RpcRequest) {
-        val allowed = descriptor.builtin || descriptor.capabilities.contains(PluginCapability.TOAST)
-        if (!allowed) {
-            val denied =
-                RpcResponse(
-                    id = req.id,
-                    error = RpcError(-32003, "Plugin '${descriptor.id}' lacks 'toast' capability"),
+            override fun onRenderProcessGone(
+                view: WebView,
+                detail: RenderProcessGoneDetail,
+            ): Boolean {
+                Log.e(
+                    TAG,
+                    "WebView render process gone for plugin=${descriptor.id} " +
+                        "didCrash=${detail.didCrash()} priority=${detail.rendererPriorityAtExit()}",
                 )
-            mainHandler.post { sendToWebView(SideveilWireJson.encodeToString(denied)) }
-            return
-        }
-        val message =
-            req.params
-                ?.jsonObject
-                ?.get("message")
-                ?.jsonPrimitive
-                ?.content
-                .orEmpty()
-        mainHandler.post {
-            if (message.isNotBlank()) {
-                Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                mainHandler.post { callbacks.onRenderProcessCrashed(descriptor.id) }
+                return true
             }
-            val ok = RpcResponse(id = req.id, result = buildJsonObject { put("ok", JsonPrimitive(true)) })
-            sendToWebView(SideveilWireJson.encodeToString(ok))
         }
-    }
-
-    private fun handleContainerAction(req: RpcRequest) {
-        val action =
-            req.params?.let { params ->
-                runCatching { SideveilWireJson.decodeFromJsonElement<ContainerActionPayload>(params) }.getOrNull()
-            }
-        mainHandler.post {
-            applyContainerAction(action)
-            val ok = RpcResponse(id = req.id, result = buildJsonObject { put("ok", JsonPrimitive(true)) })
-            sendToWebView(SideveilWireJson.encodeToString(ok))
-        }
-    }
 
     private fun applyContainerAction(action: ContainerActionPayload?) {
         val pluginId = descriptor.id
@@ -355,52 +206,7 @@ class PluginWebViewInstance(
             else -> null
         }
 
-    private fun flushQueuedEvents() {
-        while (pendingEventsBeforeReady.isNotEmpty()) {
-            sendToWebView(pendingEventsBeforeReady.removeFirst())
-        }
-    }
-
-    private fun sendToWebView(rawJson: String) {
-        if (!pageReady) {
-            if (pendingEventsBeforeReady.size >= MAX_PENDING_EVENTS) {
-                pendingEventsBeforeReady.removeFirst()
-            }
-            pendingEventsBeforeReady.addLast(rawJson)
-            return
-        }
-
-        val port = activePort
-        if (port != null && WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_PORT_POST_MESSAGE)) {
-            runCatching {
-                port.postMessage(WebMessageCompat(rawJson))
-                return
-            }.onFailure { err ->
-                Log.w(TAG, "WebMessagePort postMessage failed for ${descriptor.id}", err)
-            }
-        }
-
-        val quoted = JSONObject.quote(rawJson)
-        val quotedOrigin = JSONObject.quote(pluginOrigin)
-        webView.evaluateJavascript("window.postMessage($quoted, $quotedOrigin);", null)
-    }
-
-    inner class JsHostObject {
-        @JavascriptInterface
-        fun postMessage(message: String) {
-            handleMessageFromWebView(message)
-        }
-
-        @JavascriptInterface
-        fun getVersion(): String = HOST_VERSION
-
-        @JavascriptInterface
-        fun getPluginId(): String = descriptor.id
-    }
-
     companion object {
         private const val TAG = "SideveilPluginWebView"
-        private const val HOST_VERSION = "0.1.0"
-        private const val MAX_PENDING_EVENTS = 16
     }
 }

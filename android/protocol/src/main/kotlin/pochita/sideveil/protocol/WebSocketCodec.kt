@@ -6,49 +6,14 @@ import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.nio.charset.StandardCharsets
-import java.security.MessageDigest
 import java.security.SecureRandom
-import java.util.Base64
-import java.util.Locale
 import java.util.WeakHashMap
-
-enum class WsOpcode(
-    val code: Int,
-) {
-    TEXT(0x1),
-    BINARY(0x2),
-    CLOSE(0x8),
-    PING(0x9),
-    PONG(0xA),
-}
-
-data class WsFrame(
-    val opcode: WsOpcode,
-    val payload: ByteArray,
-) {
-    fun textOrNull(): String? = if (opcode == WsOpcode.TEXT) String(payload, StandardCharsets.UTF_8) else null
-
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (other !is WsFrame) return false
-        return opcode == other.opcode && payload.contentEquals(other.payload)
-    }
-
-    override fun hashCode(): Int = 31 * opcode.hashCode() + payload.contentHashCode()
-}
-
-data class HttpHeaderBlock(
-    val requestLine: String,
-    val headers: Map<String, String>,
-)
 
 /**
  * Minimal, pure-stdlib RFC 6455 WebSocket and HTTP/1.1 header framing helper.
  * Supports full-duplex text frames, binary frames, fragmentation, and control frames.
  */
 object WebSocketCodec {
-    private const val WS_MAGIC_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-    private const val MAX_HEADER_BYTES = 32 * 1024
     private const val MAX_PAYLOAD_BYTES = 8 * 1024 * 1024
     private const val MAX_CONTROL_FRAME_BYTES = 125L
     private val rng = SecureRandom()
@@ -56,6 +21,12 @@ object WebSocketCodec {
     private class FragmentAssembly(
         val opcode: WsOpcode,
         val buffer: ByteArrayOutputStream,
+    )
+
+    private data class RawFrame(
+        val fin: Boolean,
+        val rawOpcode: Int,
+        val payload: ByteArray,
     )
 
     private val fragmentStates = WeakHashMap<InputStream, FragmentAssembly>()
@@ -66,74 +37,14 @@ object WebSocketCodec {
         }
     }
 
-    fun computeAcceptKey(clientKey: String): String {
-        val sha1 = MessageDigest.getInstance("SHA-1")
-        val digest = sha1.digest((clientKey.trim() + WS_MAGIC_GUID).toByteArray(StandardCharsets.US_ASCII))
-        return Base64.getEncoder().encodeToString(digest)
-    }
+    fun computeAcceptKey(clientKey: String): String = WebSocketHandshake.computeAcceptKey(clientKey)
 
-    fun readHttpHeaderBlock(input: InputStream): HttpHeaderBlock? {
-        val buf = ByteArrayOutputStream(512)
-        var state = 0
-        while (buf.size() < MAX_HEADER_BYTES) {
-            val b = input.read()
-            if (b < 0) {
-                if (buf.size() == 0) return null
-                throw EOFException("Unexpected EOF while reading HTTP headers")
-            }
-            buf.write(b)
-            state =
-                when {
-                    state == 0 && b == '\r'.code -> 1
-                    state == 1 && b == '\n'.code -> 2
-                    state == 2 && b == '\r'.code -> 3
-                    state == 3 && b == '\n'.code -> 4
-                    b == '\r'.code -> 1
-                    else -> 0
-                }
-            if (state == 4) {
-                break
-            }
-        }
-        if (state != 4) {
-            throw IOException("HTTP header block exceeded $MAX_HEADER_BYTES bytes")
-        }
-
-        val raw = String(buf.toByteArray(), StandardCharsets.US_ASCII)
-        val lines = raw.split("\r\n").filter { it.isNotEmpty() }
-        if (lines.isEmpty()) return null
-
-        val headers = LinkedHashMap<String, String>(lines.size)
-        for (i in 1 until lines.size) {
-            val idx = lines[i].indexOf(':')
-            if (idx > 0) {
-                val name = lines[i].substring(0, idx).trim().lowercase(Locale.ROOT)
-                val value = lines[i].substring(idx + 1).trim()
-                headers[name] = value
-            }
-        }
-        return HttpHeaderBlock(requestLine = lines[0], headers = headers)
-    }
+    fun readHttpHeaderBlock(input: InputStream): HttpHeaderBlock? = WebSocketHandshake.readHttpHeaderBlock(input)
 
     fun writeServerUpgradeResponse(
         headers: Map<String, String>,
         output: OutputStream,
-    ) {
-        val clientKey =
-            headers["sec-websocket-key"]
-                ?: throw IOException("Missing Sec-WebSocket-Key header")
-        val accept = computeAcceptKey(clientKey)
-        val response =
-            buildString {
-                append("HTTP/1.1 101 Switching Protocols\r\n")
-                append("Upgrade: websocket\r\n")
-                append("Connection: Upgrade\r\n")
-                append("Sec-WebSocket-Accept: ").append(accept).append("\r\n")
-                append("\r\n")
-            }
-        output.write(response.toByteArray(StandardCharsets.US_ASCII))
-        output.flush()
-    }
+    ) = WebSocketHandshake.writeServerUpgradeResponse(headers, output)
 
     fun performClientHandshake(
         input: InputStream,
@@ -141,156 +52,17 @@ object WebSocketCodec {
         path: String,
         hostHeader: String,
         extraHeaders: Map<String, String> = emptyMap(),
-    ) {
-        val nonce = ByteArray(16)
-        rng.nextBytes(nonce)
-        val clientKey = Base64.getEncoder().encodeToString(nonce)
-        val req =
-            buildString {
-                append("GET ").append(path).append(" HTTP/1.1\r\n")
-                append("Host: ").append(hostHeader).append("\r\n")
-                append("Upgrade: websocket\r\n")
-                append("Connection: Upgrade\r\n")
-                append("Sec-WebSocket-Key: ").append(clientKey).append("\r\n")
-                append("Sec-WebSocket-Version: 13\r\n")
-                for ((k, v) in extraHeaders) {
-                    append(k).append(": ").append(v).append("\r\n")
-                }
-                append("\r\n")
-            }
-        output.write(req.toByteArray(StandardCharsets.US_ASCII))
-        output.flush()
-
-        val block =
-            readHttpHeaderBlock(input)
-                ?: throw IOException("Server closed connection during WebSocket handshake")
-        if (!block.requestLine.contains(" 101 ")) {
-            throw IOException("WebSocket upgrade rejected: ${block.requestLine}")
-        }
-        val expectedAccept = computeAcceptKey(clientKey)
-        val actualAccept = block.headers["sec-websocket-accept"]
-        if (actualAccept != expectedAccept) {
-            throw IOException("Invalid Sec-WebSocket-Accept header")
-        }
-    }
+    ) = WebSocketHandshake.performClientHandshake(rng, input, output, path, hostHeader, extraHeaders)
 
     fun readFrame(
         input: InputStream,
         requireMasked: Boolean = false,
     ): WsFrame? {
         while (true) {
-            val b1 = input.read()
-            if (b1 < 0) {
-                synchronized(fragmentStates) { fragmentStates.remove(input) }
-                return null
-            }
-            val b2 = readByteOrEof(input)
-
-            val fin = (b1 and 0x80) != 0
-            val rsv = b1 and 0x70
-            if (rsv != 0) {
-                throw IOException("Unsupported WebSocket RSV bits: 0x${rsv.toString(16)}")
-            }
-            val rawOpcode = b1 and 0x0F
-            val masked = (b2 and 0x80) != 0
-            if (requireMasked && !masked) {
-                throw IOException("RFC 6455 violation: client frame must be masked")
-            }
-            val len7 = b2 and 0x7F
-            val isControlOpcode = (rawOpcode and 0x08) != 0
-
-            if (isControlOpcode) {
-                if (!fin) {
-                    throw IOException("RFC 6455 violation: control frame must not be fragmented")
-                }
-                if (len7 > MAX_CONTROL_FRAME_BYTES) {
-                    throw IOException("RFC 6455 violation: control frame payload exceeds 125 bytes ($len7)")
-                }
-            }
-
-            val payloadLen =
-                when (len7) {
-                    126 -> {
-                        val hi = readByteOrEof(input)
-                        val lo = readByteOrEof(input)
-                        ((hi shl 8) or lo).toLong()
-                    }
-
-                    127 -> {
-                        var len = 0L
-                        repeat(8) {
-                            len = (len shl 8) or readByteOrEof(input).toLong()
-                        }
-                        len
-                    }
-
-                    else -> {
-                        len7.toLong()
-                    }
-                }
-
-            if (payloadLen < 0 || payloadLen > MAX_PAYLOAD_BYTES) {
-                throw IOException("WebSocket frame payload too large: $payloadLen")
-            }
-
-            val maskKey =
-                if (masked) {
-                    readExactBytes(input, 4)
-                } else {
-                    null
-                }
-            val payload = readExactBytes(input, payloadLen.toInt())
-            if (maskKey != null) {
-                for (i in payload.indices) {
-                    payload[i] = (payload[i].toInt() xor maskKey[i and 3].toInt()).toByte()
-                }
-            }
-
-            if (rawOpcode == 0) {
-                val assembly =
-                    synchronized(fragmentStates) { fragmentStates[input] }
-                        ?: throw IOException("Unexpected continuation frame")
-                if (assembly.buffer.size() + payload.size > MAX_PAYLOAD_BYTES) {
-                    synchronized(fragmentStates) { fragmentStates.remove(input) }
-                    throw IOException("Fragmented WebSocket message exceeded $MAX_PAYLOAD_BYTES bytes")
-                }
-                assembly.buffer.write(payload)
-                if (fin) {
-                    synchronized(fragmentStates) { fragmentStates.remove(input) }
-                    return WsFrame(assembly.opcode, assembly.buffer.toByteArray())
-                }
-                continue
-            }
-
-            val opcode =
-                WsOpcode.entries.firstOrNull { it.code == rawOpcode }
-                    ?: throw IOException("Unsupported WebSocket opcode: 0x${rawOpcode.toString(16)}")
-
-            // Control frames (Close/Ping/Pong) may be interleaved between fragments without resetting fragment state.
-            if (opcode == WsOpcode.CLOSE || opcode == WsOpcode.PING || opcode == WsOpcode.PONG) {
-                return WsFrame(opcode, payload)
-            }
-
-            val hasInFlightFragment = synchronized(fragmentStates) { fragmentStates.containsKey(input) }
-            if (hasInFlightFragment) {
-                synchronized(fragmentStates) { fragmentStates.remove(input) }
-                throw IOException("RFC 6455 violation: new data frame started before fragmented message completed")
-            }
-
-            if (fin) {
-                return WsFrame(opcode, payload)
-            }
-
-            val newAssembly =
-                FragmentAssembly(
-                    opcode = opcode,
-                    buffer =
-                        ByteArrayOutputStream(payload.size.coerceAtLeast(256)).apply {
-                            write(payload)
-                        },
-                )
-            synchronized(fragmentStates) {
-                fragmentStates[input] = newAssembly
+            val raw = readRawFrame(input, requireMasked) ?: return null
+            val assembled = assembleFrame(input, raw)
+            if (assembled != null) {
+                return assembled
             }
         }
     }
@@ -347,7 +119,178 @@ object WebSocketCodec {
         payload: ByteArray,
         mask: Boolean,
     ) {
-        val len = payload.size
+        val header = encodeFrameHeader(opcode, payload.size, mask)
+        output.write(header)
+        if (mask) {
+            val maskKey = ByteArray(4)
+            rng.nextBytes(maskKey)
+            output.write(maskKey)
+            val maskedPayload = ByteArray(payload.size)
+            for (i in payload.indices) {
+                maskedPayload[i] = (payload[i].toInt() xor maskKey[i and 3].toInt()).toByte()
+            }
+            output.write(maskedPayload)
+        } else {
+            output.write(payload)
+        }
+        output.flush()
+    }
+
+    private fun readRawFrame(
+        input: InputStream,
+        requireMasked: Boolean,
+    ): RawFrame? {
+        val b1 = input.read()
+        if (b1 < 0) {
+            clearStreamState(input)
+            return null
+        }
+        val b2 = readByteOrEof(input)
+
+        val fin = (b1 and 0x80) != 0
+        val rawOpcode = b1 and 0x0F
+        val masked = (b2 and 0x80) != 0
+        val len7 = b2 and 0x7F
+        validateFrameHeader(b1 and 0x70, rawOpcode, fin, masked, requireMasked, len7)
+
+        val payloadLen = readPayloadLength(input, len7)
+        val maskKey = if (masked) readExactBytes(input, 4) else null
+        val payload = readExactBytes(input, payloadLen)
+        if (maskKey != null) {
+            unmaskInPlace(payload, maskKey)
+        }
+        return RawFrame(fin = fin, rawOpcode = rawOpcode, payload = payload)
+    }
+
+    private fun validateFrameHeader(
+        rsv: Int,
+        rawOpcode: Int,
+        fin: Boolean,
+        masked: Boolean,
+        requireMasked: Boolean,
+        len7: Int,
+    ) {
+        val isControl = (rawOpcode and 0x08) != 0
+        val error =
+            when {
+                rsv != 0 -> {
+                    "Unsupported WebSocket RSV bits: 0x${rsv.toString(16)}"
+                }
+
+                requireMasked && !masked -> {
+                    "RFC 6455 violation: client frame must be masked"
+                }
+
+                isControl && !fin -> {
+                    "RFC 6455 violation: control frame must not be fragmented"
+                }
+
+                isControl && len7 > MAX_CONTROL_FRAME_BYTES -> {
+                    "RFC 6455 violation: control frame payload exceeds 125 bytes ($len7)"
+                }
+
+                else -> {
+                    null
+                }
+            }
+        if (error != null) {
+            throw IOException(error)
+        }
+    }
+
+    private fun readPayloadLength(
+        input: InputStream,
+        len7: Int,
+    ): Int {
+        val payloadLen =
+            when (len7) {
+                126 -> {
+                    val hi = readByteOrEof(input)
+                    val lo = readByteOrEof(input)
+                    ((hi shl 8) or lo).toLong()
+                }
+
+                127 -> {
+                    var len = 0L
+                    repeat(8) {
+                        len = (len shl 8) or readByteOrEof(input).toLong()
+                    }
+                    len
+                }
+
+                else -> {
+                    len7.toLong()
+                }
+            }
+        if (payloadLen < 0 || payloadLen > MAX_PAYLOAD_BYTES) {
+            throw IOException("WebSocket frame payload too large: $payloadLen")
+        }
+        return payloadLen.toInt()
+    }
+
+    private fun assembleFrame(
+        input: InputStream,
+        raw: RawFrame,
+    ): WsFrame? {
+        if (raw.rawOpcode == 0) {
+            return handleContinuationFrame(input, raw.fin, raw.payload)
+        }
+        val opcode =
+            WsOpcode.entries.firstOrNull { it.code == raw.rawOpcode }
+                ?: throw IOException("Unsupported WebSocket opcode: 0x${raw.rawOpcode.toString(16)}")
+
+        // Control frames (Close/Ping/Pong) may be interleaved between fragments without resetting fragment state.
+        if (opcode == WsOpcode.CLOSE || opcode == WsOpcode.PING || opcode == WsOpcode.PONG) {
+            return WsFrame(opcode, raw.payload)
+        }
+
+        val hasInFlightFragment = synchronized(fragmentStates) { fragmentStates.containsKey(input) }
+        if (hasInFlightFragment) {
+            clearStreamState(input)
+            throw IOException("RFC 6455 violation: new data frame started before fragmented message completed")
+        }
+
+        if (raw.fin) {
+            return WsFrame(opcode, raw.payload)
+        }
+
+        val newAssembly =
+            FragmentAssembly(
+                opcode = opcode,
+                buffer =
+                    ByteArrayOutputStream(raw.payload.size.coerceAtLeast(256)).apply {
+                        write(raw.payload)
+                    },
+            )
+        synchronized(fragmentStates) {
+            fragmentStates[input] = newAssembly
+        }
+        return null
+    }
+
+    private fun handleContinuationFrame(
+        input: InputStream,
+        fin: Boolean,
+        payload: ByteArray,
+    ): WsFrame? {
+        val assembly =
+            synchronized(fragmentStates) { fragmentStates[input] }
+                ?: throw IOException("Unexpected continuation frame")
+        if (assembly.buffer.size() + payload.size > MAX_PAYLOAD_BYTES) {
+            clearStreamState(input)
+            throw IOException("Fragmented WebSocket message exceeded $MAX_PAYLOAD_BYTES bytes")
+        }
+        assembly.buffer.write(payload)
+        if (!fin) return null
+        clearStreamState(input)
+        return WsFrame(assembly.opcode, assembly.buffer.toByteArray())
+    }
+
+    private fun encodeFrameHeader(
+        opcode: WsOpcode,
+        len: Int,
+        mask: Boolean,
+    ): ByteArray {
         val header = ByteArrayOutputStream(14)
         header.write(0x80 or opcode.code)
         val maskBit = if (mask) 0x80 else 0x00
@@ -370,21 +313,16 @@ object WebSocketCodec {
                 }
             }
         }
+        return header.toByteArray()
+    }
 
-        output.write(header.toByteArray())
-        if (mask) {
-            val maskKey = ByteArray(4)
-            rng.nextBytes(maskKey)
-            output.write(maskKey)
-            val maskedPayload = ByteArray(len)
-            for (i in 0 until len) {
-                maskedPayload[i] = (payload[i].toInt() xor maskKey[i and 3].toInt()).toByte()
-            }
-            output.write(maskedPayload)
-        } else {
-            output.write(payload)
+    private fun unmaskInPlace(
+        payload: ByteArray,
+        maskKey: ByteArray,
+    ) {
+        for (i in payload.indices) {
+            payload[i] = (payload[i].toInt() xor maskKey[i and 3].toInt()).toByte()
         }
-        output.flush()
     }
 
     private fun readByteOrEof(input: InputStream): Int {

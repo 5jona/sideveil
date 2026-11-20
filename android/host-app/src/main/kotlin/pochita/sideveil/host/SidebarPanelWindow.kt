@@ -6,48 +6,51 @@ import android.content.Context
 import android.graphics.PixelFormat
 import android.util.Log
 import android.view.ContextThemeWrapper
-import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
-import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.webkit.WebView
 import android.widget.FrameLayout
+import android.window.OnBackInvokedCallback
 import pochita.sideveil.protocol.EdgeSide
 import pochita.sideveil.protocol.PanelConfig
 import pochita.sideveil.protocol.PanelState
 import pochita.sideveil.protocol.PluginSurfaceBackdrop
 
 /**
- * Warm-resident TYPE_APPLICATION_OVERLAY Dialog container hosting the active plugin
- * WebView over a two-layer rendering architecture coordinated by [PanelBackdropController].
+ * Warm-resident `TYPE_APPLICATION_OVERLAY` Dialog container hosting the active plugin
+ * WebView over a two-layer rendering architecture coordinated by [PanelBackdropController]
+ * and [PanelWindowLayout], supporting Android 16–17 [OnBackInvokedCallback] back interception.
  */
 @SuppressLint("RtlHardcoded")
 class SidebarPanelWindow(
     private val context: Context,
-    private val windowManager: WindowManager,
+    windowManager: WindowManager,
     private val onPanelStateChanged: (PanelState) -> Unit,
     private val onBackPressedIntercept: () -> Boolean = { false },
 ) {
-    private val currentDensity: Float
-        get() = context.resources.displayMetrics.density
     private val themedContext = ContextThemeWrapper(context, R.style.Theme_Sideveil_OverlayDialog)
     private val springController = PanelSpringController()
+    private val windowLayout = PanelWindowLayout(context, windowManager)
 
     private var activeWebView: WebView? = null
     private var currentState: PanelState = PanelState.CLOSED
     private var closingInProgress = false
     private var attached = false
+    private var backCallbackRegistered = false
     private var edgeSide = EdgeSide.RIGHT
     private var railInsetDp = 0
     private var panelConfig = PanelConfig()
     private var pluginSizeOverride = PluginSizeOverride()
 
     private val contentContainer = FrameLayout(themedContext)
-    private var cachedWidthPx: Int = dp(340f)
-    private var cachedHeightPx: Int = dp(520f)
+
+    private val backInvokedCallback =
+        OnBackInvokedCallback {
+            handleBackNavigation()
+        }
 
     private val dialog =
         object : Dialog(themedContext, R.style.Theme_Sideveil_OverlayDialog) {
@@ -56,13 +59,9 @@ class SidebarPanelWindow(
             }
 
             override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-                if (event.keyCode == KeyEvent.KEYCODE_BACK &&
-                    event.action == KeyEvent.ACTION_UP &&
-                    currentState == PanelState.OPEN
-                ) {
-                    if (!onBackPressedIntercept()) {
-                        close()
-                    }
+                val isBackUp = event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP
+                if (isBackUp && currentState == PanelState.OPEN) {
+                    handleBackNavigation()
                     return true
                 }
                 return super.dispatchKeyEvent(event)
@@ -82,7 +81,7 @@ class SidebarPanelWindow(
             context = context,
             windowManager = windowManager,
             contentContainer = contentContainer,
-            cornerRadiusProvider = ::cornerPx,
+            cornerRadiusProvider = { windowLayout.cornerPx(panelConfig) },
             windowProvider = { dialog.window },
         )
 
@@ -102,18 +101,7 @@ class SidebarPanelWindow(
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         window.decorView.setPadding(0, 0, 0, 0)
         backdropController.attachToWindow(window)
-
-        val lp = window.attributes
-        lp.title = "SideveilPanelHost"
-        lp.gravity = Gravity.TOP or Gravity.LEFT
-        lp.x = 0
-        lp.y = 0
-        lp.width = 1
-        lp.height = 1
-        lp.flags = BASE_INVISIBLE_FLAGS
-        lp.dimAmount = 0f
-        OverlayWindowFlags.disableMoveAnimation(lp)
-        window.attributes = lp
+        windowLayout.configureInitialWindow(window)
     }
 
     fun isSystemBlurSupported(): Boolean = backdropController.systemBlurSupported
@@ -123,9 +111,7 @@ class SidebarPanelWindow(
     fun getCurrentState(): PanelState = currentState
 
     fun setContentWebView(webView: WebView) {
-        if (activeWebView === webView && webView.parent === contentContainer) {
-            return
-        }
+        if (activeWebView === webView && webView.parent === contentContainer) return
         (webView.parent as? ViewGroup)?.removeView(webView)
         contentContainer.removeAllViews()
         contentContainer.addView(
@@ -142,19 +128,13 @@ class SidebarPanelWindow(
         val clamped = insetDp.coerceIn(0, 80)
         if (railInsetDp == clamped) return
         railInsetDp = clamped
-        recomputePanelDimensions()
-        if (currentState == PanelState.OPEN && attached) {
-            applyOpenLayout(settled = true)
-        }
+        refreshOpenGeometry()
     }
 
     fun setPluginSizeOverride(override: PluginSizeOverride) {
         if (pluginSizeOverride == override) return
         pluginSizeOverride = override
-        recomputePanelDimensions()
-        if (currentState == PanelState.OPEN && attached) {
-            applyOpenLayout(settled = true)
-        }
+        refreshOpenGeometry()
     }
 
     fun setPluginBackdrop(backdrop: PluginSurfaceBackdrop) {
@@ -166,6 +146,9 @@ class SidebarPanelWindow(
         runCatching {
             dialog.show()
             attached = true
+            if (!backCallbackRegistered) {
+                backCallbackRegistered = windowLayout.registerBackCallback(dialog, backInvokedCallback)
+            }
             collapseToWarmInvisible()
             backdropController.registerBlurListener()
             backdropController.apply()
@@ -175,7 +158,7 @@ class SidebarPanelWindow(
     }
 
     fun onSystemConfigurationChanged() {
-        recomputePanelDimensions()
+        windowLayout.recomputeDimensions(panelConfig, railInsetDp, pluginSizeOverride)
         backdropController.onSystemConfigurationChanged()
         if (currentState == PanelState.OPEN && attached) {
             applyOpenLayout(settled = true)
@@ -188,7 +171,7 @@ class SidebarPanelWindow(
     ) {
         edgeSide = side
         panelConfig = config
-        recomputePanelDimensions()
+        windowLayout.recomputeDimensions(panelConfig, railInsetDp, pluginSizeOverride)
         backdropController.updateConfig(config)
         if (currentState == PanelState.OPEN && attached) {
             applyOpenLayout(settled = true)
@@ -206,8 +189,8 @@ class SidebarPanelWindow(
         if (!attached) attachWarm()
         springController.cancel()
         closingInProgress = false
-        recomputePanelDimensions()
-        val startX = hiddenOffsetX().toFloat()
+        windowLayout.recomputeDimensions(panelConfig, railInsetDp, pluginSizeOverride)
+        val startX = windowLayout.hiddenOffsetX().toFloat()
         springController.snapTo(startX)
         showInteractiveWindow(xPx = startX.toInt(), focusable = false, allowOffscreen = true)
         setState(PanelState.DRAGGING)
@@ -220,10 +203,12 @@ class SidebarPanelWindow(
         val nextX =
             springController.updateDrag(
                 progress = progress,
-                hiddenX = hiddenOffsetX().toFloat(),
-                openX = openMarginPx().toFloat(),
+                hiddenX = windowLayout.hiddenOffsetX().toFloat(),
+                openX = windowLayout.openMarginPx(railInsetDp).toFloat(),
             )
-        updateWindowPosition(nextX.toInt(), focusable = false, allowOffscreen = true)
+        dialog.window?.let { win ->
+            windowLayout.updatePosition(win, panelConfig, nextX.toInt(), focusable = false, allowOffscreen = true)
+        }
     }
 
     fun onGestureEnd(
@@ -241,11 +226,11 @@ class SidebarPanelWindow(
         if (!attached) attachWarm()
         springController.cancel()
         closingInProgress = false
-        recomputePanelDimensions()
+        windowLayout.recomputeDimensions(panelConfig, railInsetDp, pluginSizeOverride)
 
-        val wasClosed = currentState == PanelState.CLOSED
-        val startX = if (wasClosed) hiddenOffsetX().toFloat() else springController.currentX
-        val endX = openMarginPx().toFloat()
+        val startX =
+            if (currentState == PanelState.CLOSED) windowLayout.hiddenOffsetX().toFloat() else springController.currentX
+        val endX = windowLayout.openMarginPx(railInsetDp).toFloat()
         springController.snapTo(startX)
         showInteractiveWindow(xPx = startX.toInt(), focusable = true, allowOffscreen = true)
         setState(PanelState.OPEN)
@@ -255,7 +240,9 @@ class SidebarPanelWindow(
             endX = endX,
             startVelocityPx = initialVelocityPx,
             onUpdate = { value ->
-                updateWindowPosition(value.toInt(), focusable = true, allowOffscreen = true)
+                dialog.window?.let { win ->
+                    windowLayout.updatePosition(win, panelConfig, value.toInt(), focusable = true, allowOffscreen = true)
+                }
             },
             onSettled = {
                 if (currentState == PanelState.OPEN && !closingInProgress) {
@@ -271,28 +258,24 @@ class SidebarPanelWindow(
         springController.cancel()
         closingInProgress = true
         setImeFocused(false)
-        recomputePanelDimensions()
+        windowLayout.recomputeDimensions(panelConfig, railInsetDp, pluginSizeOverride)
 
         val closeVelocityPx = if (initialVelocityPx <= 0f) initialVelocityPx else -initialVelocityPx
         springController.animateTo(
             startX = springController.currentX,
-            endX = hiddenOffsetX().toFloat(),
+            endX = windowLayout.hiddenOffsetX().toFloat(),
             startVelocityPx = closeVelocityPx,
             onUpdate = { value ->
-                updateWindowPosition(value.toInt(), focusable = false, allowOffscreen = true)
+                dialog.window?.let { win ->
+                    windowLayout.updatePosition(win, panelConfig, value.toInt(), focusable = false, allowOffscreen = true)
+                }
             },
-            onSettled = {
-                collapseToWarmInvisible()
-            },
+            onSettled = { collapseToWarmInvisible() },
         )
     }
 
     fun toggle() {
-        if (currentState == PanelState.OPEN && !closingInProgress) {
-            close()
-        } else {
-            open()
-        }
+        if (currentState == PanelState.OPEN && !closingInProgress) close() else open()
     }
 
     fun setImeFocused(focused: Boolean) {
@@ -300,7 +283,9 @@ class SidebarPanelWindow(
         val webView = activeWebView ?: return
         val imm = context.getSystemService(InputMethodManager::class.java)
         if (focused) {
-            updateWindowFlags(focusable = true, allowOffscreen = false)
+            dialog.window?.let { win ->
+                windowLayout.updateFlags(win, panelConfig, focusable = true, allowOffscreen = false)
+            }
             webView.requestFocus()
             imm?.showSoftInput(webView, InputMethodManager.SHOW_IMPLICIT)
         } else {
@@ -311,9 +296,26 @@ class SidebarPanelWindow(
     fun detach() {
         springController.cancel()
         backdropController.unregisterBlurListener()
+        if (backCallbackRegistered) {
+            windowLayout.unregisterBackCallback(dialog, backInvokedCallback)
+            backCallbackRegistered = false
+        }
         if (attached) {
             runCatching { dialog.dismiss() }
             attached = false
+        }
+    }
+
+    private fun handleBackNavigation() {
+        if (currentState == PanelState.OPEN && !onBackPressedIntercept()) {
+            close()
+        }
+    }
+
+    private fun refreshOpenGeometry() {
+        windowLayout.recomputeDimensions(panelConfig, railInsetDp, pluginSizeOverride)
+        if (currentState == PanelState.OPEN && attached) {
+            applyOpenLayout(settled = true)
         }
     }
 
@@ -323,134 +325,28 @@ class SidebarPanelWindow(
         allowOffscreen: Boolean,
     ) {
         val window = dialog.window ?: return
-        val lp = window.attributes
-        val horiz = if (edgeSide == EdgeSide.LEFT) Gravity.LEFT else Gravity.RIGHT
-        lp.gravity = Gravity.CENTER_VERTICAL or horiz
-        lp.width = cachedWidthPx
-        lp.height = cachedHeightPx
-        lp.x = xPx
-        lp.y = 0
-        lp.flags = computeInteractiveFlags(focusable = focusable, allowOffscreen = allowOffscreen)
-        lp.dimAmount = panelConfig.scrimAlpha.coerceIn(0f, 0.75f)
-        OverlayWindowFlags.disableMoveAnimation(lp)
-        window.attributes = lp
-        window.decorView.visibility = View.VISIBLE
+        windowLayout.showInteractive(window, edgeSide, panelConfig, xPx, focusable, allowOffscreen)
         backdropController.apply()
     }
 
-    private fun updateWindowPosition(
-        xPx: Int,
-        focusable: Boolean,
-        allowOffscreen: Boolean,
-    ) {
-        val window = dialog.window ?: return
-        val lp = window.attributes
-        val nextFlags = computeInteractiveFlags(focusable = focusable, allowOffscreen = allowOffscreen)
-        if (lp.x != xPx || lp.flags != nextFlags || lp.width != cachedWidthPx || lp.height != cachedHeightPx) {
-            lp.x = xPx
-            lp.width = cachedWidthPx
-            lp.height = cachedHeightPx
-            lp.flags = nextFlags
-            lp.dimAmount = panelConfig.scrimAlpha.coerceIn(0f, 0.75f)
-            window.attributes = lp
-        }
-    }
-
     private fun applyOpenLayout(settled: Boolean) {
-        updateWindowPosition(
-            xPx = openMarginPx(),
+        val window = dialog.window ?: return
+        windowLayout.updatePosition(
+            window = window,
+            panelConfig = panelConfig,
+            xPx = windowLayout.openMarginPx(railInsetDp),
             focusable = true,
             allowOffscreen = !settled,
         )
     }
 
-    private fun updateWindowFlags(
-        focusable: Boolean,
-        allowOffscreen: Boolean,
-    ) {
-        val window = dialog.window ?: return
-        val lp = window.attributes
-        val nextFlags = computeInteractiveFlags(focusable = focusable, allowOffscreen = allowOffscreen)
-        if (lp.flags != nextFlags) {
-            lp.flags = nextFlags
-            window.attributes = lp
-        }
-    }
-
     private fun collapseToWarmInvisible() {
         closingInProgress = false
         val window = dialog.window ?: return
-        window.decorView.visibility = View.INVISIBLE
         backdropController.clearWindowBlur(window)
-        val lp = window.attributes
-        lp.gravity = Gravity.TOP or Gravity.LEFT
-        lp.width = 1
-        lp.height = 1
-        lp.x = 0
-        lp.y = 0
-        lp.dimAmount = 0f
-        lp.flags = BASE_INVISIBLE_FLAGS
-        OverlayWindowFlags.disableMoveAnimation(lp)
-        window.attributes = lp
+        windowLayout.collapseToWarmInvisible(window)
         setState(PanelState.CLOSED)
     }
-
-    private fun computeInteractiveFlags(
-        focusable: Boolean,
-        allowOffscreen: Boolean,
-    ): Int {
-        var flags =
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
-                WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
-        if (!focusable) {
-            flags = flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-        }
-        if (allowOffscreen) {
-            flags = flags or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
-        }
-        if (panelConfig.scrimAlpha > 0.005f) {
-            flags = flags or WindowManager.LayoutParams.FLAG_DIM_BEHIND
-        }
-        return flags
-    }
-
-    private fun recomputePanelDimensions() {
-        val bounds = runCatching { windowManager.currentWindowMetrics.bounds }.getOrNull()
-        val screenW = bounds?.width() ?: context.resources.displayMetrics.widthPixels
-        val screenH = bounds?.height() ?: context.resources.displayMetrics.heightPixels
-        val reservedHorizontal = dp((24 + railInsetDp).toFloat())
-        val maxW = (screenW - reservedHorizontal).coerceAtLeast(dp(240f))
-        val targetWidthDp = (pluginSizeOverride.widthDp ?: panelConfig.widthDp).coerceIn(260, 480)
-        cachedWidthPx = dp(targetWidthDp.toFloat()).coerceAtMost(maxW)
-
-        val maxH = (screenH - dp(32f)).coerceAtLeast(dp(280f))
-        val overrideHeightDp = pluginSizeOverride.heightDp
-        val overrideHeightPercent = pluginSizeOverride.heightPercent
-        val desiredHeightPx =
-            when {
-                overrideHeightDp != null -> {
-                    dp(overrideHeightDp.coerceIn(240, 960).toFloat())
-                }
-
-                overrideHeightPercent != null -> {
-                    val pct = overrideHeightPercent.coerceIn(40, 92)
-                    (screenH * (pct / 100f)).toInt()
-                }
-
-                else -> {
-                    (screenH * (panelConfig.heightPercent / 100f)).toInt()
-                }
-            }
-        cachedHeightPx = desiredHeightPx.coerceIn(dp(280f), maxH)
-    }
-
-    private fun openMarginPx(): Int = dp((12 + railInsetDp).toFloat())
-
-    private fun hiddenOffsetX(): Int = -(cachedWidthPx + dp(24f))
-
-    private fun cornerPx(): Float = dp(panelConfig.cornerRadiusDp.toFloat()).toFloat()
 
     private fun setState(next: PanelState) {
         if (currentState != next) {
@@ -459,15 +355,7 @@ class SidebarPanelWindow(
         }
     }
 
-    private fun dp(value: Float): Int = (value * currentDensity + 0.5f).toInt().coerceAtLeast(1)
-
     companion object {
         private const val TAG = "SideveilPanelWindow"
-
-        private const val BASE_INVISIBLE_FLAGS =
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
     }
 }
