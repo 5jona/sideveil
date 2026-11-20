@@ -1,14 +1,14 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   DEFAULT_CONFIG,
+  normalizeConfig,
+  normalizeSideveilConfig,
   SIDEVEIL_EVENTS,
   SIDEVEIL_METHODS,
-  normalizeSideveilConfig,
-  normalizeConfig,
 } from '../src/shared/types.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -22,7 +22,9 @@ test('DEFAULT_CONFIG conforms to expected structural and numerical bounds', () =
   assert.ok(DEFAULT_CONFIG.edge.topPercent >= 5 && DEFAULT_CONFIG.edge.topPercent <= 85);
   assert.ok(DEFAULT_CONFIG.edge.heightDp >= 64 && DEFAULT_CONFIG.edge.heightDp <= 360);
   assert.ok(DEFAULT_CONFIG.edge.hotzoneWidthDp >= 12 && DEFAULT_CONFIG.edge.hotzoneWidthDp <= 48);
-  assert.ok(DEFAULT_CONFIG.edge.triggerDistanceDp >= 18 && DEFAULT_CONFIG.edge.triggerDistanceDp <= 96);
+  assert.ok(
+    DEFAULT_CONFIG.edge.triggerDistanceDp >= 18 && DEFAULT_CONFIG.edge.triggerDistanceDp <= 96,
+  );
   assert.ok(DEFAULT_CONFIG.edge.edgeOffsetDp >= 0 && DEFAULT_CONFIG.edge.edgeOffsetDp <= 24);
   assert.ok(DEFAULT_CONFIG.edge.handleOpacity >= 0.1 && DEFAULT_CONFIG.edge.handleOpacity <= 1.0);
   assert.equal(typeof DEFAULT_CONFIG.edge.handleVisible, 'boolean');
@@ -46,8 +48,12 @@ test('DEFAULT_CONFIG conforms to expected structural and numerical bounds', () =
 
   // Scope bounds
   assert.ok(DEFAULT_CONFIG.scope.mode === 'allowlist' || DEFAULT_CONFIG.scope.mode === 'global');
-  assert.ok(Array.isArray(DEFAULT_CONFIG.scope.allowlist) && DEFAULT_CONFIG.scope.allowlist.length > 0);
-  assert.ok(Array.isArray(DEFAULT_CONFIG.scope.denylist) && DEFAULT_CONFIG.scope.denylist.length > 0);
+  assert.ok(
+    Array.isArray(DEFAULT_CONFIG.scope.allowlist) && DEFAULT_CONFIG.scope.allowlist.length > 0,
+  );
+  assert.ok(
+    Array.isArray(DEFAULT_CONFIG.scope.denylist) && DEFAULT_CONFIG.scope.denylist.length > 0,
+  );
 });
 
 test('normalizeSideveilConfig handles nullish inputs gracefully', () => {

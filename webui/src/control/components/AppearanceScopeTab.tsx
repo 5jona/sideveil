@@ -1,5 +1,3 @@
-import { Plus, X } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
 import {
   Badge,
   Button,
@@ -15,6 +13,8 @@ import {
   ThemeSwitcher,
   useTheme,
 } from '@pochita/ui';
+import { Plus, X } from 'lucide-react';
+import { type ReactNode, useState } from 'react';
 import type { ScopeMode, SideveilConfig } from '../../shared/types.ts';
 
 interface PackageScopeListProps {

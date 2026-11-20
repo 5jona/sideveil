@@ -1,4 +1,3 @@
-import { RefreshCw, RotateCcw, Terminal, Zap } from 'lucide-react';
 import {
   Badge,
   Button,
@@ -10,6 +9,7 @@ import {
   LogConsole,
   type LogEntry,
 } from '@pochita/ui';
+import { RefreshCw, RotateCcw, Terminal, Zap } from 'lucide-react';
 import type { DaemonStatus } from '../../shared/types.ts';
 
 export interface DiagnosticsTabProps {
@@ -46,12 +46,7 @@ export function DiagnosticsTab({
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
-            <Button
-              size="sm"
-              variant="primary"
-              disabled={busyAction !== null}
-              onClick={onPing}
-            >
+            <Button size="sm" variant="primary" disabled={busyAction !== null} onClick={onPing}>
               <Zap className="size-3.5" />
               {busyAction === 'ping' ? '测试中...' : 'Ping Daemon'}
             </Button>

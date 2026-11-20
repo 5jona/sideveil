@@ -1,48 +1,52 @@
-import { Activity, RefreshCw, Sparkles, X, Zap } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type BridgeOptions, type ContainerAction, useContainerThemeSync } from '@pochita/bridge';
 import {
-  BridgeProvider,
-  type BridgeOptions,
-  type ContainerAction,
-  useBridge,
-  useContainerThemeSync,
-} from '@pochita/bridge';
+  BUILTIN_DIAG_PLUGIN_ID,
+  SideveilPluginProvider,
+  useBackPress,
+  useContainerAction,
+  usePluginBackendState,
+  usePluginStorage,
+  useSideveilPlugin,
+} from '@pochita/sideveil-sdk';
 import {
   AppShell,
   Badge,
   Button,
   Card,
+  type ColorMode,
+  cn,
   Input,
   LogConsole,
+  type LogEntry,
   MetricTile,
   SettingRow,
   Switch,
+  type ThemeId,
   ThemeProvider,
   ThemeSwitcher,
   ToastProvider,
   useTheme,
   useToast,
-  type ColorMode,
-  type LogEntry,
-  type ThemeId,
 } from '@pochita/ui';
-import { cn } from '@pochita/ui';
+import { Activity, RefreshCw, Sparkles, X, Zap } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  normalizeConfig,
-  SIDEVEIL_EVENTS,
-  SIDEVEIL_METHODS,
   type ConfigUpdatedEventPayload,
   type DaemonStatus,
+  normalizeConfig,
   type PanelVisibilityEventPayload,
   type PingResult,
   type ScopeChangedEventPayload,
+  SIDEVEIL_EVENTS,
+  SIDEVEIL_METHODS,
   type SideveilConfig,
 } from '../shared/types.ts';
+import { DIAGNOSTIC_PLUGIN_MANIFEST } from './manifest.ts';
 import { createMockPanelRpcHandler } from './mockPanelBridge.ts';
 
 function nowTimeStr(): string {
   const d = new Date();
-  return d.toTimeString().slice(0, 8) + '.' + String(d.getMilliseconds()).padStart(3, '0');
+  return `${d.toTimeString().slice(0, 8)}.${String(d.getMilliseconds()).padStart(3, '0')}`;
 }
 
 function PanelWorkbench({
@@ -56,7 +60,9 @@ function PanelWorkbench({
   onClearLogs: () => void;
   onHydrated: () => void;
 }) {
-  const bridge = useBridge();
+  const { bridge, pluginId } = useSideveilPlugin();
+  const backendState = usePluginBackendState();
+  const { dismiss, requestImeFocus } = useContainerAction();
   const { pushToast } = useToast();
   const { setThemeId, setColorMode } = useTheme();
 
@@ -67,6 +73,21 @@ function PanelWorkbench({
   const [imeFocused, setImeFocused] = useState(false);
   const [nativeBlurEnabled, setNativeBlurEnabled] = useState(true);
 
+  // Backed by jailed /data/system/sideveil/data/sideveil.diagnostic/preferences.json
+  const { value: storedPref, setValue: setStoredPref } = usePluginStorage<{
+    lastCheckedAt?: number;
+  }>('preferences.json', {});
+
+  // Intercept back navigation when IME focus is active
+  useBackPress(() => {
+    if (imeFocused) {
+      setImeFocused(false);
+      void requestImeFocus(false);
+      onAppendLog('info', '返回按键拦截 -> 已解除输入法聚焦');
+      pushToast('返回键：已退出输入法', 'info');
+    }
+  }, imeFocused);
+
   const isNativeHost = bridge.env === 'host';
 
   const refreshStatus = useCallback(async () => {
@@ -76,7 +97,10 @@ function PanelWorkbench({
         setStatus(res);
       }
     } catch (err) {
-      onAppendLog('warn', `daemon.status failed: ${err instanceof Error ? err.message : String(err)}`);
+      onAppendLog(
+        'warn',
+        `daemon.status failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }, [bridge, onAppendLog]);
 
@@ -91,7 +115,10 @@ function PanelWorkbench({
         setColorMode(cfg.panel.colorMode);
         setNativeBlurEnabled(cfg.panel.nativeBlurEnabled);
       } catch (err) {
-        onAppendLog('warn', `config.get failed: ${err instanceof Error ? err.message : String(err)}`);
+        onAppendLog(
+          'warn',
+          `config.get failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
       } finally {
         onHydrated();
       }
@@ -100,17 +127,18 @@ function PanelWorkbench({
 
     const unsubScope = bridge.onHostEvent(SIDEVEIL_EVENTS.SCOPE_CHANGED, (payload) => {
       const p = payload as ScopeChangedEventPayload | undefined;
-      if (p?.foregroundPackage) {
+      const fgPkg = p?.foregroundPackage;
+      if (fgPkg) {
         setStatus((prev) =>
           prev
             ? {
-              ...prev,
-              foregroundPackage: p.foregroundPackage!,
-              scopeActive: Boolean(p.active),
-            }
+                ...prev,
+                foregroundPackage: fgPkg,
+                scopeActive: Boolean(p.active),
+              }
             : prev,
         );
-        onAppendLog('info', `scope.changed -> ${p.foregroundPackage} (active=${Boolean(p.active)})`);
+        onAppendLog('info', `scope.changed -> ${fgPkg} (active=${Boolean(p.active)})`);
       }
     });
 
@@ -122,18 +150,22 @@ function PanelWorkbench({
       setColorMode(cfg.panel.colorMode);
       setNativeBlurEnabled(cfg.panel.nativeBlurEnabled);
       onHydrated();
-      if (typeof p.foregroundPackage === 'string') {
+      const fgPkg = p.foregroundPackage;
+      if (typeof fgPkg === 'string') {
         setStatus((prev) =>
           prev
             ? {
-              ...prev,
-              foregroundPackage: p.foregroundPackage!,
-              scopeActive: Boolean(p.scopeActive),
-            }
+                ...prev,
+                foregroundPackage: fgPkg,
+                scopeActive: Boolean(p.scopeActive),
+              }
             : prev,
         );
       }
-      onAppendLog('info', `config.updated (theme=${cfg.panel.themeId}, blur=${cfg.panel.nativeBlurEnabled})`);
+      onAppendLog(
+        'info',
+        `config.updated (theme=${cfg.panel.themeId}, blur=${cfg.panel.nativeBlurEnabled})`,
+      );
     });
 
     const unsubVis = bridge.onHostEvent(SIDEVEIL_EVENTS.PANEL_VISIBILITY, (payload) => {
@@ -149,14 +181,7 @@ function PanelWorkbench({
       unsubConfig();
       unsubVis();
     };
-  }, [
-    bridge,
-    onAppendLog,
-    onHydrated,
-    refreshStatus,
-    setColorMode,
-    setThemeId,
-  ]);
+  }, [bridge, onAppendLog, onHydrated, refreshStatus, setColorMode, setThemeId]);
 
   const handlePing = async () => {
     setBusy(true);
@@ -170,8 +195,12 @@ function PanelWorkbench({
         `daemon.ping pong=${Boolean(res?.pong)} rtt=${rtt}ms uptime=${Math.round((res?.daemonUptimeMs ?? 0) / 1000)}s`,
       );
       pushToast(`双向 RPC 响应 ${rtt} ms`, 'success');
+      void setStoredPref({ lastCheckedAt: Date.now() }).catch(() => {});
     } catch (err) {
-      onAppendLog('error', `daemon.ping failed: ${err instanceof Error ? err.message : String(err)}`);
+      onAppendLog(
+        'error',
+        `daemon.ping failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
       pushToast('Ping 调用失败', 'warning');
     } finally {
       setBusy(false);
@@ -179,14 +208,12 @@ function PanelWorkbench({
   };
 
   const handleThemePatch = (patch: { themeId?: ThemeId; colorMode?: ColorMode }) => {
-    void bridge
-      .invoke(SIDEVEIL_METHODS.CONFIG_PATCH_APPEARANCE, patch)
-      .catch((err) => {
-        onAppendLog(
-          'warn',
-          `config.patchAppearance failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      });
+    void bridge.invoke(SIDEVEIL_METHODS.CONFIG_PATCH_APPEARANCE, patch).catch((err) => {
+      onAppendLog(
+        'warn',
+        `config.patchAppearance failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
   };
 
   const handleToggleBlur = (checked: boolean) => {
@@ -206,7 +233,7 @@ function PanelWorkbench({
 
   const handleImeFocus = (focused: boolean) => {
     setImeFocused(focused);
-    void bridge.sendContainerAction({ type: 'requestImeFocus', focused });
+    void requestImeFocus(focused);
     onAppendLog('info', `requestImeFocus(${focused})`);
   };
 
@@ -223,7 +250,11 @@ function PanelWorkbench({
       <AppShell
         variant="drawer"
         title="Sideveil"
-        className={isNativeHost ? 'h-full min-h-0 flex-1' : 'min-h-[calc(100dvh-1rem)] flex-1 rounded-[var(--radius-panel)]'}
+        className={
+          isNativeHost
+            ? 'h-full min-h-0 flex-1'
+            : 'min-h-[calc(100dvh-1rem)] flex-1 rounded-[var(--radius-panel)]'
+        }
         headerLeading={
           <div className="flex size-7 items-center justify-center rounded-[var(--radius-control)] bg-[var(--accent-soft)] text-[var(--accent)]">
             <Sparkles className="size-3.5" />
@@ -234,11 +265,16 @@ function PanelWorkbench({
             <Badge variant={isNativeHost ? 'success' : 'accent'} dot>
               {isNativeHost ? '在线' : '预览'}
             </Badge>
+            {backendState !== 'none' ? (
+              <Badge variant={backendState === 'online' ? 'success' : 'neutral'}>
+                {backendState === 'online' ? '后端就绪' : '后端离线'}
+              </Badge>
+            ) : null}
             <Button
               size="icon-sm"
               variant="ghost"
               aria-label="收起侧边栏"
-              onClick={() => void bridge.sendContainerAction({ type: 'dismiss' })}
+              onClick={() => void dismiss()}
             >
               <X className="size-4" />
             </Button>
@@ -247,12 +283,10 @@ function PanelWorkbench({
         footer={
           <div className="flex items-center justify-between gap-2 text-[11px]">
             <span className="tabular-nums">
-              UID {status?.uid ?? 1000} · :{status?.wsPort ?? 0}
+              {pluginId} · UID {status?.uid ?? 1000}
             </span>
             <span>
-              {nativeBlurEnabled && status?.crossWindowBlurSupported
-                ? '实时毛玻璃'
-                : '磨砂底板'}
+              {nativeBlurEnabled && status?.crossWindowBlurSupported ? '实时毛玻璃' : '磨砂底板'}
             </span>
           </div>
         }
@@ -271,7 +305,13 @@ function PanelWorkbench({
               label="链路延迟"
               value={lastPingMs !== null ? lastPingMs : '--'}
               unit={lastPingMs !== null ? 'ms' : undefined}
-              hint={status ? `PID ${status.hostPid ?? '-'}` : '等待测速'}
+              hint={
+                storedPref?.lastCheckedAt
+                  ? `上次: ${new Date(storedPref.lastCheckedAt).toLocaleTimeString()}`
+                  : status
+                    ? `PID ${status.hostPid ?? '-'}`
+                    : '等待测速'
+              }
               statusLabel={lastPingMs !== null ? '正常' : '待测'}
               statusVariant={lastPingMs !== null ? 'accent' : 'neutral'}
               icon={<Zap className="size-3.5" />}
@@ -391,7 +431,7 @@ export function PanelApp() {
       id: 'init-1',
       timestamp: nowTimeStr(),
       level: 'info',
-      message: 'Panel diagnostic container initialized',
+      message: '面板诊断插件已就绪',
     },
   ]);
 
@@ -412,6 +452,11 @@ export function PanelApp() {
 
   const bridgeOptions = useMemo<BridgeOptions>(
     () => ({
+      allowUrlOverride: false,
+      allowedOrigins: [
+        `https://${BUILTIN_DIAG_PLUGIN_ID}.plugins.sideveil.local`,
+        'https://appassets.androidplatform.net',
+      ],
       mockNamespace: 'sideveil-panel',
       onMockRpc: createMockPanelRpcHandler(),
       onMockContainerAction: (action: ContainerAction) => {
@@ -424,12 +469,12 @@ export function PanelApp() {
   const clearLogs = useCallback(() => setEventsLog([]), []);
 
   return (
-    <BridgeProvider options={bridgeOptions}>
-      <PanelThemedContainer
-        eventsLog={eventsLog}
-        onAppendLog={appendLog}
-        onClearLogs={clearLogs}
-      />
-    </BridgeProvider>
+    <SideveilPluginProvider
+      pluginId={BUILTIN_DIAG_PLUGIN_ID}
+      manifest={DIAGNOSTIC_PLUGIN_MANIFEST}
+      bridgeOptions={bridgeOptions}
+    >
+      <PanelThemedContainer eventsLog={eventsLog} onAppendLog={appendLog} onClearLogs={clearLogs} />
+    </SideveilPluginProvider>
   );
 }

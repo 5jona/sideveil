@@ -1,4 +1,3 @@
-import { Activity, Layers, ShieldCheck } from 'lucide-react';
 import {
   Button,
   Card,
@@ -11,6 +10,7 @@ import {
   Slider,
   Switch,
 } from '@pochita/ui';
+import { Activity, Layers, ShieldCheck } from 'lucide-react';
 import type { DaemonStatus, EdgeSide, SideveilConfig } from '../../shared/types.ts';
 import { EdgePreviewCanvas } from './EdgePreviewCanvas.tsx';
 
@@ -44,7 +44,11 @@ export function OverviewEdgeTab({ config, status, onChange }: OverviewEdgeTabPro
           value={status ? `PID ${status.pid}` : '未连接'}
           statusLabel={status ? `UID ${status.uid}` : '离线'}
           statusVariant={status?.uid === 1000 ? 'success' : 'warning'}
-          hint={status ? `运行 ${Math.round(status.uptimeMs / 1000)}s · WS :${status.wsPort}` : '等待服务启动'}
+          hint={
+            status
+              ? `运行 ${Math.round(status.uptimeMs / 1000)}s · WS :${status.wsPort}`
+              : '等待服务启动'
+          }
           icon={<Activity className="size-4" />}
         />
         <MetricTile
@@ -61,7 +65,9 @@ export function OverviewEdgeTab({ config, status, onChange }: OverviewEdgeTabPro
           statusLabel={status?.taskListenerActive ? 'TaskStack 就绪' : '轮询兜底'}
           statusVariant={status?.gestureMonitorActive ? 'success' : 'danger'}
           hint={
-            status ? `${status.screenWidthPx}×${status.screenHeightPx} (${status.density}x)` : undefined
+            status
+              ? `${status.screenWidthPx}×${status.screenHeightPx} (${status.density}x)`
+              : undefined
           }
           icon={<ShieldCheck className="size-4" />}
         />

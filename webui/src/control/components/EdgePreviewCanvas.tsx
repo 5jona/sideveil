@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react';
 import { colorWithAlpha, readThemeToken, useTheme } from '@pochita/ui';
+import { useEffect, useRef } from 'react';
 import type { SideveilConfig } from '../../shared/types.ts';
 
 export interface EdgePreviewCanvasProps {
@@ -13,7 +13,7 @@ export interface EdgePreviewCanvasProps {
  */
 export function EdgePreviewCanvas({ config, previewOpen = true }: EdgePreviewCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const { themeId, resolvedScheme } = useTheme();
+  const { resolvedScheme } = useTheme();
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -152,7 +152,7 @@ export function EdgePreviewCanvas({ config, previewOpen = true }: EdgePreviewCan
       observer.disconnect();
       resizeObserver.disconnect();
     };
-  }, [config, previewOpen, themeId, resolvedScheme]);
+  }, [config, previewOpen, resolvedScheme]);
 
   return (
     <div className="space-y-1.5">

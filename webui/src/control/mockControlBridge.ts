@@ -1,10 +1,18 @@
 import type { ExecResult } from '@pochita/bridge';
-import { CONFIG_PATH, DEFAULT_CONFIG, type DaemonStatus, type SideveilConfig } from '../shared/types.ts';
+import type { PluginDescriptor, PluginsSnapshotPayload } from '@pochita/sideveil-sdk';
+import {
+  CONFIG_PATH,
+  type DaemonStatus,
+  DEFAULT_CONFIG,
+  type SideveilConfig,
+} from '../shared/types.ts';
 
 interface MockControlState {
   panelState: 'closed' | 'open';
   pingCount: number;
   logs: string[];
+  activePluginId: string;
+  plugins: PluginDescriptor[];
 }
 
 const mockState: MockControlState = {
@@ -18,7 +26,83 @@ const mockState: MockControlState = {
     '09:00:00.610 [I] Host WebSocket connected',
     '09:00:00.614 [I] Host hello pid=14905 blurSupported=true',
   ],
+  activePluginId: 'sideveil.diagnostic',
+  plugins: [
+    {
+      id: 'sideveil.diagnostic',
+      name: '系统诊断',
+      version: '1.0.0',
+      entry: 'index.html',
+      builtin: true,
+      enabled: true,
+      priority: 0,
+      packages: [],
+      global: true,
+      hasScopeOverride: false,
+      backend: 'none',
+      backendState: 'none',
+      capabilities: ['storage', 'toast', 'system-exec'],
+      surface: {
+        backdrop: 'native-glass',
+        widthDp: 340,
+        heightPercent: 72,
+      },
+    },
+    {
+      id: 'com.gamer.hud',
+      name: '游戏性能悬浮条',
+      version: '2.1.4',
+      entry: 'dist/index.html',
+      builtin: false,
+      enabled: true,
+      priority: 20,
+      packages: ['com.miHoYo.GenshinImpact', 'com.tencent.tmgp.sgame'],
+      global: false,
+      hasScopeOverride: false,
+      backend: 'uds-native',
+      backendState: 'online',
+      capabilities: ['storage', 'toast', 'system-exec'],
+      surface: {
+        backdrop: 'transparent',
+        widthDp: 380,
+        heightPercent: 65,
+      },
+    },
+    {
+      id: 'org.music.remote',
+      name: '全局流媒体歌词与控制',
+      version: '1.3.0',
+      entry: 'index.html',
+      builtin: false,
+      enabled: true,
+      priority: 10,
+      packages: ['com.netease.cloudmusic', 'com.spotify.music'],
+      global: false,
+      hasScopeOverride: false,
+      backend: 'uds-app',
+      backendState: 'offline',
+      capabilities: ['toast'],
+      surface: {
+        backdrop: 'opaque',
+        widthDp: 320,
+        heightPercent: 50,
+      },
+    },
+  ],
 };
+
+function getMockSnapshot(fgPkg = 'me.weishu.kernelsu'): PluginsSnapshotPayload {
+  const matched = mockState.plugins
+    .filter((p) => p.enabled && (p.global || p.packages.includes(fgPkg)))
+    .map((p) => p.id);
+
+  return {
+    plugins: mockState.plugins,
+    matchedPluginIds: matched,
+    activePluginId: mockState.activePluginId,
+    foregroundPackage: fgPkg,
+  };
+}
 
 function readMockStoredConfig(): SideveilConfig {
   try {
@@ -34,7 +118,7 @@ function readMockStoredConfig(): SideveilConfig {
 
 function appendMockLog(msg: string) {
   const now = new Date();
-  const ts = now.toTimeString().slice(0, 8) + '.' + String(now.getMilliseconds()).padStart(3, '0');
+  const ts = `${now.toTimeString().slice(0, 8)}.${String(now.getMilliseconds()).padStart(3, '0')}`;
   mockState.logs.push(`${ts} [I] ${msg}`);
   if (mockState.logs.length > 80) {
     mockState.logs.shift();
@@ -131,6 +215,69 @@ export async function handleMockControlExec(cmd: string): Promise<ExecResult> {
         id: 'ctl',
         result: { lines: mockState.logs },
       }),
+      stderr: '',
+    };
+  }
+
+  if (normalized.includes('sideveil-ctl plugins list')) {
+    return {
+      errno: 0,
+      stdout: JSON.stringify(getMockSnapshot()),
+      stderr: '',
+    };
+  }
+
+  if (normalized.includes('sideveil-ctl plugins reload')) {
+    appendMockLog('Rescanned plugins directory');
+    return {
+      errno: 0,
+      stdout: JSON.stringify({
+        ok: true,
+        count: mockState.plugins.length,
+        snapshot: getMockSnapshot(),
+      }),
+      stderr: '',
+    };
+  }
+
+  const enableMatch = normalized.match(/sideveil-ctl plugins (enable|disable) ([^\s]+)/);
+  if (enableMatch) {
+    const isEnable = enableMatch[1] === 'enable';
+    const targetId = enableMatch[2];
+    mockState.plugins = mockState.plugins.map((p) =>
+      p.id === targetId ? { ...p, enabled: isEnable } : p,
+    );
+    appendMockLog(`Plugin ${targetId} ${isEnable ? 'enabled' : 'disabled'}`);
+    return {
+      errno: 0,
+      stdout: JSON.stringify(getMockSnapshot()),
+      stderr: '',
+    };
+  }
+
+  const priorityMatch = normalized.match(/sideveil-ctl plugins priority ([^\s]+) (-?\d+)/);
+  if (priorityMatch) {
+    const targetId = priorityMatch[1];
+    const prio = Number.parseInt(priorityMatch[2], 10);
+    mockState.plugins = mockState.plugins.map((p) =>
+      p.id === targetId ? { ...p, priority: prio } : p,
+    );
+    appendMockLog(`Plugin ${targetId} priority set to ${prio}`);
+    return {
+      errno: 0,
+      stdout: JSON.stringify(getMockSnapshot()),
+      stderr: '',
+    };
+  }
+
+  const selectMatch = normalized.match(/sideveil-ctl plugins select ([^\s]+)/);
+  if (selectMatch) {
+    const targetId = selectMatch[1];
+    mockState.activePluginId = targetId;
+    appendMockLog(`Active plugin switched to ${targetId}`);
+    return {
+      errno: 0,
+      stdout: JSON.stringify(getMockSnapshot()),
       stderr: '',
     };
   }

@@ -1,6 +1,4 @@
-import { AlertCircle, AlertTriangle, PanelRightClose, PanelRightOpen, SlidersHorizontal } from 'lucide-react';
-import { useMemo } from 'react';
-import { BridgeProvider, type BridgeOptions } from '@pochita/bridge';
+import { type BridgeOptions, BridgeProvider } from '@pochita/bridge';
 import {
   AppShell,
   Badge,
@@ -12,10 +10,19 @@ import {
   ThemeProvider,
   ToastProvider,
 } from '@pochita/ui';
+import {
+  AlertCircle,
+  AlertTriangle,
+  PanelRightClose,
+  PanelRightOpen,
+  SlidersHorizontal,
+} from 'lucide-react';
+import { useMemo } from 'react';
 import { CONFIG_PATH } from '../shared/types.ts';
 import { AppearanceScopeTab } from './components/AppearanceScopeTab.tsx';
 import { DiagnosticsTab } from './components/DiagnosticsTab.tsx';
 import { OverviewEdgeTab } from './components/OverviewEdgeTab.tsx';
+import { PluginsTab } from './components/PluginsTab.tsx';
 import { useSideveilControl } from './hooks/useSideveilControl.ts';
 import { handleMockControlExec } from './mockControlBridge.ts';
 
@@ -25,6 +32,7 @@ function ControlWorkbench() {
     config,
     status,
     logs,
+    pluginsSnapshot,
     busyAction,
     lastPingMs,
     saving,
@@ -34,13 +42,21 @@ function ControlWorkbench() {
     loadConfigFromDisk,
     refreshStatus,
     refreshLogs,
+    reloadPlugins,
+    setPluginEnabled,
+    setPluginPriority,
+    selectPlugin,
     runCtl,
     clearLogs,
   } = useSideveilControl();
 
   const isPanelOpen = status?.panelState === 'open';
   const envLabel =
-    bridge.env === 'ksu' ? 'KernelSU WebUI' : bridge.env === 'host' ? 'Host WebView' : 'Browser 预览';
+    bridge.env === 'ksu'
+      ? 'KernelSU WebUI'
+      : bridge.env === 'host'
+        ? 'Host WebView'
+        : 'Browser 预览';
 
   return (
     <AppShell
@@ -70,7 +86,9 @@ function ControlWorkbench() {
             size="sm"
             variant={isPanelOpen ? 'secondary' : 'primary'}
             disabled={busyAction !== null}
-            onClick={() => runCtl(isPanelOpen ? 'close' : 'open', isPanelOpen ? '收起侧边栏' : '弹出侧边栏')}
+            onClick={() =>
+              runCtl(isPanelOpen ? 'close' : 'open', isPanelOpen ? '收起侧边栏' : '弹出侧边栏')
+            }
           >
             {isPanelOpen ? (
               <>
@@ -94,32 +112,24 @@ function ControlWorkbench() {
       }
     >
       {configLoadError ? (
-        <div className="mb-4 flex items-center justify-between gap-3 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--warning)_35%,transparent)] bg-[color-mix(in_srgb,var(--warning)_12%,transparent)] p-3 text-xs text-[var(--text-primary)]">
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-[var(--radius-control)] border border-[color-mix(in_oklab,var(--warning)_35%,transparent)] bg-[color-mix(in_oklab,var(--warning)_12%,transparent)] p-3 text-xs text-[var(--text-primary)]">
           <div className="flex items-center gap-2">
             <AlertTriangle className="size-4 shrink-0 text-[var(--warning)]" />
             <span>{configLoadError}</span>
           </div>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => void loadConfigFromDisk()}
-          >
+          <Button size="sm" variant="secondary" onClick={() => void loadConfigFromDisk()}>
             重试读取
           </Button>
         </div>
       ) : null}
 
       {daemonOfflineError ? (
-        <div className="mb-4 flex items-center justify-between gap-3 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--danger)_35%,transparent)] bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] p-3 text-xs text-[var(--text-primary)]">
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-[var(--radius-control)] border border-[color-mix(in_oklab,var(--danger)_35%,transparent)] bg-[color-mix(in_oklab,var(--danger)_12%,transparent)] p-3 text-xs text-[var(--text-primary)]">
           <div className="flex items-center gap-2">
             <AlertCircle className="size-4 shrink-0 text-[var(--danger)]" />
             <span>Sideveil 守护进程未运行：{daemonOfflineError}</span>
           </div>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => void refreshStatus()}
-          >
+          <Button size="sm" variant="secondary" onClick={() => void refreshStatus()}>
             重试连接
           </Button>
         </div>
@@ -129,6 +139,7 @@ function ControlWorkbench() {
         <TabsList>
           <TabsTrigger value="overview">概览与手势</TabsTrigger>
           <TabsTrigger value="appearance">外观与范围</TabsTrigger>
+          <TabsTrigger value="plugins">插件管理</TabsTrigger>
           <TabsTrigger value="diagnostics">诊断与日志</TabsTrigger>
         </TabsList>
 
@@ -142,6 +153,17 @@ function ControlWorkbench() {
             foregroundPackage={status?.foregroundPackage ?? ''}
             crossWindowBlurSupported={status?.crossWindowBlurSupported ?? null}
             onChange={updateConfig}
+          />
+        </TabsContent>
+
+        <TabsContent value="plugins">
+          <PluginsTab
+            snapshot={pluginsSnapshot}
+            busyAction={busyAction}
+            onReload={reloadPlugins}
+            onSetEnabled={setPluginEnabled}
+            onSetPriority={setPluginPriority}
+            onSelectPlugin={selectPlugin}
           />
         </TabsContent>
 
@@ -166,6 +188,7 @@ function ControlWorkbench() {
 export function ControlApp() {
   const bridgeOptions = useMemo<BridgeOptions>(
     () => ({
+      allowUrlOverride: false,
       mockNamespace: 'sideveil-control',
       onMockExec: handleMockControlExec,
     }),
@@ -174,7 +197,11 @@ export function ControlApp() {
 
   return (
     <BridgeProvider options={bridgeOptions}>
-      <ThemeProvider defaultTheme="coloros-glass" defaultColorMode="system" defaultSurfaceMode="standalone">
+      <ThemeProvider
+        defaultTheme="coloros-glass"
+        defaultColorMode="system"
+        defaultSurfaceMode="standalone"
+      >
         <ToastProvider>
           <ControlWorkbench />
         </ToastProvider>

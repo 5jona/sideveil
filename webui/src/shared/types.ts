@@ -61,6 +61,8 @@ export interface DaemonStatus {
   screenHeightPx: number;
   density: number;
   wsPort: number;
+  sensorConnected?: boolean;
+  sensorPid?: number | null;
 }
 
 export interface PingResult {
@@ -195,7 +197,6 @@ export function normalizeSideveilConfig(
 }
 
 export const normalizeConfig = normalizeSideveilConfig;
-
 
 function clampInt(val: number | undefined, min: number, max: number, fallback: number): number {
   if (typeof val !== 'number' || !Number.isFinite(val)) return fallback;
