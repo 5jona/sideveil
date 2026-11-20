@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { BUILTIN_DIAG_PLUGIN_ID } from '@pochita/sideveil-sdk';
+import { buildPluginScopeCommand } from '../src/control/hooks/usePluginsControl.ts';
 import { handleMockControlExec } from '../src/control/mockControlBridge.ts';
 import { DIAGNOSTIC_PLUGIN_MANIFEST } from '../src/panel/manifest.ts';
 
@@ -50,4 +51,32 @@ test('handleMockControlExec supports plugins list, reload, enable, disable, prio
   assert.equal(selectRes.errno, 0);
   const selectSnap = JSON.parse(selectRes.stdout);
   assert.equal(selectSnap.activePluginId, 'com.gamer.hud');
+
+  // scope override: set custom packages + global=false
+  const setScopeCmd = buildPluginScopeCommand('com.gamer.hud', {
+    global: false,
+    packages: ['me.weishu.kernelsu', 'com.example.game'],
+  });
+  assert.match(setScopeCmd, /plugins scope 'com\.gamer\.hud' --global false --packages/);
+  const scopeRes = await handleMockControlExec(setScopeCmd);
+  assert.equal(scopeRes.errno, 0);
+  const scopeSnap = JSON.parse(scopeRes.stdout);
+  const scopedPlugin = scopeSnap.plugins.find((p) => p.id === 'com.gamer.hud');
+  assert.equal(scopedPlugin?.hasScopeOverride, true);
+  assert.equal(scopedPlugin?.global, false);
+  assert.deepEqual(scopedPlugin?.packages, ['me.weishu.kernelsu', 'com.example.game']);
+  assert.ok(scopeSnap.matchedPluginIds.includes('com.gamer.hud'));
+
+  // scope override: clear resets to manifest defaults
+  const clearScopeCmd = buildPluginScopeCommand('com.gamer.hud', { clear: true });
+  assert.match(clearScopeCmd, /plugins scope 'com\.gamer\.hud' --clear$/);
+  const clearRes = await handleMockControlExec(clearScopeCmd);
+  assert.equal(clearRes.errno, 0);
+  const clearSnap = JSON.parse(clearRes.stdout);
+  const restoredPlugin = clearSnap.plugins.find((p) => p.id === 'com.gamer.hud');
+  assert.equal(restoredPlugin?.hasScopeOverride, false);
+  assert.deepEqual(restoredPlugin?.packages, [
+    'com.miHoYo.GenshinImpact',
+    'com.tencent.tmgp.sgame',
+  ]);
 });

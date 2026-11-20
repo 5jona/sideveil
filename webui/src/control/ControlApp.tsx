@@ -45,6 +45,7 @@ function ControlWorkbench() {
     reloadPlugins,
     setPluginEnabled,
     setPluginPriority,
+    setPluginScopeOverride,
     selectPlugin,
     runCtl,
     clearLogs,
@@ -160,9 +161,11 @@ function ControlWorkbench() {
           <PluginsTab
             snapshot={pluginsSnapshot}
             busyAction={busyAction}
+            foregroundPackage={status?.foregroundPackage ?? ''}
             onReload={reloadPlugins}
             onSetEnabled={setPluginEnabled}
             onSetPriority={setPluginPriority}
+            onSetScopeOverride={setPluginScopeOverride}
             onSelectPlugin={selectPlugin}
           />
         </TabsContent>

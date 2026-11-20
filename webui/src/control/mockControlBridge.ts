@@ -15,6 +15,69 @@ interface MockControlState {
   plugins: PluginDescriptor[];
 }
 
+const INITIAL_MOCK_PLUGINS: readonly PluginDescriptor[] = [
+  {
+    id: 'sideveil.diagnostic',
+    name: '系统诊断',
+    version: '1.0.0',
+    entry: 'index.html',
+    builtin: true,
+    enabled: true,
+    priority: 0,
+    packages: [],
+    global: true,
+    hasScopeOverride: false,
+    backend: 'none',
+    backendState: 'none',
+    capabilities: ['storage', 'toast', 'system-exec'],
+    surface: {
+      backdrop: 'native-glass',
+      widthDp: 340,
+      heightPercent: 72,
+    },
+  },
+  {
+    id: 'com.gamer.hud',
+    name: '游戏性能悬浮条',
+    version: '2.1.4',
+    entry: 'dist/index.html',
+    builtin: false,
+    enabled: true,
+    priority: 20,
+    packages: ['com.miHoYo.GenshinImpact', 'com.tencent.tmgp.sgame'],
+    global: false,
+    hasScopeOverride: false,
+    backend: 'uds-native',
+    backendState: 'online',
+    capabilities: ['storage', 'toast', 'system-exec'],
+    surface: {
+      backdrop: 'transparent',
+      widthDp: 380,
+      heightPercent: 65,
+    },
+  },
+  {
+    id: 'org.music.remote',
+    name: '全局流媒体歌词与控制',
+    version: '1.3.0',
+    entry: 'index.html',
+    builtin: false,
+    enabled: true,
+    priority: 10,
+    packages: ['com.netease.cloudmusic', 'com.spotify.music'],
+    global: false,
+    hasScopeOverride: false,
+    backend: 'uds-app',
+    backendState: 'offline',
+    capabilities: ['toast'],
+    surface: {
+      backdrop: 'opaque',
+      widthDp: 320,
+      heightPercent: 50,
+    },
+  },
+];
+
 const mockState: MockControlState = {
   panelState: 'closed',
   pingCount: 0,
@@ -27,68 +90,7 @@ const mockState: MockControlState = {
     '09:00:00.614 [I] Host hello pid=14905 blurSupported=true',
   ],
   activePluginId: 'sideveil.diagnostic',
-  plugins: [
-    {
-      id: 'sideveil.diagnostic',
-      name: '系统诊断',
-      version: '1.0.0',
-      entry: 'index.html',
-      builtin: true,
-      enabled: true,
-      priority: 0,
-      packages: [],
-      global: true,
-      hasScopeOverride: false,
-      backend: 'none',
-      backendState: 'none',
-      capabilities: ['storage', 'toast', 'system-exec'],
-      surface: {
-        backdrop: 'native-glass',
-        widthDp: 340,
-        heightPercent: 72,
-      },
-    },
-    {
-      id: 'com.gamer.hud',
-      name: '游戏性能悬浮条',
-      version: '2.1.4',
-      entry: 'dist/index.html',
-      builtin: false,
-      enabled: true,
-      priority: 20,
-      packages: ['com.miHoYo.GenshinImpact', 'com.tencent.tmgp.sgame'],
-      global: false,
-      hasScopeOverride: false,
-      backend: 'uds-native',
-      backendState: 'online',
-      capabilities: ['storage', 'toast', 'system-exec'],
-      surface: {
-        backdrop: 'transparent',
-        widthDp: 380,
-        heightPercent: 65,
-      },
-    },
-    {
-      id: 'org.music.remote',
-      name: '全局流媒体歌词与控制',
-      version: '1.3.0',
-      entry: 'index.html',
-      builtin: false,
-      enabled: true,
-      priority: 10,
-      packages: ['com.netease.cloudmusic', 'com.spotify.music'],
-      global: false,
-      hasScopeOverride: false,
-      backend: 'uds-app',
-      backendState: 'offline',
-      capabilities: ['toast'],
-      surface: {
-        backdrop: 'opaque',
-        widthDp: 320,
-        heightPercent: 50,
-      },
-    },
-  ],
+  plugins: INITIAL_MOCK_PLUGINS.map((p) => ({ ...p, packages: [...p.packages] })),
 };
 
 function getMockSnapshot(fgPkg = 'me.weishu.kernelsu'): PluginsSnapshotPayload {
@@ -263,6 +265,52 @@ export async function handleMockControlExec(cmd: string): Promise<ExecResult> {
       p.id === targetId ? { ...p, priority: prio } : p,
     );
     appendMockLog(`Plugin ${targetId} priority set to ${prio}`);
+    return {
+      errno: 0,
+      stdout: JSON.stringify(getMockSnapshot()),
+      stderr: '',
+    };
+  }
+
+  const scopeMatch = normalized.match(/sideveil-ctl plugins scope ([^\s]+)(.*)$/);
+  if (scopeMatch) {
+    const targetId = scopeMatch[1];
+    const rest = scopeMatch[2] ?? '';
+    const isClear = rest.includes('--clear');
+    const globalMatch = rest.match(/--global\s+(true|false|1|0)/);
+    const pkgsMatch = rest.match(/--packages\s+([^\s-][^\s]*)/);
+    const hasEmptyPkgs = /--packages(?:\s+$|\s+--|$)/.test(rest);
+    const defaults = INITIAL_MOCK_PLUGINS.find((p) => p.id === targetId);
+
+    mockState.plugins = mockState.plugins.map((p) => {
+      if (p.id !== targetId) return p;
+      if (isClear && defaults) {
+        return {
+          ...p,
+          global: defaults.global,
+          packages: [...defaults.packages],
+          hasScopeOverride: false,
+        };
+      }
+      const nextGlobal = globalMatch
+        ? globalMatch[1] === 'true' || globalMatch[1] === '1'
+        : p.global;
+      const nextPackages = pkgsMatch
+        ? pkgsMatch[1]
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
+        : hasEmptyPkgs
+          ? []
+          : p.packages;
+      return {
+        ...p,
+        global: nextGlobal,
+        packages: nextPackages,
+        hasScopeOverride: true,
+      };
+    });
+    appendMockLog(`Plugin ${targetId} scope ${isClear ? 'cleared' : 'overridden'}`);
     return {
       errno: 0,
       stdout: JSON.stringify(getMockSnapshot()),

@@ -10,7 +10,7 @@ Target baseline: Android 16–17 (API 36–37, arm64) on Linux GKI 6.12+. Built 
    - Manages `/data/system/sideveil/config.json` with atomic persistence and `inotify` hot-reload.
    - Hosts the open **Plugin Registry** (`inotify`-watched `/data/system/sideveil/plugins/<plugin_id>/manifest.json`, persistent overrides & per-app MRU in `plugins.json`, capability ACLs for `storage`/`toast`/`system-exec`, authenticated loopback static asset serving, and dynamic `uds-native` / `uds-app` backend RPC multiplexing).
    - Exposes a dual-channel Unix Domain Socket gateway (`hub.sock` & `app.sock`) gated by kernel `SO_PEERCRED`, paired with an authenticated loopback WebSocket (`127.0.0.1:0/ws`) and dual-priority outbound queues (coalescing ephemeral gesture moves while preserving critical control/RPC frames).
-   - Provides the native Rust CLI `bin/sideveil-ctl` communicating directly over `hub.sock` (including `plugins list|reload|enable|disable|select`).
+   - Provides the native Rust CLI `bin/sideveil-ctl` communicating directly over `hub.sock` (including `plugins list|reload|enable|disable|priority|scope|select`).
 2. **Thin System Sensor (`android/sensor`, `UID 1000` `app_process64`)**
    - Initializes `ApplicationSharedMemory` and monitors foreground apps via `ITaskStackListener` + 4-argument `ActivityTaskManager.getTasks`.
    - Intercepts edge drags using `InputManagerGlobal.monitorGestureInput` + `InputMonitor.pilferPointers` backed by a pure JVM `EdgeGestureStateMachine`.
@@ -19,10 +19,10 @@ Target baseline: Android 16–17 (API 36–37, arm64) on Linux GKI 6.12+. Built 
 3. **Headless Render Host APK (`android/host-app`, `pochita.sideveil.host`)**
    - Packaged into `/system/priv-app/SideveilHost/SideveilHost.apk` with `privapp-permissions` and `sysconfig` allowlists.
    - Maintains a click-through `TYPE_APPLICATION_OVERLAY` edge indicator capsule, a warm `1x1` `INVISIBLE` overlay container with `SpringAnimation` physics, hardware cross-window blur (`BlurMaskDrawable` + AGSL `GlassBackdropDrawable` with per-plugin `native-glass`/`transparent`/`opaque` backdrop overrides), IME focus handoff, and an automatic `46dp` frosted-glass **Plugin Rail** (`PluginRailWindow`) shown only when 2+ plugins match the foreground app.
-   - Isolates each plugin in its own warm LRU-cached WebView sandbox under `https://<pluginId>.plugins.sideveil.local/` with `WebMessagePort`, server-stamped `pluginId` identity, back-key interception, and `onRenderProcessGone` crash self-healing.
+   - Isolates each plugin in its own warm LRU-cached WebView sandbox under `https://<pluginId>.plugins.sideveil.local/` with `WebMessagePort`, server-stamped `pluginId` identity, Android 16–17 `OnBackInvokedCallback` back interception, and `onRenderProcessGone` crash self-healing.
 4. **KernelSU WebUI Control Plane & Built-in Diagnostic Plugin (`webui/`)**
    - Built with `@pochita/ui`, `@pochita/bridge`, `@pochita/sideveil-sdk`, and `@pochita/config` from `pochita-webui-kit`.
-   - Control Plane (`webui/control` -> `webroot/`) edits `/data/system/sideveil/config.json` atomically (`inotify` hot-reload), manages registered plugins (enable/disable, priority, rescan, quick switch), and controls the live sidebar via `/data/adb/modules/sideveil/bin/sideveil-ctl`.
+   - Control Plane (`webui/control` -> `webroot/`) edits `/data/system/sideveil/config.json` atomically (`inotify` hot-reload), manages registered plugins (enable/disable, priority, trigger scope overrides, rescan, quick switch), and controls the live sidebar via `/data/adb/modules/sideveil/bin/sideveil-ctl`.
    - Built-in Diagnostic Plugin (`sideveil.diagnostic`, `webui/panel` -> `assets/panel/`) adheres to the standard `@pochita/sideveil-sdk` plugin contract.
 
 ## Security & Runtime Separation

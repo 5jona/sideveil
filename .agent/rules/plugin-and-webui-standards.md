@@ -29,7 +29,7 @@
   - Standard `@pochita/bridge` methods (`fs.read`, `fs.writeAtomic`, `ui.toast`, `system.exec`) are scoped to the plugin's isolated `/data/system/sideveil/data/<plugin_id>/` directory and manifest ACLs.
 
 ## 4. Frontend & `pochita-webui-kit` Standards
-All Sideveil WebUI code (`control`, `builtin-diag`) and `pochita-webui-kit` packages must adhere to `pochita-webui-kit/.agents/rules/webui-standards.md`, plus:
+All Sideveil WebUI code (`control`, `panel` built-in diagnostic plugin `sideveil.diagnostic`) and `pochita-webui-kit` packages must adhere to `pochita-webui-kit/.agents/rules/webui-standards.md`, plus:
 - **Unified Linter & Formatter**: Enforce **Biome** across both `pochita-webui-kit` and `sideveil/webui` (2-space indent, consistent imports, zero lint warnings).
 - **Theme Bootstrap Timing**: Inject the theme bootstrap inline script with `injectTo: 'head-prepend'` (immediately after `<meta name="color-scheme">`) so first paint never flashes.
 - **CSS & Token Hygiene**:

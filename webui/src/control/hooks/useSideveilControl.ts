@@ -1,5 +1,4 @@
 import { shellQuote, useBridge } from '@pochita/bridge';
-import type { PluginsSnapshotPayload } from '@pochita/sideveil-sdk';
 import { type LogEntry, useTheme, useToast } from '@pochita/ui';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -11,6 +10,7 @@ import {
   normalizeSideveilConfig,
   type SideveilConfig,
 } from '../../shared/types.ts';
+import { usePluginsControl } from './usePluginsControl.ts';
 
 function parseDaemonLogLines(lines: readonly string[]): LogEntry[] {
   return lines.map((line, idx) => {
@@ -34,12 +34,24 @@ export function useSideveilControl() {
   const [config, setConfigState] = useState<SideveilConfig>(DEFAULT_CONFIG);
   const [status, setStatus] = useState<DaemonStatus | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [busyAction, setBusyAction] = useState<CtlCommand | null>(null);
+  const [ctlBusyAction, setCtlBusyAction] = useState<CtlCommand | null>(null);
   const [lastPingMs, setLastPingMs] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [configLoadError, setConfigLoadError] = useState<string | null>(null);
   const [daemonOfflineError, setDaemonOfflineError] = useState<string | null>(null);
-  const [pluginsSnapshot, setPluginsSnapshot] = useState<PluginsSnapshotPayload | null>(null);
+
+  const {
+    pluginsSnapshot,
+    pluginBusyAction,
+    refreshPlugins,
+    reloadPlugins,
+    setPluginEnabled,
+    setPluginPriority,
+    setPluginScopeOverride,
+    selectPlugin,
+  } = usePluginsControl(bridge, pushToast);
+
+  const busyAction = ctlBusyAction ?? pluginBusyAction;
 
   const latestConfigRef = useRef<SideveilConfig>(DEFAULT_CONFIG);
   const pendingSaveConfigRef = useRef<SideveilConfig | null>(null);
@@ -86,29 +98,6 @@ export function useSideveilControl() {
       } catch {
         // Ignore malformed log frame.
       }
-    }
-  }, [bridge]);
-
-  const refreshPlugins = useCallback(async () => {
-    try {
-      const res = await bridge.exec(`${shellQuote(CTL_BIN)} plugins list`);
-      if (res.errno === 0 && res.stdout.trim()) {
-        try {
-          const parsed = JSON.parse(res.stdout.trim()) as
-            | PluginsSnapshotPayload
-            | { result?: PluginsSnapshotPayload };
-          const snapshot = (
-            'result' in parsed && parsed.result ? parsed.result : parsed
-          ) as PluginsSnapshotPayload;
-          if (Array.isArray(snapshot.plugins)) {
-            setPluginsSnapshot(snapshot);
-          }
-        } catch {
-          // Ignore transient JSON parse issues.
-        }
-      }
-    } catch {
-      // Ignore transient errors
     }
   }, [bridge]);
 
@@ -253,101 +242,9 @@ export function useSideveilControl() {
     };
   }, [flushPendingSave, loadConfigFromDisk, refreshLogs, refreshPlugins, refreshStatus]);
 
-  const reloadPlugins = useCallback(async () => {
-    setBusyAction('plugins' as unknown as CtlCommand);
-    try {
-      const res = await bridge.exec(`${shellQuote(CTL_BIN)} plugins reload`);
-      if (res.errno === 0) {
-        pushToast('插件扫描重载成功', 'success');
-        await refreshPlugins();
-      } else {
-        pushToast(`插件重载失败: ${res.stderr || res.stdout}`, 'warning');
-      }
-    } catch (err) {
-      pushToast(`插件重载失败: ${err instanceof Error ? err.message : String(err)}`, 'warning');
-    } finally {
-      setBusyAction(null);
-    }
-  }, [bridge, pushToast, refreshPlugins]);
-
-  const setPluginEnabled = useCallback(
-    async (pluginId: string, enabled: boolean) => {
-      const actionCmd = enabled ? 'enable' : 'disable';
-      setBusyAction(`plugin-${pluginId}` as unknown as CtlCommand);
-      try {
-        const res = await bridge.exec(
-          `${shellQuote(CTL_BIN)} plugins ${actionCmd} ${shellQuote(pluginId)}`,
-        );
-        if (res.errno === 0) {
-          pushToast(`插件 ${pluginId} 已${enabled ? '启用' : '禁用'}`, 'success');
-          await refreshPlugins();
-        } else {
-          pushToast(`设置插件状态失败: ${res.stderr || res.stdout}`, 'warning');
-        }
-      } catch (err) {
-        pushToast(`操作失败: ${err instanceof Error ? err.message : String(err)}`, 'warning');
-      } finally {
-        setBusyAction(null);
-      }
-    },
-    [bridge, pushToast, refreshPlugins],
-  );
-
-  const setPluginPriority = useCallback(
-    async (pluginId: string, priority: number) => {
-      setBusyAction(`plugin-${pluginId}` as unknown as CtlCommand);
-      try {
-        const res = await bridge.exec(
-          `${shellQuote(CTL_BIN)} plugins priority ${shellQuote(pluginId)} ${priority}`,
-        );
-        if (res.errno === 0) {
-          pushToast(`插件 ${pluginId} 优先级已更新为 ${priority}`, 'success');
-          await refreshPlugins();
-        } else {
-          // If CLI doesn't have dedicated priority subcommand, use RPC
-          const rpcRes = await bridge.invoke<PluginsSnapshotPayload>('plugins.setPriority', {
-            pluginId,
-            priority,
-          });
-          if (rpcRes && Array.isArray(rpcRes.plugins)) {
-            setPluginsSnapshot(rpcRes);
-          }
-          pushToast(`插件 ${pluginId} 优先级已更新为 ${priority}`, 'success');
-        }
-      } catch (err) {
-        pushToast(`更新优先级失败: ${err instanceof Error ? err.message : String(err)}`, 'warning');
-      } finally {
-        setBusyAction(null);
-      }
-    },
-    [bridge, pushToast, refreshPlugins],
-  );
-
-  const selectPlugin = useCallback(
-    async (pluginId: string) => {
-      setBusyAction(`plugin-${pluginId}` as unknown as CtlCommand);
-      try {
-        const res = await bridge.exec(
-          `${shellQuote(CTL_BIN)} plugins select ${shellQuote(pluginId)}`,
-        );
-        if (res.errno === 0) {
-          pushToast(`已切换至插件 ${pluginId}`, 'success');
-          await refreshPlugins();
-        } else {
-          pushToast(`切换插件失败: ${res.stderr || res.stdout}`, 'warning');
-        }
-      } catch (err) {
-        pushToast(`切换插件失败: ${err instanceof Error ? err.message : String(err)}`, 'warning');
-      } finally {
-        setBusyAction(null);
-      }
-    },
-    [bridge, pushToast, refreshPlugins],
-  );
-
   const runCtl = useCallback(
     async (action: CtlCommand, label: string) => {
-      setBusyAction(action);
+      setCtlBusyAction(action);
       const t0 = performance.now();
       try {
         const res = await bridge.exec(`${shellQuote(CTL_BIN)} ${shellQuote(action)}`);
@@ -366,7 +263,7 @@ export function useSideveilControl() {
           pushToast(`${label}失败：${res.stderr || res.stdout}`, 'warning');
         }
       } finally {
-        setBusyAction(null);
+        setCtlBusyAction(null);
       }
     },
     [bridge, loadConfigFromDisk, pushToast, refreshLogs, refreshStatus],
@@ -393,6 +290,7 @@ export function useSideveilControl() {
     reloadPlugins,
     setPluginEnabled,
     setPluginPriority,
+    setPluginScopeOverride,
     selectPlugin,
     runCtl,
     clearLogs,
