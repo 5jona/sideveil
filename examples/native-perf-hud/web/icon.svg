@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+  <defs>
+    <linearGradient id="hud-grad" x1="2" y1="4" x2="22" y2="20" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#34d399" />
+      <stop offset="100%" stop-color="#38bdf8" />
+    </linearGradient>
+  </defs>
+  <rect x="2.5" y="4" width="19" height="16" rx="4.5" stroke="currentColor" stroke-width="1.8" opacity="0.88" />
+  <path d="M5.5 14.5 L8.8 11.2 L11.5 13.4 L15.2 8.8 L18.5 11.4" stroke="url(#hud-grad)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+</svg>

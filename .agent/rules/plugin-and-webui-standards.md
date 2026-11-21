@@ -9,11 +9,11 @@
 - **Required `manifest.json` fields**:
   - `id`: Reverse-DNS or kebab-case unique identifier (e.g. `com.example.foo`).
   - `name`, `version`, `icon`: Display metadata (used by Control WebUI and Plugin Rail).
-  - `triggers`: Matching rules (target package list, global mode, priority).
+  - `triggers`: Matching rules (target package list, optional Activity suffix list, global mode, priority).
   - `entry`: Relative path under `web/` (e.g. `web/index.html`).
   - `backend` (optional): `none` | `uds-native` (KernelSU daemon via `hub.sock`) | `uds-app` (LSPosed hook in target app via `app.sock` + `SO_PEERCRED` UID match).
-  - `capabilities` (optional): Least-privilege permission requests (e.g. `storage`, `toast`, `system.exec`).
-  - `surface` (optional): Default backdrop mode (`native-glass` | `transparent` | `opaque`) and preferred panel size hints.
+  - `capabilities` (optional): Least-privilege permission requests (`storage`, `toast`, `system-exec`, `native-hud`, `clipboard`, `haptics`, `telemetry`, `inter-plugin-bus`).
+  - `surface` (optional): Default backdrop mode (`native-glass` | `transparent` | `opaque`), presentation mode (`drawer` | `peek` | `pinned` | `wide` | `native-hud`), `crossOriginIsolated` (on-demand COOP/COEP/CORP for WASM/WebGPU), and preferred panel size hints.
 - **Dynamic backend lifecycle**: Backends connect over UDS and register with `plugin.register`. If a backend disconnects, the plugin remains discoverable and the frontend receives a `plugin.backendState` event (`online` / `offline`).
 
 ## 3. Host Container & Plugin RPC Contract

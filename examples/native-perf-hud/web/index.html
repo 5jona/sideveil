@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="color-scheme" content="dark light" />
+  <title>性能监控 HUD</title>
+  <style>
+    :root { color-scheme: dark light; font-family: system-ui, -apple-system, sans-serif; }
+    body { margin: 0; padding: 14px; background: transparent; color: #f1f5f9; }
+    .card { background: rgba(15, 23, 42, 0.42); border: 1px solid rgba(255,255,255,0.14); border-radius: 16px; padding: 14px; display: grid; gap: 10px; }
+    .title { font-size: 14px; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
+    .badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: rgba(56, 189, 248, 0.2); color: #7dd3fc; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; }
+    button { flex: 1; min-width: 92px; border: 1px solid rgba(255,255,255,0.18); background: rgba(255,255,255,0.08); color: #f8fafc; border-radius: 10px; padding: 8px 10px; font-size: 12px; cursor: pointer; }
+    button.primary { background: var(--accent, #0284c7); border-color: transparent; color: var(--accent-fg, #fff); }
+    .hint { font-size: 11px; color: rgba(226, 232, 240, 0.72); line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="title">
+      <span>零 WebView 原生 HUD</span>
+      <span id="state" class="badge">vello_cpu NEON</span>
+    </div>
+    <div class="hint">
+      Rust 后端直连 hub.sock 采样 CPU / RAM / 温度，经 libsideveil_hud.so 在原生跨窗模糊之上渲染矢量曲线与等宽数字。
+    </div>
+    <div class="row">
+      <button id="toggleHud" class="primary">开启 / 关闭 HUD</button>
+      <button id="toggleTouch">切换点击穿透</button>
+      <button id="closeBtn">收起抽屉</button>
+    </div>
+  </div>
+  <script>
+    let port = null;
+    let seq = 1;
+    let hudOn = true;
+    let clickThrough = false;
+
+    function rpc(method, params) {
+      const msg = JSON.stringify({ jsonrpc: '2.0', id: 'hud-' + (seq++), method, params });
+      if (port) port.postMessage(msg);
+      else if (window.__POCHITA_HOST__) window.__POCHITA_HOST__.postMessage(msg);
+    }
+
+    window.addEventListener('message', (ev) => {
+      if (ev.ports && ev.ports[0] && !port) {
+        port = ev.ports[0];
+        port.onmessage = () => {};
+      }
+    });
+
+    document.getElementById('toggleHud').onclick = () => {
+      hudOn = !hudOn;
+      document.getElementById('state').textContent = hudOn ? 'HUD 运行中' : 'HUD 已隐藏';
+      rpc('plugin.invoke', { method: 'setEnabled', params: { enabled: hudOn } });
+    };
+    document.getElementById('toggleTouch').onclick = () => {
+      clickThrough = !clickThrough;
+      rpc('plugin.invoke', { method: 'setClickThrough', params: { clickThrough } });
+    };
+    document.getElementById('closeBtn').onclick = () => {
+      rpc('container.action', { type: 'dismiss' });
+    };
+  </script>
+</body>
+</html>

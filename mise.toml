@@ -52,6 +52,11 @@ description = "Cross-compile Rust hub binaries and HUD JNI cdylib for aarch64-li
 dir = "{{config_root}}/hub"
 run = "cargo build --release --target aarch64-linux-android -p sideveild -p sideveil-ctl -p sideveil-hud-jni"
 
+[tasks."examples:build"]
+description = "Cross-compile standalone native-perf-hud example plugin daemon for aarch64-linux-android"
+dir = "{{config_root}}/examples/native-perf-hud"
+run = "cargo build --release --target aarch64-linux-android"
+
 [tasks.check]
 description = "Run all Rust, WebUI, and Android quality gates"
 run = "mise run hub:check && mise run webui:check && mise run android:check"

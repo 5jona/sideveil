@@ -1,0 +1,22 @@
+{
+  "id": "example.native-perf-hud",
+  "name": "性能监控 HUD",
+  "version": "0.1.0",
+  "icon": "web/icon.svg",
+  "triggers": {
+    "packages": [],
+    "activities": [],
+    "global": true,
+    "priority": 15
+  },
+  "entry": "web/index.html",
+  "backend": "uds-native",
+  "capabilities": ["native-hud", "telemetry"],
+  "surface": {
+    "backdrop": "native-glass",
+    "presentation": "drawer",
+    "crossOriginIsolated": false,
+    "widthDp": 320,
+    "heightPercent": 48
+  }
+}

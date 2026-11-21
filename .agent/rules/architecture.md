@@ -15,9 +15,11 @@ Sideveil is an open microkernel sidebar host targeting **Android 16–17 (API 36
 
 ## 2. Repository & Runtime Naming Conventions
 - **Rust Workspace (`sideveil/hub/`)**:
-  - `crates/sideveil-protocol` — Shared Manifest, JSON-RPC 2.0, event, and ACL wire types.
+  - `crates/sideveil-protocol` — Shared Manifest, JSON-RPC 2.0, HUD, Theme, event, and ACL wire types.
+  - `crates/sideveil-gfx` — Shared pure-Rust Linebender (`vello_cpu` NEON, `kurbo`, `peniko`, `color`, optional `usvg`) SVG icon rasterizer, `Oklch` palette synthesizer, and `HudCanvas` renderer.
+  - `crates/sideveil-hud-jni` — Lightweight `arm64-v8a` `cdylib` (`libsideveil_hud.so`) linking `libjnigraphics.so` for zero-WebView native vector HUDs.
   - `crates/sideveild` — Core hub daemon binary.
-  - `crates/sideveil-ctl` — Native CLI binary.
+  - `crates/sideveil-ctl` — Native CLI binary (kept decoupled from `sideveil-gfx`).
 - **Android Modules (`sideveil/android/`)**:
   - `:hidden-stubs` — Compile-only Android hidden API stubs.
   - `:protocol` — Minimal wire DTOs shared by `:sensor` and `:host-app`.

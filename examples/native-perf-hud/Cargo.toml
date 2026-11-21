@@ -1,0 +1,17 @@
+[package]
+name = "sideveil-example-perf-hud"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sideveil-protocol = { path = "../../hub/crates/sideveil-protocol" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+opt-level = 3

@@ -21,8 +21,11 @@ Align strictly with `pochita-webui-kit/.agents/rules/webui-standards.md` Section
   - Preload `HardwareRenderer.preload()` and keep the overlay window warm-attached (`1x1` `INVISIBLE` when closed) with `PRIVATE_FLAG_NO_MOVE_ANIMATION` to guarantee zero-jank expansion.
   - Guard `onConfigurationChanged` against redundant double-layout / double-redraw passes.
 - **Motion & Spring Physics**:
-  - Target ColorOS-grade five-channel coupled springs (`transX`, `transY`, `width`, `height`, `cornerRadius`) batched via `postOnAnimation`, revealing from the edge handle `sourceRect` via center-anchored clip bounds (`scale = 1.0f`) rather than stretching content.
-  - Support edge reverse-drag cancellation (`240px` zone) and clean post-dismiss fade to `1x1 INVISIBLE`.
+  - Lock `WindowManager.LayoutParams` `width`/`height` during open/close springs to guarantee zero WebView CSS reflow and zero GraphicBuffer reallocations; drive origin-anchored vertical glide (`startYFraction`), staged content alpha reveal, quantized progressive cross-window blur, dynamic AGSL specular flow, and synchronized `PluginRailWindow` entry/exit from a single normalized `progress` via `PanelMotionChoreographer`.
+  - Support `240px` edge reverse-pull cancellation, optional fullscreen double-swipe anti-accidental trigger, `450ms` long-press handle repositioning, stepped `VibrationEffect.Composition` haptics, `WindowInsets` (IME/cutout/tablet) avoidance, and Android 16–17 `OnBackAnimationCallback` predictive back previews.
+- **Zero-WebView Native HUD (`libsideveil_hud.so`)**:
+  - Keep the 24/7 host shell on HWUI + SurfaceFlinger cross-window blur + AGSL (never use `SurfaceView` + Vulkan/wgpu for the host shell).
+  - For high-frequency lightweight overlays (`NativeHudWindow`), rasterize vector geometry via `sideveil-hud-jni` (`vello_cpu` NEON) into double-buffered `ARGB_8888` Bitmaps and composite CJK/Emoji/tabular text (`tnum`) via HWUI `Canvas.drawText`.
 
 ## 3. Multi-Plugin WebView Sandbox & Plugin Rail
 - **Per-plugin Origin isolation**: Assign each plugin an isolated virtual origin (`https://<pluginId>.plugins.sideveil.local/`) via `WebViewAssetLoader` / custom request interceptor so plugins cannot read each other's `localStorage` or caches. Disable `allowFileAccess` and `allowContentAccess`.

@@ -5,25 +5,27 @@ Target baseline: Android 16–17 (API 36–37, arm64) on Linux GKI 6.12+. Built 
 
 ## Architecture
 
-1. **Rust Core Hub (`hub/crates/sideveild` & `hub/crates/sideveil-ctl`)**
+1. **Rust Core Hub (`hub/crates/sideveild`, `sideveil-gfx`, `sideveil-hud-jni`, `sideveil-ctl`)**
    - Supervises `sideveil-sensor` directly (`UID 1000` drop via `pre_exec`) and `SideveilHost` via Linux `pidfd_open` + Tokio `AsyncFd` (`epoll`) with zero shell/curl polling.
    - Manages `/data/system/sideveil/config.json` with atomic persistence and `inotify` hot-reload.
-   - Hosts the open **Plugin Registry** (`inotify`-watched `/data/system/sideveil/plugins/<plugin_id>/manifest.json`, persistent overrides & per-app MRU in `plugins.json`, capability ACLs for `storage`/`toast`/`system-exec`, authenticated loopback static asset serving, and dynamic `uds-native` / `uds-app` backend RPC multiplexing).
-   - Exposes a dual-channel Unix Domain Socket gateway (`hub.sock` & `app.sock`) gated by kernel `SO_PEERCRED`, paired with an authenticated loopback WebSocket (`127.0.0.1:0/ws`) and dual-priority outbound queues (coalescing ephemeral gesture moves while preserving critical control/RPC frames).
-   - Provides the native Rust CLI `bin/sideveil-ctl` communicating directly over `hub.sock` (including `plugins list|reload|enable|disable|priority|scope|select`).
+   - Hosts the open **Plugin Registry** (`inotify`-watched `/data/system/sideveil/plugins/<plugin_id>/manifest.json`, persistent overrides & per-app MRU in `plugins.json`, package + Activity-level triggers, capability ACLs for `storage`/`toast`/`system-exec`/`native-hud`/`clipboard`/`haptics`/`telemetry`/`inter-plugin-bus`, structured audit ring, authenticated loopback static asset serving with on-demand COOP/COEP headers, per-plugin loopback Dev Mode URLs, and dynamic `uds-native` / `uds-app` backend RPC multiplexing).
+   - Integrates **`sideveil-gfx`** (Linebender `color` `Oklch`, `kurbo`, `peniko`, `vello_cpu` NEON + `usvg`): powers on-disk cached SVG-to-PNG icon rasterization (`GET /plugins/<id>/__icon?size=&theme=`), WCAG-verified Material You `Oklch` palette synthesis (`theme.paletteUpdated`), and zero-WebView `NativeHudScene` rasterization via **`sideveil-hud-jni`** (`libsideveil_hud.so` + NDK `libjnigraphics.so`).
+   - Exposes a dual-channel Unix Domain Socket gateway (`hub.sock` & `app.sock`) gated by kernel `SO_PEERCRED`, paired with an authenticated loopback WebSocket (`127.0.0.1:0/ws`) and dual-priority outbound queues (coalescing ephemeral gesture moves and 60Hz HUD frames while preserving critical control/RPC frames).
+   - Provides the native Rust CLI `bin/sideveil-ctl` communicating directly over `hub.sock` (including `plugins list|reload|enable|disable|priority|scope|dev|audit|select` and `hud demo|dismiss`).
 2. **Thin System Sensor (`android/sensor`, `UID 1000` `app_process64`)**
-   - Initializes `ApplicationSharedMemory` and monitors foreground apps via `ITaskStackListener` + 4-argument `ActivityTaskManager.getTasks`.
-   - Intercepts edge drags using `InputManagerGlobal.monitorGestureInput` + `InputMonitor.pilferPointers` backed by a pure JVM `EdgeGestureStateMachine`.
+   - Initializes `ApplicationSharedMemory` and monitors foreground packages and Activities via `ITaskStackListener` + 4-argument `ActivityTaskManager.getTasks`.
+   - Intercepts edge drags using `InputManagerGlobal.monitorGestureInput` + `InputMonitor.pilferPointers` backed by a pure JVM `EdgeGestureStateMachine` (`240px` reverse-pull cancel, optional fullscreen double-swipe anti-accidental trigger, and `450ms` long-press handle repositioning).
    - Grants `OP_SYSTEM_ALERT_WINDOW` and Doze exemption to `pochita.sideveil.host` via `IAppOpsService` and `IDeviceIdleController`.
    - Connects persistently to `sideveild` via `hub.sock` NDJSON framing.
 3. **Headless Render Host APK (`android/host-app`, `pochita.sideveil.host`)**
-   - Packaged into `/system/priv-app/SideveilHost/SideveilHost.apk` with `privapp-permissions` and `sysconfig` allowlists.
-   - Maintains a click-through `TYPE_APPLICATION_OVERLAY` edge indicator capsule, a warm `1x1` `INVISIBLE` overlay container with `SpringAnimation` physics, hardware cross-window blur (`BlurMaskDrawable` + AGSL `GlassBackdropDrawable` with per-plugin `native-glass`/`transparent`/`opaque` backdrop overrides), IME focus handoff, and an automatic `46dp` frosted-glass **Plugin Rail** (`PluginRailWindow`) shown only when 2+ plugins match the foreground app.
-   - Isolates each plugin in its own warm LRU-cached WebView sandbox under `https://<pluginId>.plugins.sideveil.local/` with `WebMessagePort`, server-stamped `pluginId` identity, Android 16–17 `OnBackInvokedCallback` back interception, and `onRenderProcessGone` crash self-healing.
-4. **KernelSU WebUI Control Plane & Built-in Diagnostic Plugin (`webui/`)**
+   - Packaged into `/system/priv-app/SideveilHost/SideveilHost.apk` (with `arm64-v8a/libsideveil_hud.so`) alongside `privapp-permissions` and `sysconfig` allowlists.
+   - Maintains a click-through `TYPE_APPLICATION_OVERLAY` edge indicator capsule (idle auto-dim/tuck, fullscreen double-swipe pulse, live reposition preview, live status badges), zero-reflow origin-anchored spring panel (`drawer`/`peek`/`wide` + `PinnedContainerWindow` with click-through unlock chip), hardware cross-window blur (`BlurMaskDrawable` + dynamic `Oklch`-tinted AGSL `GlassBackdropDrawable`), IME/cutout/tablet `WindowInsets` avoidance, stepped `VibrationEffect.Composition` haptics, Android 16–17 `OnBackAnimationCallback` predictive back preview, synchronized `46dp` frosted-glass **Plugin Rail** (`PluginRailWindow` with SVG icon loading, blind scrubbing, and quick menu), and zero-WebView **`NativeHudWindow`** (`vello_cpu` NEON Bitmap + HWUI `tnum` text).
+   - Isolates each plugin in its own warm LRU-cached WebView sandbox under `https://<pluginId>.plugins.sideveil.local/` with `WebMessagePort`, COOP/COEP WebGPU support, loopback Dev Mode proxying, `PluginWebChromeClient` console forwarding, WebGPU VRAM-aware LRU eviction, and `onRenderProcessGone` crash self-healing.
+4. **KernelSU WebUI Control Plane, Built-in Diagnostic Plugin (`webui/`), & Reference Examples (`examples/`)**
    - Built with `@pochita/ui`, `@pochita/bridge`, `@pochita/sideveil-sdk`, and `@pochita/config` from `pochita-webui-kit`.
-   - Control Plane (`webui/control` -> `webroot/`) edits `/data/system/sideveil/config.json` atomically (`inotify` hot-reload), manages registered plugins (enable/disable, priority, trigger scope overrides, rescan, quick switch), and controls the live sidebar via `/data/adb/modules/sideveil/bin/sideveil-ctl`.
-   - Built-in Diagnostic Plugin (`sideveil.diagnostic`, `webui/panel` -> `assets/panel/`) adheres to the standard `@pochita/sideveil-sdk` plugin contract.
+   - Control Plane (`webui/control` -> `webroot/`) edits `/data/system/sideveil/config.json` atomically (`inotify` hot-reload), manages registered plugins (enable/disable, priority, scope overrides, loopback Dev Mode, Host memory & ACL audit drawer, quick switch), and controls the live sidebar via `/data/adb/modules/sideveil/bin/sideveil-ctl`.
+   - Built-in Diagnostic Plugin (`sideveil.diagnostic`, `webui/panel` -> `assets/panel/`) adheres to the standard `@pochita/sideveil-sdk` plugin contract with live dynamic `Oklch` CSS token sync.
+   - Dual reference example plugins live in `examples/` (`vello-vector-scope` for transparent COOP/COEP WebGPU rendering and `native-perf-hud` for zero-WebView `uds-native` + `vello_cpu` NEON HUD rendering).
 
 ## Security & Runtime Separation
 
@@ -41,7 +43,9 @@ Target baseline: Android 16–17 (API 36–37, arm64) on Linux GKI 6.12+. Built 
 sideveil/
 ├── hub/
 │   └── crates/
-│       ├── sideveil-protocol/  # Shared Rust Manifest, JSON-RPC, Sensor & UDS wire types
+│       ├── sideveil-protocol/  # Shared Rust Manifest, JSON-RPC, HUD, Theme, Sensor & UDS types
+│       ├── sideveil-gfx/       # Pure-Rust Linebender core (usvg + vello_cpu NEON + Oklch color)
+│       ├── sideveil-hud-jni/   # arm64 JNI cdylib -> libsideveil_hud.so (zero-WebView HUD)
 │       ├── sideveild/          # Rust core hub daemon -> bin/sideveild
 │       └── sideveil-ctl/       # Native Rust CLI -> bin/sideveil-ctl
 ├── android/
@@ -49,6 +53,7 @@ sideveil/
 │   ├── protocol/               # Minimal Kotlin wire DTOs & RFC 6455 client codec
 │   ├── sensor/                 # Thin UID 1000 app_process sensor -> bin/sideveil-sensor.dex
 │   └── host-app/               # Headless priv-app overlay host -> SideveilHost.apk
+├── examples/                   # Official reference plugins (vello-vector-scope, native-perf-hud)
 ├── system/                     # KernelSU Magic Mount priv-app & sysconfig XMLs
 ├── webui/                      # React + Vite + Tailwind v4 Control Plane & Panel apps
 ├── build.sh                    # Full Rust + WebUI + Gradle + KernelSU ZIP packager

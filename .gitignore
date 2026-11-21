@@ -30,6 +30,8 @@ webui/dist/
 
 # Rust workspace build artifacts
 hub/target/
+examples/*/target/
+examples/*/Cargo.lock
 
 # Editor and OS files
 *.tmp

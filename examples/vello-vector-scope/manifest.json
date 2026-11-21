@@ -1,0 +1,22 @@
+{
+  "id": "example.vello-scope",
+  "name": "Vello 矢量示波",
+  "version": "0.1.0",
+  "icon": "web/icon.svg",
+  "triggers": {
+    "packages": [],
+    "activities": [],
+    "global": true,
+    "priority": 18
+  },
+  "entry": "web/index.html",
+  "backend": "none",
+  "capabilities": ["telemetry", "haptics"],
+  "surface": {
+    "backdrop": "transparent",
+    "presentation": "drawer",
+    "crossOriginIsolated": true,
+    "widthDp": 356,
+    "heightPercent": 62
+  }
+}
