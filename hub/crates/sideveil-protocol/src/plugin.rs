@@ -1,10 +1,14 @@
 //! Open plugin manifest schema, trigger rules, overrides, and capability ACL definitions.
 
+mod rpc_params;
+
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
+
+pub use rpc_params::*;
 
 /// Canonical identifier for the built-in diagnostic panel plugin.
 pub const BUILTIN_DIAG_PLUGIN_ID: &str = "sideveil.diagnostic";
@@ -193,97 +197,6 @@ pub struct PluginScopedEventPayload {
     pub event: String,
     #[serde(default)]
     pub payload: Option<Value>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PluginSetEnabledParams {
-    pub plugin_id: String,
-    pub enabled: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PluginSetPriorityParams {
-    pub plugin_id: String,
-    pub priority: i32,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PluginSetScopeOverrideParams {
-    pub plugin_id: String,
-    #[serde(default)]
-    pub packages: Option<Vec<String>>,
-    #[serde(default)]
-    pub global: Option<bool>,
-    #[serde(default)]
-    pub clear: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PluginSelectParams {
-    pub plugin_id: String,
-    #[serde(default)]
-    pub package_name: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PluginInvokeParams {
-    pub method: String,
-    #[serde(default)]
-    pub params: Option<Value>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PluginSetDevUrlParams {
-    pub plugin_id: String,
-    #[serde(default)]
-    pub dev_server_url: Option<String>,
-    #[serde(default)]
-    pub clear: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PluginBusPublishParams {
-    pub topic: String,
-    #[serde(default)]
-    pub payload: Option<Value>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PluginBusEventPayload {
-    pub from_plugin_id: String,
-    pub topic: String,
-    #[serde(default)]
-    pub payload: Option<Value>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PluginAuditEntry {
-    pub timestamp_ms: u64,
-    pub plugin_id: String,
-    pub action: String,
-    pub allowed: bool,
-    pub detail: String,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct HostPluginDiagnosticsPayload {
-    pub warm_plugin_ids: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub active_hud_plugin_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub host_native_heap_kb: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub host_pss_kb: Option<u64>,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]

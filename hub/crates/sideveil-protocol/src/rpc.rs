@@ -49,6 +49,7 @@ pub mod methods {
     pub const CONTAINER_ACTION: &str = "container.action";
     pub const PLUGINS_LIST: &str = "plugins.list";
     pub const PLUGINS_RELOAD: &str = "plugins.reload";
+    pub const PLUGINS_INSTALL: &str = "plugins.install";
     pub const PLUGINS_SET_ENABLED: &str = "plugins.setEnabled";
     pub const PLUGINS_SET_PRIORITY: &str = "plugins.setPriority";
     pub const PLUGINS_SET_SCOPE_OVERRIDE: &str = "plugins.setScopeOverride";
