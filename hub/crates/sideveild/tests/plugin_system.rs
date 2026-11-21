@@ -154,6 +154,7 @@ async fn plugin_registry_assets_backend_rpc_and_acls_work_end_to_end() {
     // 1. Verify priority sorting and MRU persistence for com.example.game.
     let snap = registry.snapshot(
         "com.example.game",
+        "",
         &state.config_store().current(),
         &Default::default(),
     );
@@ -168,6 +169,7 @@ async fn plugin_registry_assets_backend_rpc_and_acls_work_end_to_end() {
         .expect("select beta");
     let snap_after_mru = registry.snapshot(
         "com.example.game",
+        "",
         &state.config_store().current(),
         &Default::default(),
     );

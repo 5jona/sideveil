@@ -11,12 +11,15 @@ use std::time::Duration;
 
 use sideveil_protocol::config::SideveilConfig;
 use sideveil_protocol::plugin::{
-    BUILTIN_DIAG_PLUGIN_ID, PluginBackendKind, PluginCapability, PluginDescriptor, PluginManifest,
-    PluginOverrideEntry, PluginOverridesFile, PluginsSnapshotPayload, validate_plugin_id,
+    PluginBackendKind, PluginCapability, PluginDescriptor, PluginManifest, PluginOverrideEntry,
+    PluginOverridesFile, PluginsSnapshotPayload, validate_plugin_id,
 };
 use tokio::sync::broadcast;
 
-use self::store::{build_descriptor, builtin_diag_manifest, load_overrides, persist_overrides};
+use self::store::{
+    build_descriptor, load_overrides, matches_activity, persist_overrides, scan_plugins_dir,
+    validate_loopback_dev_url,
+};
 use crate::inotify::{DIR_CHANGE_MASK, InotifyDirWatcher};
 use crate::log_ring::LogRing;
 
@@ -68,64 +71,7 @@ impl PluginRegistry {
 
     /// Rescans `/data/system/sideveil/plugins/<plugin_id>/manifest.json` and refreshes registry.
     pub fn rescan(&self) -> usize {
-        let mut discovered = BTreeMap::new();
-        discovered.insert(
-            BUILTIN_DIAG_PLUGIN_ID.to_owned(),
-            LoadedPlugin {
-                manifest: builtin_diag_manifest(),
-                root_dir: None,
-                builtin: true,
-            },
-        );
-
-        if let Ok(entries) = fs::read_dir(&self.plugins_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if !path.is_dir() {
-                    continue;
-                }
-                let Some(dir_name) = entry.file_name().to_str().map(str::to_owned) else {
-                    continue;
-                };
-                if dir_name.starts_with('.') || dir_name == BUILTIN_DIAG_PLUGIN_ID {
-                    continue;
-                }
-                let manifest_path = path.join("manifest.json");
-                let Ok(raw) = fs::read_to_string(&manifest_path) else {
-                    continue;
-                };
-                match serde_json::from_str::<PluginManifest>(&raw) {
-                    Ok(manifest) => {
-                        if manifest.id != dir_name {
-                            self.logs.warn(format!(
-                                "Skipped plugin dir '{dir_name}': manifest.id '{}' does not match directory name",
-                                manifest.id
-                            ));
-                            continue;
-                        }
-                        if let Err(err) = manifest.validate() {
-                            self.logs
-                                .warn(format!("Skipped invalid plugin '{dir_name}': {err}"));
-                            continue;
-                        }
-                        discovered.insert(
-                            manifest.id.clone(),
-                            LoadedPlugin {
-                                manifest,
-                                root_dir: Some(path),
-                                builtin: false,
-                            },
-                        );
-                    }
-                    Err(err) => {
-                        self.logs.warn(format!(
-                            "Skipped malformed manifest in '{}': {err}",
-                            manifest_path.display()
-                        ));
-                    }
-                }
-            }
-        }
+        let discovered = scan_plugins_dir(&self.plugins_dir, &self.logs);
 
         let count = discovered.len();
         let changed = {
@@ -191,6 +137,15 @@ impl PluginRegistry {
     }
 
     #[must_use]
+    pub fn plugin_cross_origin_isolated(&self, plugin_id: &str) -> bool {
+        let guard = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+        guard
+            .plugins
+            .get(plugin_id)
+            .is_some_and(|p| p.manifest.surface.cross_origin_isolated)
+    }
+
+    #[must_use]
     pub fn contains_plugin(&self, plugin_id: &str) -> bool {
         let guard = self.inner.read().unwrap_or_else(PoisonError::into_inner);
         guard.plugins.contains_key(plugin_id)
@@ -248,16 +203,18 @@ impl PluginRegistry {
         Ok(())
     }
 
-    /// Computes full sorted descriptors, matched plugin IDs for `foreground_package`, and MRU active ID.
+    /// Computes full sorted descriptors, matched plugin IDs for `(foreground_package, foreground_activity)`, and MRU active ID.
     #[must_use]
     pub fn snapshot(
         &self,
         foreground_package: &str,
+        foreground_activity: &str,
         config: &SideveilConfig,
         online_backends: &HashSet<String>,
     ) -> PluginsSnapshotPayload {
         let guard = self.inner.read().unwrap_or_else(PoisonError::into_inner);
         let fg = foreground_package.trim();
+        let fg_act = foreground_activity.trim();
         let clean_scope = config.scope.sanitized();
         let denied = !fg.is_empty() && clean_scope.denylist.iter().any(|d| d == fg);
 
@@ -281,7 +238,11 @@ impl PluginRegistry {
         } else {
             descriptors
                 .iter()
-                .filter(|d| d.enabled && (d.global || d.packages.iter().any(|p| p == fg)))
+                .filter(|d| {
+                    d.enabled
+                        && (d.global || d.packages.iter().any(|p| p == fg))
+                        && matches_activity(&d.activities, fg_act)
+                })
                 .map(|d| d.id.clone())
                 .collect()
         };
@@ -297,7 +258,27 @@ impl PluginRegistry {
             matched_plugin_ids,
             active_plugin_id,
             foreground_package: fg.to_owned(),
+            foreground_activity: fg_act.to_owned(),
         }
+    }
+
+    pub fn set_dev_url(
+        &self,
+        plugin_id: &str,
+        dev_server_url: Option<&str>,
+        clear: bool,
+    ) -> Result<(), String> {
+        let validated = if clear {
+            None
+        } else {
+            match dev_server_url {
+                Some(raw) if !raw.trim().is_empty() => Some(validate_loopback_dev_url(raw)?),
+                _ => None,
+            }
+        };
+        self.mutate_override(plugin_id, |entry| {
+            entry.dev_server_url = validated;
+        })
     }
 
     pub fn set_enabled(&self, plugin_id: &str, enabled: bool) -> Result<(), String> {

@@ -4,12 +4,13 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 use sideveil_protocol::hud::{HudDismissPayload, NativeHudScene};
-use sideveil_protocol::plugin::{PluginCapability, PluginInvokeParams};
+use sideveil_protocol::plugin::{PluginBusPublishParams, PluginCapability, PluginInvokeParams};
 use sideveil_protocol::rpc::error_codes;
 
-use super::{decode_params, require_plugin_id};
+use super::{decode_params, require_plugin_id, serialize_result};
 use crate::plugin_acl;
 use crate::state::HubState;
+use crate::telemetry;
 
 pub(super) async fn handle_plugin_invoke(
     state: &Arc<HubState>,
@@ -36,7 +37,9 @@ pub(super) fn handle_fs_read(
     params: Option<Value>,
 ) -> Result<Value, (i32, String)> {
     let pid = require_plugin_id(caller_plugin_id)?;
-    plugin_acl::handle_fs_read(state.plugin_registry(), state.data_dir(), pid, params)
+    let res = plugin_acl::handle_fs_read(state.plugin_registry(), state.data_dir(), pid, params);
+    state.audit().record(pid, "fs.read", res.is_ok(), "");
+    res
 }
 
 pub(super) fn handle_fs_write_atomic(
@@ -45,7 +48,10 @@ pub(super) fn handle_fs_write_atomic(
     params: Option<Value>,
 ) -> Result<Value, (i32, String)> {
     let pid = require_plugin_id(caller_plugin_id)?;
-    plugin_acl::handle_fs_write_atomic(state.plugin_registry(), state.data_dir(), pid, params)
+    let res =
+        plugin_acl::handle_fs_write_atomic(state.plugin_registry(), state.data_dir(), pid, params);
+    state.audit().record(pid, "fs.writeAtomic", res.is_ok(), "");
+    res
 }
 
 pub(super) async fn handle_system_exec(
@@ -54,7 +60,71 @@ pub(super) async fn handle_system_exec(
     params: Option<Value>,
 ) -> Result<Value, (i32, String)> {
     let pid = require_plugin_id(caller_plugin_id)?;
-    plugin_acl::handle_system_exec(state.plugin_registry(), pid, params).await
+    let res = plugin_acl::handle_system_exec(state.plugin_registry(), pid, params).await;
+    state.audit().record(pid, "system.exec", res.is_ok(), "");
+    res
+}
+
+pub(super) fn handle_bus_publish(
+    state: &Arc<HubState>,
+    caller_plugin_id: Option<&str>,
+    params: Option<Value>,
+) -> Result<Value, (i32, String)> {
+    let pid = require_plugin_id(caller_plugin_id)?;
+    if !state
+        .plugin_registry()
+        .has_capability(pid, PluginCapability::InterPluginBus)
+    {
+        state.audit().record(
+            pid,
+            "plugin.busPublish",
+            false,
+            "missing inter-plugin-bus capability",
+        );
+        return Err((
+            error_codes::PERMISSION_DENIED,
+            format!("Plugin '{pid}' lacks 'inter-plugin-bus' capability"),
+        ));
+    }
+    let parsed: PluginBusPublishParams = decode_params(params)?;
+    let topic = parsed.topic.trim().to_owned();
+    if topic.is_empty() || topic.len() > 96 {
+        return Err((
+            error_codes::INVALID_PARAMS,
+            "bus topic must be 1..=96 non-blank chars".to_owned(),
+        ));
+    }
+    state
+        .audit()
+        .record(pid, "plugin.busPublish", true, topic.clone());
+    state.emit_plugin_bus_message(pid, topic, parsed.payload);
+    Ok(json!({ "ok": true }))
+}
+
+pub(super) fn handle_telemetry_snapshot(
+    state: &Arc<HubState>,
+    is_privileged: bool,
+    caller_plugin_id: Option<&str>,
+) -> Result<Value, (i32, String)> {
+    if !is_privileged {
+        let pid = require_plugin_id(caller_plugin_id)?;
+        if !state
+            .plugin_registry()
+            .has_capability(pid, PluginCapability::Telemetry)
+        {
+            state.audit().record(
+                pid,
+                "telemetry.snapshot",
+                false,
+                "missing telemetry capability",
+            );
+            return Err((
+                error_codes::PERMISSION_DENIED,
+                format!("Plugin '{pid}' lacks 'telemetry' capability"),
+            ));
+        }
+    }
+    serialize_result(&telemetry::sample_snapshot())
 }
 
 pub(super) fn handle_hud_update(

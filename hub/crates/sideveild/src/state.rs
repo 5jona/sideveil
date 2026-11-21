@@ -1,79 +1,27 @@
 //! Shared runtime state, session registries, and event routing for `sideveild`.
 
-use std::fs::File;
-use std::io::Read;
+mod runtime;
+
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU16, AtomicU64, Ordering};
 use std::sync::{Arc, PoisonError, RwLock};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use sideveil_protocol::config::PanelState;
-use sideveil_protocol::plugin::PluginsSnapshotPayload;
+use sideveil_protocol::plugin::{HostPluginDiagnosticsPayload, PluginsSnapshotPayload};
 use sideveil_protocol::rpc::{DaemonHealth, DaemonStatus};
-use sideveil_protocol::sensor::{DisplayGeometry, HubToSensor};
-use sideveil_protocol::theme::HostDynamicColorsPayload;
+use sideveil_protocol::sensor::HubToSensor;
 use tokio::sync::mpsc;
 
+pub use self::runtime::HostWakeSignal;
+pub(crate) use self::runtime::{HostSessionHandle, RuntimeSnapshot, SensorSessionHandle};
+use self::runtime::{current_uid, generate_hex_token};
+use crate::audit_ring::AuditRing;
 use crate::config_store::ConfigStore;
 use crate::log_ring::LogRing;
 use crate::outbound_queue::OutboundSender;
 use crate::plugin_backends::PluginBackends;
 use crate::plugin_registry::PluginRegistry;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HostWakeSignal {
-    SyncAndWake,
-    ForceRestart,
-    WatchHostPid(u32),
-    HostDisconnected,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct HostSessionHandle {
-    pub(crate) id: u64,
-    pub(crate) sender: OutboundSender,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct SensorSessionHandle {
-    pub(crate) id: u64,
-    pub(crate) sender: mpsc::UnboundedSender<HubToSensor>,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct RuntimeSnapshot {
-    pub(crate) foreground_package: String,
-    pub(crate) display: DisplayGeometry,
-    pub(crate) task_listener_active: bool,
-    pub(crate) gesture_monitor_active: bool,
-    pub(crate) overlay_permission_granted: bool,
-    pub(crate) panel_state: PanelState,
-    pub(crate) fullscreen_active: bool,
-    pub(crate) dynamic_colors: Option<HostDynamicColorsPayload>,
-    pub(crate) active_hud_plugin: Option<String>,
-    pub(crate) host_pid: Option<u32>,
-    pub(crate) cross_window_blur_supported: Option<bool>,
-    pub(crate) sensor_pid: Option<u32>,
-}
-
-impl Default for RuntimeSnapshot {
-    fn default() -> Self {
-        Self {
-            foreground_package: String::new(),
-            display: DisplayGeometry::default(),
-            task_listener_active: false,
-            gesture_monitor_active: false,
-            overlay_permission_granted: false,
-            panel_state: PanelState::Closed,
-            fullscreen_active: false,
-            dynamic_colors: None,
-            active_hud_plugin: None,
-            host_pid: None,
-            cross_window_blur_supported: None,
-            sensor_pid: None,
-        }
-    }
-}
 
 #[derive(Debug)]
 pub struct HubState {
@@ -85,6 +33,7 @@ pub struct HubState {
     data_dir: PathBuf,
     cache_dir: PathBuf,
     logs: Arc<LogRing>,
+    audit: Arc<AuditRing>,
     ws_port: AtomicU16,
     ws_token: String,
     next_session_id: AtomicU64,
@@ -115,6 +64,7 @@ impl HubState {
             data_dir,
             cache_dir,
             logs,
+            audit: Arc::new(AuditRing::new()),
             ws_port: AtomicU16::new(0),
             ws_token: generate_hex_token(),
             next_session_id: AtomicU64::new(1),
@@ -151,16 +101,32 @@ impl HubState {
     }
 
     #[must_use]
+    pub fn audit(&self) -> &Arc<AuditRing> {
+        &self.audit
+    }
+
+    #[must_use]
+    pub fn host_diagnostics(&self) -> HostPluginDiagnosticsPayload {
+        let rt = self.runtime.read().unwrap_or_else(PoisonError::into_inner);
+        let mut diag = rt.host_diagnostics.clone();
+        if diag.active_hud_plugin_id.is_none() {
+            diag.active_hud_plugin_id = rt.active_hud_plugin.clone();
+        }
+        diag
+    }
+
+    #[must_use]
     pub fn plugins_snapshot(&self) -> PluginsSnapshotPayload {
         let cfg = self.config.current();
-        let fg = self
-            .runtime
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-            .foreground_package
-            .clone();
+        let (fg_pkg, fg_act) = {
+            let rt = self.runtime.read().unwrap_or_else(PoisonError::into_inner);
+            (
+                rt.foreground_package.clone(),
+                rt.foreground_activity.clone(),
+            )
+        };
         let online = self.backends.online_ids();
-        self.plugins.snapshot(&fg, &cfg, &online)
+        self.plugins.snapshot(&fg_pkg, &fg_act, &cfg, &online)
     }
 
     #[must_use]
@@ -225,9 +191,12 @@ impl HubState {
             .unwrap_or_else(PoisonError::into_inner)
             .clone();
         let online = self.backends.online_ids();
-        let plugins_snap = self
-            .plugins
-            .snapshot(&snap.foreground_package, &cfg, &online);
+        let plugins_snap = self.plugins.snapshot(
+            &snap.foreground_package,
+            &snap.foreground_activity,
+            &cfg,
+            &online,
+        );
         let scope_active = !plugins_snap.matched_plugin_ids.is_empty();
         DaemonStatus {
             pid: std::process::id(),
@@ -358,38 +327,4 @@ impl HubState {
     pub(crate) fn send_host_wake(&self, signal: HostWakeSignal) {
         let _ = self.host_wake_tx.send(signal);
     }
-}
-
-fn current_uid() -> u32 {
-    unsafe {
-        // SAFETY: `getuid` has no preconditions and always returns the process real UID.
-        libc::getuid()
-    }
-}
-
-fn generate_hex_token() -> String {
-    let mut bytes = [0u8; 32];
-    if let Ok(mut f) = File::open("/dev/urandom")
-        && f.read_exact(&mut bytes).is_ok()
-    {
-        return encode_hex(&bytes);
-    }
-    let seed = HubState::now_unix_ms() ^ (u64::from(std::process::id()) << 32);
-    for (idx, chunk) in bytes.chunks_mut(8).enumerate() {
-        let mixed = seed
-            .wrapping_mul(6_364_136_223_846_793_005)
-            .wrapping_add(idx as u64);
-        chunk.copy_from_slice(&mixed.to_le_bytes());
-    }
-    encode_hex(&bytes)
-}
-
-fn encode_hex(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for &b in bytes {
-        out.push(HEX[(b >> 4) as usize] as char);
-        out.push(HEX[(b & 0x0f) as usize] as char);
-    }
-    out
 }

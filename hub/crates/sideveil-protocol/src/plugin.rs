@@ -34,6 +34,10 @@ pub enum PluginCapability {
     Toast,
     SystemExec,
     NativeHud,
+    Clipboard,
+    Haptics,
+    Telemetry,
+    InterPluginBus,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -60,6 +64,7 @@ pub enum PluginPresentationMode {
 #[serde(rename_all = "camelCase", default)]
 pub struct PluginTriggers {
     pub packages: Vec<String>,
+    pub activities: Vec<String>,
     pub global: bool,
     pub priority: i32,
 }
@@ -69,6 +74,7 @@ pub struct PluginTriggers {
 pub struct PluginSurfacePrefs {
     pub backdrop: PluginSurfaceBackdrop,
     pub presentation: PluginPresentationMode,
+    pub cross_origin_isolated: bool,
     pub width_dp: Option<i32>,
     pub height_percent: Option<i32>,
 }
@@ -118,8 +124,12 @@ pub struct PluginDescriptor {
     pub enabled: bool,
     pub priority: i32,
     pub packages: Vec<String>,
+    #[serde(default)]
+    pub activities: Vec<String>,
     pub global: bool,
     pub has_scope_override: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dev_server_url: Option<String>,
     pub backend: PluginBackendKind,
     pub backend_state: PluginBackendState,
     pub capabilities: Vec<PluginCapability>,
@@ -138,6 +148,8 @@ pub struct PluginOverrideEntry {
     pub packages_override: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub global_override: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dev_server_url: Option<String>,
 }
 
 /// Persisted plugin override and per-app MRU selection state.
@@ -155,6 +167,8 @@ pub struct PluginsSnapshotPayload {
     pub matched_plugin_ids: Vec<String>,
     pub active_plugin_id: Option<String>,
     pub foreground_package: String,
+    #[serde(default)]
+    pub foreground_activity: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -221,6 +235,55 @@ pub struct PluginInvokeParams {
     pub method: String,
     #[serde(default)]
     pub params: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginSetDevUrlParams {
+    pub plugin_id: String,
+    #[serde(default)]
+    pub dev_server_url: Option<String>,
+    #[serde(default)]
+    pub clear: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginBusPublishParams {
+    pub topic: String,
+    #[serde(default)]
+    pub payload: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginBusEventPayload {
+    pub from_plugin_id: String,
+    pub topic: String,
+    #[serde(default)]
+    pub payload: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginAuditEntry {
+    pub timestamp_ms: u64,
+    pub plugin_id: String,
+    pub action: String,
+    pub allowed: bool,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct HostPluginDiagnosticsPayload {
+    pub warm_plugin_ids: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_hud_plugin_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_native_heap_kb: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_pss_kb: Option<u64>,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]

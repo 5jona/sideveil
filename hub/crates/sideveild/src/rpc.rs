@@ -119,12 +119,26 @@ async fn dispatch_inner(
             require_privileged(is_privileged, &req.method)?;
             plugins::handle_set_scope_override(state, req.params)
         }
+        methods::PLUGINS_SET_DEV_URL => {
+            require_privileged(is_privileged, &req.method)?;
+            plugins::handle_set_dev_url(state, req.params)
+        }
+        methods::PLUGINS_AUDIT => {
+            require_privileged(is_privileged, &req.method)?;
+            plugins::handle_plugins_audit(state)
+        }
         methods::PLUGINS_SELECT => {
             require_privileged(is_privileged, &req.method)?;
             plugins::handle_select_plugin(state, req.params)
         }
         methods::PLUGIN_INVOKE => {
             sandbox::handle_plugin_invoke(state, req.plugin_id.as_deref(), req.params).await
+        }
+        methods::PLUGIN_BUS_PUBLISH => {
+            sandbox::handle_bus_publish(state, req.plugin_id.as_deref(), req.params)
+        }
+        methods::TELEMETRY_SNAPSHOT => {
+            sandbox::handle_telemetry_snapshot(state, is_privileged, req.plugin_id.as_deref())
         }
         methods::FS_READ => sandbox::handle_fs_read(state, req.plugin_id.as_deref(), req.params),
         methods::FS_WRITE_ATOMIC => {

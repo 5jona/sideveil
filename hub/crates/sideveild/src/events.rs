@@ -10,12 +10,12 @@ use sideveil_gfx::palette::synthesize_glass_palette;
 use sideveil_protocol::config::SideveilConfig;
 use sideveil_protocol::hud::{HudDismissPayload, NativeHudScene};
 use sideveil_protocol::plugin::{
-    PluginActiveChangedPayload, PluginBackendState, PluginBackendStatePayload,
-    PluginScopedEventPayload, PluginSelectParams,
+    HostPluginDiagnosticsPayload, PluginActiveChangedPayload, PluginBackendState,
+    PluginBackendStatePayload, PluginBusEventPayload, PluginScopedEventPayload, PluginSelectParams,
 };
 use sideveil_protocol::rpc::{
     ConfigUpdatedPayload, HostEventEnvelope, HostFullscreenChangedPayload, HostHelloPayload,
-    PanelCommand, PanelCommandPayload, PanelStateChangedPayload, events,
+    HostWebViewConsolePayload, PanelCommand, PanelCommandPayload, PanelStateChangedPayload, events,
 };
 use sideveil_protocol::sensor::HubToSensor;
 use sideveil_protocol::theme::HostDynamicColorsPayload;
@@ -57,6 +57,22 @@ impl HubState {
             &PluginScopedEventPayload {
                 plugin_id: plugin_id.to_owned(),
                 event,
+                payload,
+            },
+        );
+    }
+
+    pub fn emit_plugin_bus_message(
+        &self,
+        from_plugin_id: &str,
+        topic: String,
+        payload: Option<Value>,
+    ) {
+        self.emit_host_event_critical(
+            events::PLUGIN_BUS_MESSAGE,
+            &PluginBusEventPayload {
+                from_plugin_id: from_plugin_id.to_owned(),
+                topic,
                 payload,
             },
         );
@@ -264,6 +280,25 @@ impl HubState {
                         rt.dynamic_colors = Some(colors);
                     }
                     self.push_dynamic_palette_if_available();
+                }
+            }
+            events::HOST_DIAGNOSTICS => {
+                if let Some(payload) = envelope.payload
+                    && let Ok(diag) =
+                        serde_json::from_value::<HostPluginDiagnosticsPayload>(payload)
+                {
+                    let mut rt = self.runtime.write().unwrap_or_else(PoisonError::into_inner);
+                    rt.host_diagnostics = diag;
+                }
+            }
+            events::HOST_WEBVIEW_CONSOLE => {
+                if let Some(payload) = envelope.payload
+                    && let Ok(msg) = serde_json::from_value::<HostWebViewConsolePayload>(payload)
+                {
+                    self.logs().info(format!(
+                        "[WebView:{}][{}] {}",
+                        msg.plugin_id, msg.level, msg.message
+                    ));
                 }
             }
             events::PANEL_STATE_CHANGED => {

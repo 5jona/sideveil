@@ -22,6 +22,7 @@ impl HubState {
                 gesture_monitor_active,
                 overlay_permission_granted,
                 foreground_package,
+                foreground_activity,
             } => {
                 {
                     let mut rt = self.runtime.write().unwrap_or_else(PoisonError::into_inner);
@@ -32,6 +33,7 @@ impl HubState {
                     rt.overlay_permission_granted = overlay_permission_granted;
                     if !foreground_package.is_empty() {
                         rt.foreground_package = foreground_package;
+                        rt.foreground_activity = foreground_activity;
                     }
                 }
                 self.logs().info(format!(
@@ -42,10 +44,14 @@ impl HubState {
                 self.push_config_snapshot_to_host();
                 self.push_plugins_snapshot_to_host();
             }
-            SensorToHub::ForegroundChanged { package_name } => {
+            SensorToHub::ForegroundChanged {
+                package_name,
+                activity_name,
+            } => {
                 {
                     let mut rt = self.runtime.write().unwrap_or_else(PoisonError::into_inner);
                     rt.foreground_package = package_name.clone();
+                    rt.foreground_activity = activity_name.clone();
                 }
                 let snapshot = self.plugins_snapshot();
                 let active = !snapshot.matched_plugin_ids.is_empty();
@@ -54,6 +60,7 @@ impl HubState {
                     events::SCOPE_CHANGED,
                     &ScopeChangedPayload {
                         foreground_package: package_name,
+                        foreground_activity: activity_name,
                         active,
                     },
                 );

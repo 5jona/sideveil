@@ -1,6 +1,7 @@
 //! Sideveil core hub library modules.
 
 pub mod asset_server;
+pub mod audit_ring;
 pub mod config_store;
 pub mod events;
 pub mod host_ws;
@@ -15,4 +16,5 @@ pub mod plugin_registry;
 pub mod rpc;
 pub mod state;
 pub mod supervisor;
+pub mod telemetry;
 pub mod uds_gateway;

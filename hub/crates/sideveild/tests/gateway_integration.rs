@@ -193,9 +193,11 @@ async fn sensor_hub_host_and_ctl_pipeline_works_end_to_end() {
             gesture_monitor_active: true,
             overlay_permission_granted: true,
             foreground_package: "me.weishu.kernelsu".to_owned(),
+            foreground_activity: ".ui.MainActivity".to_owned(),
         },
         SensorToHub::ForegroundChanged {
             package_name: "me.weishu.kernelsu".to_owned(),
+            activity_name: ".ui.MainActivity".to_owned(),
         },
         SensorToHub::GestureDragStart {
             side: EdgeSide::Right,

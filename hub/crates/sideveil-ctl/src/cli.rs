@@ -165,6 +165,30 @@ fn parse_plugins_subcommand(
             ))
         }
         "scope" => parse_plugins_scope(&args[1..]),
+        "dev" => {
+            let (Some(plugin_id), Some(second)) = (args.get(1), args.get(2)) else {
+                return Err((
+                    2,
+                    "Usage: sideveil-ctl plugins dev <plugin-id> <http://127.0.0.1:port|--clear>"
+                        .to_owned(),
+                ));
+            };
+            let clear = second == "--clear";
+            Ok((
+                methods::PLUGINS_SET_DEV_URL.to_owned(),
+                Some(json!({
+                    "pluginId": plugin_id,
+                    "devServerUrl": if clear { Value::Null } else { Value::String(second.clone()) },
+                    "clear": clear,
+                })),
+                OutputMode::FullEnvelope,
+            ))
+        }
+        "audit" => Ok((
+            methods::PLUGINS_AUDIT.to_owned(),
+            None,
+            OutputMode::FullEnvelope,
+        )),
         "select" => {
             let Some(plugin_id) = args.get(1) else {
                 return Err((

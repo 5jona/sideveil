@@ -114,8 +114,16 @@ pub async fn handle_http_asset(stream: TcpStream, state: Arc<HubState>) {
     };
 
     let mime = mime_type_for(&file_path);
+    let coi_headers = if state
+        .plugin_registry()
+        .plugin_cross_origin_isolated(plugin_id)
+    {
+        "Cross-Origin-Opener-Policy: same-origin\r\nCross-Origin-Embedder-Policy: require-corp\r\nCross-Origin-Resource-Policy: same-origin\r\n"
+    } else {
+        ""
+    };
     let header = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 200 OK\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n{coi_headers}Connection: close\r\n\r\n",
         bytes.len()
     );
     if write_half.write_all(header.as_bytes()).await.is_err() {

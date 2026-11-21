@@ -17,6 +17,8 @@ pub mod events {
     pub const HOST_HELLO: &str = "host.hello";
     pub const HOST_FULLSCREEN_CHANGED: &str = "host.fullscreenChanged";
     pub const HOST_DYNAMIC_COLORS: &str = "host.dynamicColors";
+    pub const HOST_DIAGNOSTICS: &str = "host.diagnostics";
+    pub const HOST_WEBVIEW_CONSOLE: &str = "host.webviewConsole";
     pub const HOST_SELECT_PLUGIN: &str = "host.selectPlugin";
     pub const PANEL_STATE_CHANGED: &str = "panel.stateChanged";
     pub const PANEL_VISIBILITY: &str = "panel.visibility";
@@ -25,6 +27,7 @@ pub mod events {
     pub const PLUGINS_ACTIVE_CHANGED: &str = "plugins.activeChanged";
     pub const PLUGIN_BACKEND_STATE: &str = "plugin.backendState";
     pub const PLUGIN_EVENT: &str = "plugin.event";
+    pub const PLUGIN_BUS_MESSAGE: &str = "plugin.busMessage";
     pub const THEME_PALETTE_UPDATED: &str = "theme.paletteUpdated";
     pub const HUD_SCENE_UPDATED: &str = "hud.sceneUpdated";
     pub const HUD_DISMISSED: &str = "hud.dismissed";
@@ -49,11 +52,18 @@ pub mod methods {
     pub const PLUGINS_SET_ENABLED: &str = "plugins.setEnabled";
     pub const PLUGINS_SET_PRIORITY: &str = "plugins.setPriority";
     pub const PLUGINS_SET_SCOPE_OVERRIDE: &str = "plugins.setScopeOverride";
+    pub const PLUGINS_SET_DEV_URL: &str = "plugins.setDevUrl";
+    pub const PLUGINS_AUDIT: &str = "plugins.audit";
     pub const PLUGINS_SELECT: &str = "plugins.select";
     pub const PLUGIN_INVOKE: &str = "plugin.invoke";
+    pub const PLUGIN_BUS_PUBLISH: &str = "plugin.busPublish";
     pub const FS_READ: &str = "fs.read";
     pub const FS_WRITE_ATOMIC: &str = "fs.writeAtomic";
     pub const SYSTEM_EXEC: &str = "system.exec";
+    pub const TELEMETRY_SNAPSHOT: &str = "telemetry.snapshot";
+    pub const CLIPBOARD_GET: &str = "clipboard.get";
+    pub const CLIPBOARD_SET: &str = "clipboard.set";
+    pub const HAPTICS_TRIGGER: &str = "haptics.trigger";
     pub const UI_TOAST: &str = "ui.toast";
     pub const HUD_UPDATE_SCENE: &str = "hud.updateScene";
     pub const HUD_DISMISS: &str = "hud.dismiss";
@@ -211,7 +221,21 @@ pub struct ConfigUpdatedPayload {
 #[serde(rename_all = "camelCase")]
 pub struct ScopeChangedPayload {
     pub foreground_package: String,
+    #[serde(default)]
+    pub foreground_activity: String,
     pub active: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostWebViewConsolePayload {
+    pub plugin_id: String,
+    pub level: String,
+    pub message: String,
+    #[serde(default)]
+    pub source_id: String,
+    #[serde(default)]
+    pub line_number: i32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]

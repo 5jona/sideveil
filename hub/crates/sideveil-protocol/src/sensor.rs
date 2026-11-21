@@ -35,9 +35,15 @@ pub enum SensorToHub {
         gesture_monitor_active: bool,
         overlay_permission_granted: bool,
         foreground_package: String,
+        #[serde(default)]
+        foreground_activity: String,
     },
     #[serde(rename_all = "camelCase")]
-    ForegroundChanged { package_name: String },
+    ForegroundChanged {
+        package_name: String,
+        #[serde(default)]
+        activity_name: String,
+    },
     #[serde(rename_all = "camelCase")]
     DisplayChanged { display: DisplayGeometry },
     #[serde(rename_all = "camelCase")]
