@@ -1,5 +1,9 @@
 import { type BridgeOptions, type ContainerAction, useContainerThemeSync } from '@pochita/bridge';
-import { BUILTIN_DIAG_PLUGIN_ID, SideVeilPluginProvider } from '@pochita/sideveil-sdk';
+import {
+  BUILTIN_DIAG_PLUGIN_ID,
+  SideVeilPluginProvider,
+  useClipboard,
+} from '@pochita/sideveil-sdk';
 import {
   AppShell,
   Badge,
@@ -38,6 +42,7 @@ function PanelWorkbench({
   onClearLogs: () => void;
   onHydrated: () => void;
 }) {
+  const clipboard = useClipboard();
   const {
     isNativeHost,
     backendState,
@@ -194,6 +199,7 @@ function PanelWorkbench({
             title="事件日志"
             entries={eventsLog}
             onClear={onClearLogs}
+            onCopy={clipboard.writeText}
             maxHeightClassName="max-h-36"
           />
         </div>
