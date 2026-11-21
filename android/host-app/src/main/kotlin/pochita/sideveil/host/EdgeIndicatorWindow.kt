@@ -5,6 +5,8 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.Gravity
 import android.view.View
@@ -16,16 +18,21 @@ import pochita.sideveil.protocol.EdgeSide
 import pochita.sideveil.protocol.PanelState
 
 /**
- * Click-through TYPE_APPLICATION_OVERLAY capsule indicator positioned flush along the
- * configured screen edge trigger zone. Never intercepts touch events.
+ * Click-through `TYPE_APPLICATION_OVERLAY` capsule indicator positioned flush along the
+ * configured screen edge trigger zone. Supports ColorOS-style `delayDoDark` idle auto-dim
+ * & edge half-tuck, fullscreen double-swipe hint pulsing, and live long-press reposition preview.
  */
 @SuppressLint("RtlHardcoded")
 class EdgeIndicatorWindow(
     private val context: Context,
     private val windowManager: WindowManager,
+    private val onFullscreenChanged: (Boolean) -> Unit = {},
 ) {
+    private val mainHandler = Handler(Looper.getMainLooper())
     private val currentDensity: Float
-        get() = context.resources.displayMetrics.density
+        get() =
+            context.resources.displayMetrics.density
+                .coerceAtLeast(1f)
 
     private val rootView = FrameLayout(context)
     private val pillView = View(context)
@@ -34,7 +41,7 @@ class EdgeIndicatorWindow(
     private val layoutParams =
         WindowManager
             .LayoutParams(
-                dp(6f),
+                dp(8f),
                 dp(168f),
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
@@ -49,11 +56,23 @@ class EdgeIndicatorWindow(
 
     private var attached = false
     private var fullscreenBarsHidden = false
+    private var idleDimmed = false
     private var dragPulseProgress = 0f
+    private var repositionActive = false
+    private var repositionSide = EdgeSide.RIGHT
+    private var repositionTopPercent = 32
     private var latestEdge = EdgeConfig()
     private var latestScopeActive = false
     private var latestPanelState = PanelState.CLOSED
     private var latestDarkSurface = false
+
+    private val idleDimRunnable =
+        Runnable {
+            if (attached && !repositionActive && dragPulseProgress == 0f) {
+                idleDimmed = true
+                animateIdleState(dimmed = true)
+            }
+        }
 
     init {
         pillDrawable.shape = GradientDrawable.RECTANGLE
@@ -70,11 +89,14 @@ class EdgeIndicatorWindow(
             val hidden = !insets.isVisible(WindowInsets.Type.statusBars())
             if (hidden != fullscreenBarsHidden) {
                 fullscreenBarsHidden = hidden
+                onFullscreenChanged(hidden)
                 applyAppearance()
             }
             insets
         }
     }
+
+    fun isFullscreenActive(): Boolean = fullscreenBarsHidden
 
     fun attach() {
         if (attached) return
@@ -97,6 +119,7 @@ class EdgeIndicatorWindow(
         latestScopeActive = scopeActive
         latestPanelState = panelState
         latestDarkSurface = isDarkSurface
+        wakeAndRescheduleIdle()
         applyAppearance()
     }
 
@@ -104,23 +127,68 @@ class EdgeIndicatorWindow(
         val clamped = progress.coerceIn(0f, 1f)
         dragPulseProgress = clamped
         if (!attached) return
-        val targetScaleX = 1f + clamped * 0.45f
-        val targetScaleY = 1f + clamped * 0.08f
-        if (clamped == 0f) {
+        if (clamped > 0f) {
+            cancelIdleDim(restoreActive = true)
+            pillView.animate().cancel()
+            pillView.scaleX = 1f + clamped * 0.45f
+            pillView.scaleY = 1f + clamped * 0.08f
+        } else {
             pillView
                 .animate()
                 .scaleX(1f)
                 .scaleY(1f)
                 .setDuration(140L)
                 .start()
-        } else {
-            pillView.animate().cancel()
-            pillView.scaleX = targetScaleX
-            pillView.scaleY = targetScaleY
+            scheduleIdleDim()
         }
     }
 
+    /**
+     * Visual cue when the first swipe in fullscreen anti-accidental mode wakes the edge handle.
+     */
+    fun pulseFullscreenHint() {
+        if (!attached) return
+        cancelIdleDim(restoreActive = true)
+        rootView.animate().cancel()
+        rootView.alpha = 1f
+        pillView.animate().cancel()
+        pillView
+            .animate()
+            .scaleX(1.65f)
+            .scaleY(1.12f)
+            .setDuration(140L)
+            .withEndAction {
+                pillView
+                    .animate()
+                    .scaleX(1.15f)
+                    .scaleY(1.03f)
+                    .setDuration(260L)
+                    .start()
+            }.start()
+        scheduleIdleDim(extraDelayMs = FULLSCREEN_HINT_HOLD_MS)
+    }
+
+    /**
+     * Shows a live accented handle preview while long-press repositioning `side` and `topPercent`.
+     */
+    fun setRepositionPreview(
+        active: Boolean,
+        side: EdgeSide,
+        topPercent: Int,
+    ) {
+        repositionActive = active
+        repositionSide = side
+        repositionTopPercent = topPercent.coerceIn(5, 85)
+        if (active) {
+            cancelIdleDim(restoreActive = true)
+        } else {
+            scheduleIdleDim()
+        }
+        applyAppearance()
+    }
+
     fun detach() {
+        mainHandler.removeCallbacks(idleDimRunnable)
         if (!attached) return
         runCatching { windowManager.removeViewImmediate(rootView) }
         attached = false
@@ -130,14 +198,17 @@ class EdgeIndicatorWindow(
         if (!attached) return
 
         val shouldShow =
-            latestScopeActive &&
-                latestEdge.handleVisible &&
-                latestPanelState == PanelState.CLOSED
+            repositionActive ||
+                (latestScopeActive && latestEdge.handleVisible && latestPanelState == PanelState.CLOSED)
 
         rootView.visibility = if (shouldShow) View.VISIBLE else View.GONE
         if (!shouldShow) {
+            mainHandler.removeCallbacks(idleDimRunnable)
             return
         }
+
+        val activeSide = if (repositionActive) repositionSide else latestEdge.side
+        val activeTopPercent = if (repositionActive) repositionTopPercent else latestEdge.topPercent
 
         val screenHeight =
             runCatching { windowManager.currentWindowMetrics.bounds.height() }
@@ -145,49 +216,103 @@ class EdgeIndicatorWindow(
                 .coerceAtLeast(480)
         val heightPx = dp(latestEdge.heightDp.toFloat()).coerceAtMost(screenHeight)
         val maxTop = (screenHeight - heightPx).coerceAtLeast(0)
-        val topPx = ((latestEdge.topPercent / 100f) * screenHeight).toInt().coerceIn(0, maxTop)
+        val topPx = ((activeTopPercent / 100f) * screenHeight).toInt().coerceIn(0, maxTop)
 
-        val gravityHorizontal = if (latestEdge.side == EdgeSide.LEFT) Gravity.LEFT else Gravity.RIGHT
+        val gravityHorizontal = if (activeSide == EdgeSide.LEFT) Gravity.LEFT else Gravity.RIGHT
         layoutParams.gravity = Gravity.TOP or gravityHorizontal
-        layoutParams.width = dp(6f)
+        layoutParams.width = dp(if (repositionActive) 10f else 8f)
         layoutParams.height = heightPx
         layoutParams.x = dpOrZero(latestEdge.edgeOffsetDp.toFloat())
         layoutParams.y = topPx
 
         val pillParams = pillView.layoutParams as FrameLayout.LayoutParams
-        pillParams.width = dp(4f)
+        pillParams.width = dp(if (repositionActive) 6f else 4f)
         pillParams.height = (heightPx * 0.64f).toInt().coerceAtLeast(dp(44f))
         pillParams.gravity = Gravity.CENTER_VERTICAL or gravityHorizontal
         pillView.layoutParams = pillParams
 
+        applyPillColors()
+
+        val activeAlpha = computeActiveAlpha()
+        rootView.alpha = if (idleDimmed && !repositionActive) activeAlpha * IDLE_ALPHA_FACTOR else activeAlpha
+        pillView.translationX = if (idleDimmed && !repositionActive) tuckTranslationPx(activeSide) else 0f
+        pillView.scaleX = if (repositionActive) 1.25f else 1f + dragPulseProgress * 0.45f
+        pillView.scaleY = if (repositionActive) 1.04f else 1f + dragPulseProgress * 0.08f
+
+        runCatching { windowManager.updateViewLayout(rootView, layoutParams) }
+    }
+
+    private fun applyPillColors() {
         val fillColor =
-            if (latestDarkSurface) {
-                Color.argb(215, 240, 246, 255)
-            } else {
-                Color.argb(190, 24, 34, 48)
+            when {
+                repositionActive -> Color.argb(240, 56, 189, 248)
+                latestDarkSurface -> Color.argb(215, 240, 246, 255)
+                else -> Color.argb(190, 24, 34, 48)
             }
         val strokeColor =
-            if (latestDarkSurface) {
-                Color.argb(110, 96, 165, 250)
-            } else {
-                Color.argb(90, 255, 255, 255)
+            when {
+                repositionActive -> Color.argb(235, 255, 255, 255)
+                latestDarkSurface -> Color.argb(110, 96, 165, 250)
+                else -> Color.argb(90, 255, 255, 255)
             }
         pillDrawable.cornerRadius = dp(4f).toFloat()
         pillDrawable.setColor(fillColor)
         pillDrawable.setStroke(dp(1f), strokeColor)
+    }
 
+    private fun computeActiveAlpha(): Float {
+        if (repositionActive) return 1f
         val baseOpacity = latestEdge.handleOpacity.coerceIn(0.1f, 1.0f)
-        val effectiveAlpha =
-            if (latestEdge.dimInFullscreen && fullscreenBarsHidden) {
-                (baseOpacity * 0.35f).coerceAtLeast(0.15f)
-            } else {
-                baseOpacity
-            }
-        rootView.alpha = effectiveAlpha
-        pillView.scaleX = 1f + dragPulseProgress * 0.45f
-        pillView.scaleY = 1f + dragPulseProgress * 0.08f
+        return if (latestEdge.dimInFullscreen && fullscreenBarsHidden) {
+            (baseOpacity * 0.35f).coerceAtLeast(0.15f)
+        } else {
+            baseOpacity
+        }
+    }
 
-        runCatching { windowManager.updateViewLayout(rootView, layoutParams) }
+    private fun wakeAndRescheduleIdle() {
+        cancelIdleDim(restoreActive = true)
+        scheduleIdleDim()
+    }
+
+    private fun cancelIdleDim(restoreActive: Boolean) {
+        mainHandler.removeCallbacks(idleDimRunnable)
+        if (idleDimmed) {
+            idleDimmed = false
+            if (restoreActive && attached) {
+                animateIdleState(dimmed = false)
+            }
+        }
+    }
+
+    private fun scheduleIdleDim(extraDelayMs: Long = 0L) {
+        mainHandler.removeCallbacks(idleDimRunnable)
+        val delayMs = latestEdge.idleAutoDimMs.toLong()
+        if (delayMs <= 0L || repositionActive) return
+        mainHandler.postDelayed(idleDimRunnable, delayMs + extraDelayMs)
+    }
+
+    private fun animateIdleState(dimmed: Boolean) {
+        val activeAlpha = computeActiveAlpha()
+        val targetAlpha = if (dimmed) (activeAlpha * IDLE_ALPHA_FACTOR).coerceAtLeast(0.12f) else activeAlpha
+        val targetTx = if (dimmed) tuckTranslationPx(latestEdge.side) else 0f
+        rootView
+            .animate()
+            .alpha(targetAlpha)
+            .setDuration(IDLE_ANIM_MS)
+            .start()
+        pillView
+            .animate()
+            .translationX(targetTx)
+            .scaleX(1f)
+            .scaleY(1f)
+            .setDuration(IDLE_ANIM_MS)
+            .start()
+    }
+
+    private fun tuckTranslationPx(side: EdgeSide): Float {
+        val shift = 1.6f * currentDensity
+        return if (side == EdgeSide.LEFT) -shift else shift
     }
 
     private fun dp(value: Float): Int = (value * currentDensity + 0.5f).toInt().coerceAtLeast(1)
@@ -196,5 +321,8 @@ class EdgeIndicatorWindow(
 
     companion object {
         private const val TAG = "SideveilEdgeIndicator"
+        private const val IDLE_ALPHA_FACTOR = 0.38f
+        private const val IDLE_ANIM_MS = 280L
+        private const val FULLSCREEN_HINT_HOLD_MS = 1_500L
     }
 }

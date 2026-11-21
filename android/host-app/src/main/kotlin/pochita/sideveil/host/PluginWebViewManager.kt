@@ -156,6 +156,10 @@ class PluginWebViewManager(
         warmInstances[activePluginId]?.pushEvent(SideveilEvents.PANEL_VISIBILITY, payload)
     }
 
+    fun isBackIntercepted(): Boolean = warmInstances[activePluginId]?.backInterceptEnabled == true
+
+    fun maxPluginPriority(): Int = descriptors.values.maxOfOrNull { it.priority } ?: 0
+
     fun dispatchBackPress(): Boolean {
         val active = warmInstances[activePluginId] ?: return false
         if (!active.backInterceptEnabled) return false

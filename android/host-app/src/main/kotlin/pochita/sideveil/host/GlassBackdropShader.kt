@@ -65,6 +65,15 @@ internal object GlassBackdropShader {
         shader.setFloatUniform("uRimFadeRatio", fadeRatio)
     }
 
+    fun applyMotionUniforms(
+        shader: RuntimeShader,
+        motionProgress: Float,
+        velocityShift: Float,
+    ) {
+        shader.setFloatUniform("uMotionProgress", motionProgress.coerceIn(0f, 1.15f))
+        shader.setFloatUniform("uVelocityShift", velocityShift.coerceIn(-1f, 1f))
+    }
+
     private val GLASS_OPTICAL_AGSL =
         """
         uniform float2 uSize;
@@ -78,6 +87,8 @@ internal object GlassBackdropShader {
         uniform float4 uRimWidths;
         uniform float3 uRimAlphas;
         uniform float uRimFadeRatio;
+        uniform float uMotionProgress;
+        uniform float uVelocityShift;
 
         float rBox(float2 p, float2 halfSize, float r) {
             float2 q = abs(p) - halfSize + r;
@@ -145,8 +156,9 @@ internal object GlassBackdropShader {
                 float2 pEdge = dir * edgeScale;
 
                 float halfPerimeter = (halfSize.x + halfSize.y) * 2.0;
-                float distTopLeft = (pEdge.x + halfSize.x) + (pEdge.y + halfSize.y);
-                float distBottomRight = max(halfPerimeter - distTopLeft, 0.0);
+                float flowOffset = uVelocityShift * halfPerimeter * 0.14;
+                float distTopLeft = abs((pEdge.x + halfSize.x) + (pEdge.y + halfSize.y) - flowOffset);
+                float distBottomRight = abs(max(halfPerimeter - ((pEdge.x + halfSize.x) + (pEdge.y + halfSize.y)), 0.0) + flowOffset);
                 float fadeSpan = max(uRimFadeRatio * halfPerimeter, 1.0);
 
                 float nearWeight = smoothstep(fadeSpan, 0.0, distTopLeft);
@@ -157,10 +169,11 @@ internal object GlassBackdropShader {
                 nearSdf = pow(max(nearSdf, 1e-6), 6.0) * 0.25 + 0.75 * nearSdf;
                 farSdf = pow(max(farSdf, 1e-6), 6.0) * 0.25 + 0.75 * farSdf;
 
+                float motionSheen = 1.0 + sin(clamp(uMotionProgress, 0.0, 1.0) * 3.14159265) * 0.22;
                 float rimAlpha = clamp(
-                    uRimAlphas.x * nearWeight * nearSdf +
+                    (uRimAlphas.x * nearWeight * nearSdf +
                     uRimAlphas.y * farWeight * farSdf +
-                    uRimAlphas.z * farSdf,
+                    uRimAlphas.z * farSdf) * motionSheen,
                     0.0,
                     1.0
                 );

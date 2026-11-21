@@ -35,4 +35,32 @@ class PanelSpringControllerTest {
         assertTrue((atOnePointFive - atOne) < linearStep * 0.35f)
         assertTrue((atTwo - atOnePointFive) < (atOnePointFive - atOne))
     }
+
+    @Test
+    fun `choreographer anchors vertical travel from startYFraction and settles to center`() {
+        val geo =
+            PanelMotionGeometry(
+                hiddenX = -1000,
+                openX = 36,
+                panelWidthPx = 960,
+                panelHeightPx = 1400,
+                screenHeightPx = 2400,
+                targetBlurRadiusPx = 160,
+            )
+
+        val startTop = PanelMotionChoreographer.computeFrame(0f, 0f, 0.15f, geo)
+        val midTop = PanelMotionChoreographer.computeFrame(0.5f, 1.8f, 0.15f, geo)
+        val settled = PanelMotionChoreographer.computeFrame(1.0f, 0f, 0.15f, geo)
+
+        assertTrue("origin near top should start above center", startTop.windowY < 0)
+        assertTrue("midpoint should glide closer to center", midTop.windowY > startTop.windowY && midTop.windowY < 0)
+        assertEquals(0, settled.windowY)
+        assertEquals(0f, startTop.contentAlpha, 1e-4f)
+        assertEquals(1f, settled.contentAlpha, 1e-4f)
+        assertEquals(0, startTop.blurRadiusPx)
+        assertTrue(midTop.blurRadiusPx in 40..120)
+        assertEquals(160, settled.blurRadiusPx)
+        assertTrue(midTop.shaderVelocityShift > 0f)
+        assertEquals(0f, settled.shaderVelocityShift, 1e-4f)
+    }
 }

@@ -1,17 +1,29 @@
 package pochita.sideveil.host
 
 import android.annotation.SuppressLint
+import android.app.Dialog
 import android.content.Context
+import android.graphics.PixelFormat
 import android.view.Gravity
+import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
 import android.view.Window
+import android.view.WindowInsets
 import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
+import android.webkit.WebView
+import android.window.OnBackInvokedCallback
+import android.window.OnBackInvokedDispatcher
 import pochita.sideveil.protocol.EdgeSide
 import pochita.sideveil.protocol.PanelConfig
+import pochita.sideveil.protocol.PanelState
 
 /**
- * Pure geometry and [WindowManager.LayoutParams] coordinator for [SidebarPanelWindow].
- * Encapsulates dimension clamping, edge/rail inset math, interactive flags, and warm `1x1` hiding.
+ * Geometry and [WindowManager.LayoutParams] coordinator for [SidebarPanelWindow].
+ * Coordinates safe insets (IME, display cutout, tablet landscape), locked zero-reflow sizing,
+ * interactive flags, predictive-back registration, and warm `1x1` hiding.
  */
 @SuppressLint("RtlHardcoded")
 internal class PanelWindowLayout(
@@ -19,12 +31,79 @@ internal class PanelWindowLayout(
     private val windowManager: WindowManager,
 ) {
     private val currentDensity: Float
-        get() = context.resources.displayMetrics.density
+        get() =
+            context.resources.displayMetrics.density
+                .coerceAtLeast(1f)
 
     var cachedWidthPx: Int = dp(340f)
         private set
     var cachedHeightPx: Int = dp(520f)
         private set
+    var safeBounds: PanelSafeBounds = PanelInsetsCoordinator.resolveBounds(context, windowManager)
+        private set
+    var safeCenterOffsetY: Int = 0
+        private set
+
+    fun createOverlayDialog(
+        themedContext: Context,
+        contentView: View,
+        stateProvider: () -> PanelState,
+        onBackPressedIntercept: () -> Boolean,
+        onCloseRequested: () -> Unit,
+    ): Dialog {
+        val dialog =
+            object : Dialog(themedContext, R.style.Theme_Sideveil_OverlayDialog) {
+                override fun cancel() = onCloseRequested()
+
+                override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+                    val isBackUp = event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP
+                    if (isBackUp && stateProvider() == PanelState.OPEN) {
+                        if (!onBackPressedIntercept()) onCloseRequested()
+                        return true
+                    }
+                    return super.dispatchKeyEvent(event)
+                }
+
+                override fun onTouchEvent(event: MotionEvent): Boolean {
+                    if (event.action == MotionEvent.ACTION_OUTSIDE && stateProvider() == PanelState.OPEN) {
+                        onCloseRequested()
+                        return true
+                    }
+                    return super.onTouchEvent(event)
+                }
+            }
+        dialog.setCanceledOnTouchOutside(true)
+        dialog.setCancelable(true)
+        dialog.setContentView(
+            contentView,
+            ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
+        )
+        val window = dialog.window ?: error("Overlay dialog window unavailable")
+        window.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
+        window.setFormat(PixelFormat.TRANSLUCENT)
+        @Suppress("DEPRECATION")
+        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        window.decorView.setPadding(0, 0, 0, 0)
+        configureInitialWindow(window)
+        return dialog
+    }
+
+    fun applyImeFocus(
+        window: Window?,
+        webView: WebView,
+        panelConfig: PanelConfig,
+        focused: Boolean,
+    ) {
+        val imm = context.getSystemService(InputMethodManager::class.java)
+        if (focused) {
+            window?.let { updateFlags(it, panelConfig, focusable = true, allowOffscreen = false) }
+            webView.requestFocus()
+            @Suppress("DEPRECATION")
+            imm?.showSoftInput(webView, InputMethodManager.SHOW_IMPLICIT)
+        } else {
+            imm?.hideSoftInputFromWindow(webView.windowToken, 0)
+        }
+    }
 
     fun configureInitialWindow(window: Window) {
         val lp = window.attributes
@@ -41,29 +120,48 @@ internal class PanelWindowLayout(
     }
 
     fun recomputeDimensions(
+        edgeSide: EdgeSide,
         panelConfig: PanelConfig,
         railInsetDp: Int,
         sizeOverride: PluginSizeOverride,
+        liveInsets: WindowInsets? = null,
     ) {
-        val bounds = runCatching { windowManager.currentWindowMetrics.bounds }.getOrNull()
-        val screenW = bounds?.width() ?: context.resources.displayMetrics.widthPixels
-        val screenH = bounds?.height() ?: context.resources.displayMetrics.heightPixels
-
-        val reservedHorizontal = dp((24 + railInsetDp).toFloat())
-        val maxW = (screenW - reservedHorizontal).coerceAtLeast(dp(240f))
-        val targetWidthDp = (sizeOverride.widthDp ?: panelConfig.widthDp).coerceIn(260, 480)
-        cachedWidthPx = dp(targetWidthDp.toFloat()).coerceAtMost(maxW)
-
-        val maxH = (screenH - dp(32f)).coerceAtLeast(dp(280f))
-        val desiredHeightPx = resolveDesiredHeightPx(screenH, panelConfig, sizeOverride)
-        cachedHeightPx = desiredHeightPx.coerceIn(dp(280f), maxH)
+        val resolved = PanelInsetsCoordinator.resolveBounds(context, windowManager, liveInsets)
+        safeBounds = resolved
+        val (widthPx, heightPx) =
+            PanelInsetsCoordinator.computePanelDimensions(
+                safe = resolved,
+                density = currentDensity,
+                edgeSide = edgeSide,
+                panelConfig = panelConfig,
+                railInsetDp = railInsetDp,
+                sizeOverride = sizeOverride,
+            )
+        cachedWidthPx = widthPx
+        cachedHeightPx = heightPx
+        safeCenterOffsetY = PanelInsetsCoordinator.computeSafeCenterOffsetY(resolved, currentDensity, heightPx)
     }
+
+    fun buildMotionGeometry(
+        edgeSide: EdgeSide,
+        railInsetDp: Int,
+        targetBlurRadiusPx: Int,
+    ): PanelMotionGeometry =
+        PanelMotionGeometry(
+            hiddenX = hiddenOffsetX(),
+            openX = openMarginPx(edgeSide, railInsetDp),
+            panelWidthPx = cachedWidthPx,
+            panelHeightPx = cachedHeightPx,
+            screenHeightPx = safeBounds.screenHeightPx,
+            targetBlurRadiusPx = targetBlurRadiusPx,
+        )
 
     fun showInteractive(
         window: Window,
         edgeSide: EdgeSide,
         panelConfig: PanelConfig,
         xPx: Int,
+        yPx: Int,
         focusable: Boolean,
         allowOffscreen: Boolean,
     ) {
@@ -73,7 +171,7 @@ internal class PanelWindowLayout(
         lp.width = cachedWidthPx
         lp.height = cachedHeightPx
         lp.x = xPx
-        lp.y = 0
+        lp.y = yPx
         lp.flags = computeInteractiveFlags(panelConfig, focusable, allowOffscreen)
         lp.dimAmount = panelConfig.scrimAlpha.coerceIn(0f, 0.75f)
         OverlayWindowFlags.disableMoveAnimation(lp)
@@ -85,14 +183,17 @@ internal class PanelWindowLayout(
         window: Window,
         panelConfig: PanelConfig,
         xPx: Int,
+        yPx: Int,
         focusable: Boolean,
         allowOffscreen: Boolean,
     ) {
         val lp = window.attributes
         val nextFlags = computeInteractiveFlags(panelConfig, focusable, allowOffscreen)
-        val geometryChanged = lp.x != xPx || lp.width != cachedWidthPx || lp.height != cachedHeightPx
+        val geometryChanged =
+            lp.x != xPx || lp.y != yPx || lp.width != cachedWidthPx || lp.height != cachedHeightPx
         if (geometryChanged || lp.flags != nextFlags) {
             lp.x = xPx
+            lp.y = yPx
             lp.width = cachedWidthPx
             lp.height = cachedHeightPx
             lp.flags = nextFlags
@@ -130,54 +231,34 @@ internal class PanelWindowLayout(
     }
 
     fun registerBackCallback(
-        dialog: android.app.Dialog,
-        callback: android.window.OnBackInvokedCallback,
+        dialog: Dialog,
+        callback: OnBackInvokedCallback,
     ): Boolean =
         runCatching {
             dialog.onBackInvokedDispatcher.registerOnBackInvokedCallback(
-                android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,
+                OnBackInvokedDispatcher.PRIORITY_DEFAULT,
                 callback,
             )
             true
         }.getOrDefault(false)
 
     fun unregisterBackCallback(
-        dialog: android.app.Dialog,
-        callback: android.window.OnBackInvokedCallback,
+        dialog: Dialog,
+        callback: OnBackInvokedCallback,
     ) {
         runCatching {
             dialog.onBackInvokedDispatcher.unregisterOnBackInvokedCallback(callback)
         }
     }
 
-    fun openMarginPx(railInsetDp: Int): Int = dp((12 + railInsetDp).toFloat())
+    fun openMarginPx(
+        edgeSide: EdgeSide,
+        railInsetDp: Int,
+    ): Int = dp((12 + railInsetDp).toFloat()) + PanelInsetsCoordinator.edgeCutoutInsetPx(safeBounds, edgeSide)
 
     fun hiddenOffsetX(): Int = -(cachedWidthPx + dp(24f))
 
     fun cornerPx(panelConfig: PanelConfig): Float = dp(panelConfig.cornerRadiusDp.toFloat()).toFloat()
-
-    private fun resolveDesiredHeightPx(
-        screenH: Int,
-        panelConfig: PanelConfig,
-        sizeOverride: PluginSizeOverride,
-    ): Int {
-        val overrideHeightDp = sizeOverride.heightDp
-        val overrideHeightPercent = sizeOverride.heightPercent
-        return when {
-            overrideHeightDp != null -> {
-                dp(overrideHeightDp.coerceIn(240, 960).toFloat())
-            }
-
-            overrideHeightPercent != null -> {
-                val pct = overrideHeightPercent.coerceIn(40, 92)
-                (screenH * (pct / 100f)).toInt()
-            }
-
-            else -> {
-                (screenH * (panelConfig.heightPercent / 100f)).toInt()
-            }
-        }
-    }
 
     private fun computeInteractiveFlags(
         panelConfig: PanelConfig,

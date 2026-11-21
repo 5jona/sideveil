@@ -11,6 +11,7 @@ import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.view.View
 import android.view.ViewOutlineProvider
+import kotlin.math.abs
 
 /**
  * Optical frosted-glass backdrop [Drawable] backed by a reusable AGSL
@@ -25,6 +26,8 @@ class GlassBackdropDrawable(
     private var style: GlassBackdropStyle = GlassBackdropStyle()
     private var palette: GlassOpticalPalette = GlassOpticalPalette.from(style)
     private var drawableAlpha: Int = 255
+    private var motionProgress: Float = 1f
+    private var velocityShift: Float = 0f
 
     private val shaderPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val runtimeShader: RuntimeShader? = GlassBackdropShader.create()
@@ -34,6 +37,7 @@ class GlassBackdropDrawable(
         if (runtimeShader != null) {
             shaderPaint.shader = runtimeShader
             GlassBackdropShader.applyStyleUniforms(runtimeShader, style, palette, density)
+            GlassBackdropShader.applyMotionUniforms(runtimeShader, motionProgress, velocityShift)
         } else {
             syncFallbackDrawable()
         }
@@ -59,6 +63,30 @@ class GlassBackdropDrawable(
         style = next
         palette = GlassOpticalPalette.from(next)
         syncVisuals()
+        invalidateSelf()
+        return true
+    }
+
+    /**
+     * Updates AGSL specular motion flow uniforms during drag/spring transitions without
+     * reallocating paints or redrawing idle frames.
+     */
+    fun updateMotion(
+        nextMotionProgress: Float,
+        nextVelocityShift: Float,
+    ): Boolean {
+        val clampedProgress = nextMotionProgress.coerceIn(0f, 1.15f)
+        val clampedShift = nextVelocityShift.coerceIn(-1f, 1f)
+        if (abs(clampedProgress - motionProgress) < MOTION_EPSILON &&
+            abs(clampedShift - velocityShift) < MOTION_EPSILON
+        ) {
+            return false
+        }
+        motionProgress = clampedProgress
+        velocityShift = clampedShift
+        val shader = runtimeShader ?: return false
+        GlassBackdropShader.applyMotionUniforms(shader, motionProgress, velocityShift)
+        rebindShader(shader)
         invalidateSelf()
         return true
     }
@@ -112,6 +140,7 @@ class GlassBackdropDrawable(
         if (shader != null) {
             GlassBackdropShader.applyStyleUniforms(shader, style, palette, density)
             GlassBackdropShader.applyBoundsUniforms(shader, style, bounds)
+            GlassBackdropShader.applyMotionUniforms(shader, motionProgress, velocityShift)
             rebindShader(shader)
         } else {
             syncFallbackDrawable()
@@ -130,6 +159,8 @@ class GlassBackdropDrawable(
     }
 
     companion object {
+        private const val MOTION_EPSILON = 0.005f
+
         /**
          * Creates a [ViewOutlineProvider] synchronized with the exact round-rect corner radius
          * rendered by [GlassBackdropDrawable].

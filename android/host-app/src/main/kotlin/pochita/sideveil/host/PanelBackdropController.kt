@@ -108,7 +108,37 @@ internal class PanelBackdropController(
     }
 
     fun clearWindowBlur(window: Window) {
+        backdropDrawable.alpha = 255
+        backdropDrawable.updateMotion(1f, 0f)
         applyBlurRadius(window, 0)
+    }
+
+    fun targetBlurRadiusPx(): Int {
+        if (pluginBackdrop != PluginSurfaceBackdrop.NATIVE_GLASS || !systemBlurSupported) {
+            return 0
+        }
+        return if (panelConfig.nativeBlurEnabled) panelConfig.blurRadiusPx.coerceAtLeast(0) else 0
+    }
+
+    /**
+     * Applies per-frame progressive cross-window blur, optical glass alpha, and AGSL specular
+     * motion shift without re-creating [BlurMaskDrawable].
+     */
+    fun applyMotionFrame(
+        window: Window,
+        blurRadiusPx: Int,
+        backdropAlpha: Float,
+        motionProgress: Float,
+        velocityShift: Float,
+    ) {
+        if (pluginBackdrop == PluginSurfaceBackdrop.TRANSPARENT) {
+            applyBlurRadius(window, 0)
+            return
+        }
+        val clampedBlur = blurRadiusPx.coerceIn(0, targetBlurRadiusPx())
+        applyBlurRadius(window, clampedBlur)
+        backdropDrawable.alpha = (backdropAlpha.coerceIn(0f, 1f) * 255f).toInt().coerceIn(0, 255)
+        backdropDrawable.updateMotion(motionProgress, velocityShift)
     }
 
     fun apply() {
