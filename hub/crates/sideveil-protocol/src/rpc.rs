@@ -11,8 +11,11 @@ pub mod events {
     pub const GESTURE_DRAG_START: &str = "gesture.dragStart";
     pub const GESTURE_DRAG_MOVE: &str = "gesture.dragMove";
     pub const GESTURE_DRAG_END: &str = "gesture.dragEnd";
+    pub const GESTURE_FULLSCREEN_HINT: &str = "gesture.fullscreenHint";
+    pub const EDGE_REPOSITION: &str = "edge.reposition";
     pub const PANEL_COMMAND: &str = "panel.command";
     pub const HOST_HELLO: &str = "host.hello";
+    pub const HOST_FULLSCREEN_CHANGED: &str = "host.fullscreenChanged";
     pub const HOST_SELECT_PLUGIN: &str = "host.selectPlugin";
     pub const PANEL_STATE_CHANGED: &str = "panel.stateChanged";
     pub const PANEL_VISIBILITY: &str = "panel.visibility";
@@ -30,6 +33,7 @@ pub mod methods {
     pub const DAEMON_LOGS: &str = "daemon.logs";
     pub const CONFIG_GET: &str = "config.get";
     pub const CONFIG_PATCH_APPEARANCE: &str = "config.patchAppearance";
+    pub const CONFIG_PATCH_EDGE: &str = "config.patchEdge";
     pub const CONFIG_RELOAD: &str = "config.reload";
     pub const PANEL_OPEN: &str = "panel.open";
     pub const PANEL_CLOSE: &str = "panel.close";
@@ -226,6 +230,38 @@ pub struct GestureDragMovePayload {
 pub struct GestureDragEndPayload {
     pub should_open: bool,
     pub velocity_px_per_sec: f32,
+    #[serde(default)]
+    pub canceled: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GestureFullscreenHintPayload {
+    pub side: EdgeSide,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EdgeRepositionPhase {
+    Start,
+    Move,
+    End,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EdgeRepositionPayload {
+    pub phase: EdgeRepositionPhase,
+    pub side: EdgeSide,
+    pub top_percent: i32,
+    #[serde(default)]
+    pub committed: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostFullscreenChangedPayload {
+    pub fullscreen: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

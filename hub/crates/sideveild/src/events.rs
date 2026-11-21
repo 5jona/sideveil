@@ -1,20 +1,21 @@
-//! Bidirectional Host WebSocket event and `:sensor` UDS telemetry routing for `HubState`.
+//! Bidirectional Host WebSocket event routing for `HubState`.
+
+mod sensor;
 
 use std::sync::PoisonError;
 
 use serde::Serialize;
 use serde_json::Value;
-use sideveil_protocol::config::{PanelState, SideveilConfig};
+use sideveil_protocol::config::SideveilConfig;
 use sideveil_protocol::plugin::{
     PluginActiveChangedPayload, PluginBackendState, PluginBackendStatePayload,
     PluginScopedEventPayload, PluginSelectParams,
 };
 use sideveil_protocol::rpc::{
-    ConfigUpdatedPayload, GestureDragEndPayload, GestureDragMovePayload, GestureDragStartPayload,
-    HostEventEnvelope, HostHelloPayload, PanelCommand, PanelCommandPayload,
-    PanelStateChangedPayload, ScopeChangedPayload, events,
+    ConfigUpdatedPayload, HostEventEnvelope, HostFullscreenChangedPayload, HostHelloPayload,
+    PanelCommand, PanelCommandPayload, PanelStateChangedPayload, events,
 };
-use sideveil_protocol::sensor::{HubToSensor, SensorToHub};
+use sideveil_protocol::sensor::HubToSensor;
 
 use crate::state::{HostWakeSignal, HubState};
 
@@ -100,11 +101,10 @@ impl HubState {
         let cfg = self.config_store().current();
         let snapshot = self.plugins_snapshot();
         let scope_active = !snapshot.matched_plugin_ids.is_empty();
-        let panel_state = self
-            .runtime
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-            .panel_state;
+        let (panel_state, fullscreen_active) = {
+            let rt = self.runtime.read().unwrap_or_else(PoisonError::into_inner);
+            (rt.panel_state, rt.fullscreen_active)
+        };
         let guard = self
             .sensor_session
             .read()
@@ -114,6 +114,7 @@ impl HubState {
                 config: cfg,
                 scope_active,
                 panel_state,
+                fullscreen_active,
             });
         }
     }
@@ -176,6 +177,25 @@ impl HubState {
                     self.send_host_wake(HostWakeSignal::WatchHostPid(hello.pid));
                 }
             }
+            events::HOST_FULLSCREEN_CHANGED => {
+                if let Some(payload) = envelope.payload
+                    && let Ok(changed) =
+                        serde_json::from_value::<HostFullscreenChangedPayload>(payload)
+                {
+                    let updated = {
+                        let mut rt = self.runtime.write().unwrap_or_else(PoisonError::into_inner);
+                        if rt.fullscreen_active == changed.fullscreen {
+                            false
+                        } else {
+                            rt.fullscreen_active = changed.fullscreen;
+                            true
+                        }
+                    };
+                    if updated {
+                        self.sync_sensor_state();
+                    }
+                }
+            }
             events::PANEL_STATE_CHANGED => {
                 if let Some(payload) = envelope.payload
                     && let Ok(changed) = serde_json::from_value::<PanelStateChangedPayload>(payload)
@@ -209,120 +229,6 @@ impl HubState {
             other => {
                 self.logs().info(format!("Ignored host event '{other}'"));
             }
-        }
-    }
-
-    pub fn on_sensor_message(&self, msg: SensorToHub) {
-        match msg {
-            SensorToHub::Hello {
-                pid,
-                version,
-                display,
-                task_listener_active,
-                gesture_monitor_active,
-                overlay_permission_granted,
-                foreground_package,
-            } => {
-                {
-                    let mut rt = self.runtime.write().unwrap_or_else(PoisonError::into_inner);
-                    rt.sensor_pid = Some(pid);
-                    rt.display = display;
-                    rt.task_listener_active = task_listener_active;
-                    rt.gesture_monitor_active = gesture_monitor_active;
-                    rt.overlay_permission_granted = overlay_permission_granted;
-                    if !foreground_package.is_empty() {
-                        rt.foreground_package = foreground_package;
-                    }
-                }
-                self.logs().info(format!(
-                    "Sensor hello pid={pid} version={version} display={}x{}@{} overlay={overlay_permission_granted}",
-                    display.width_px, display.height_px, display.density
-                ));
-                self.sync_sensor_state();
-                self.push_config_snapshot_to_host();
-                self.push_plugins_snapshot_to_host();
-            }
-            SensorToHub::ForegroundChanged { package_name } => {
-                {
-                    let mut rt = self.runtime.write().unwrap_or_else(PoisonError::into_inner);
-                    rt.foreground_package = package_name.clone();
-                }
-                let snapshot = self.plugins_snapshot();
-                let active = !snapshot.matched_plugin_ids.is_empty();
-                self.sync_sensor_state();
-                self.emit_host_event_critical(
-                    events::SCOPE_CHANGED,
-                    &ScopeChangedPayload {
-                        foreground_package: package_name,
-                        active,
-                    },
-                );
-                self.emit_host_event_critical(events::PLUGINS_UPDATED, &snapshot);
-            }
-            SensorToHub::DisplayChanged { display } => {
-                {
-                    let mut rt = self.runtime.write().unwrap_or_else(PoisonError::into_inner);
-                    rt.display = display;
-                }
-                self.push_config_snapshot_to_host();
-            }
-            SensorToHub::PermissionsStatus {
-                overlay_granted, ..
-            } => {
-                let mut rt = self.runtime.write().unwrap_or_else(PoisonError::into_inner);
-                rt.overlay_permission_granted = overlay_granted;
-            }
-            SensorToHub::GestureDragStart {
-                side,
-                start_y_fraction,
-            } => {
-                if self.is_host_connected() {
-                    let mut rt = self.runtime.write().unwrap_or_else(PoisonError::into_inner);
-                    rt.panel_state = PanelState::Dragging;
-                }
-                self.emit_host_event_critical(
-                    events::GESTURE_DRAG_START,
-                    &GestureDragStartPayload {
-                        side,
-                        start_y_fraction,
-                    },
-                );
-            }
-            SensorToHub::GestureDragMove {
-                side,
-                progress,
-                raw_x,
-                raw_y,
-                delta_x,
-            } => {
-                self.emit_host_event_ephemeral(
-                    events::GESTURE_DRAG_MOVE,
-                    &GestureDragMovePayload {
-                        side,
-                        progress,
-                        raw_x,
-                        raw_y,
-                        delta_x,
-                    },
-                );
-            }
-            SensorToHub::GestureDragEnd {
-                should_open,
-                velocity_px_per_sec,
-            } => {
-                if !self.is_host_connected() {
-                    let mut rt = self.runtime.write().unwrap_or_else(PoisonError::into_inner);
-                    rt.panel_state = PanelState::Closed;
-                }
-                self.emit_host_event_critical(
-                    events::GESTURE_DRAG_END,
-                    &GestureDragEndPayload {
-                        should_open,
-                        velocity_px_per_sec,
-                    },
-                );
-            }
-            SensorToHub::Pong { .. } => {}
         }
     }
 }

@@ -1,5 +1,7 @@
 //! Authenticated loopback HTTP static asset server for isolated plugin bundles (`GET /plugins/<id>/<path>`).
 
+mod icon_cache;
+
 use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -47,7 +49,10 @@ pub async fn handle_http_asset(stream: TcpStream, state: Arc<HubState>) {
         return;
     }
 
-    let path_only = req.target.split('?').next().unwrap_or_default();
+    let (path_only, query_str) = match req.target.split_once('?') {
+        Some((p, q)) => (p, Some(q)),
+        None => (req.target.as_str(), None),
+    };
     let Some(rest) = path_only.strip_prefix("/plugins/") else {
         let _ = write_error(&mut write_half, 404, "Not Found").await;
         return;
@@ -65,6 +70,29 @@ pub async fn handle_http_asset(stream: TcpStream, state: Arc<HubState>) {
         let _ = write_error(&mut write_half, 404, "Plugin Not Found").await;
         return;
     };
+
+    if raw_rel == "__icon" {
+        let query = icon_cache::IconQuery::parse(query_str);
+        match icon_cache::load_or_rasterize_icon(&state, plugin_id, &plugin_root, query).await {
+            Ok(resolved) => {
+                let header = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nCache-Control: private, max-age=60\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n",
+                    resolved.mime,
+                    resolved.bytes.len()
+                );
+                if write_half.write_all(header.as_bytes()).await.is_ok() {
+                    if req.method == "GET" {
+                        let _ = write_half.write_all(&resolved.bytes).await;
+                    }
+                    let _ = write_half.flush().await;
+                }
+            }
+            Err((status, reason)) => {
+                let _ = write_error(&mut write_half, status, reason).await;
+            }
+        }
+        return;
+    }
 
     let Ok(file_path) = resolve_asset_file(&plugin_root, raw_rel).await else {
         let _ = write_error(&mut write_half, 403, "Forbidden").await;
@@ -242,7 +270,7 @@ fn from_hex(b: u8) -> Option<u8> {
     }
 }
 
-fn mime_type_for(path: &Path) -> &'static str {
+pub(crate) fn mime_type_for(path: &Path) -> &'static str {
     match path.extension().and_then(|e| e.to_str()).unwrap_or("") {
         "html" | "htm" => "text/html; charset=utf-8",
         "js" | "mjs" => "application/javascript; charset=utf-8",

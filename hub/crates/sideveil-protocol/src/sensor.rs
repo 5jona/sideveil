@@ -63,6 +63,20 @@ pub enum SensorToHub {
     GestureDragEnd {
         should_open: bool,
         velocity_px_per_sec: f32,
+        #[serde(default)]
+        canceled: bool,
+    },
+    #[serde(rename_all = "camelCase")]
+    GestureFullscreenHint { side: EdgeSide },
+    #[serde(rename_all = "camelCase")]
+    EdgeRepositionStart { side: EdgeSide, top_percent: i32 },
+    #[serde(rename_all = "camelCase")]
+    EdgeRepositionMove { side: EdgeSide, top_percent: i32 },
+    #[serde(rename_all = "camelCase")]
+    EdgeRepositionEnd {
+        side: EdgeSide,
+        top_percent: i32,
+        committed: bool,
     },
     #[serde(rename_all = "camelCase")]
     Pong { seq: u64 },
@@ -77,6 +91,8 @@ pub enum HubToSensor {
         config: SideveilConfig,
         scope_active: bool,
         panel_state: PanelState,
+        #[serde(default)]
+        fullscreen_active: bool,
     },
     RefreshPermissions,
     #[serde(rename_all = "camelCase")]
@@ -105,6 +121,7 @@ mod tests {
             config: SideveilConfig::default(),
             scope_active: true,
             panel_state: PanelState::Closed,
+            fullscreen_active: false,
         };
         let encoded_sync = serde_json::to_string(&sync).expect("encode HubToSensor");
         assert!(encoded_sync.contains(r#""type":"syncState""#));

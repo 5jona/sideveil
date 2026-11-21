@@ -47,6 +47,7 @@ pub(crate) struct RuntimeSnapshot {
     pub(crate) gesture_monitor_active: bool,
     pub(crate) overlay_permission_granted: bool,
     pub(crate) panel_state: PanelState,
+    pub(crate) fullscreen_active: bool,
     pub(crate) host_pid: Option<u32>,
     pub(crate) cross_window_blur_supported: Option<bool>,
     pub(crate) sensor_pid: Option<u32>,
@@ -61,6 +62,7 @@ impl Default for RuntimeSnapshot {
             gesture_monitor_active: false,
             overlay_permission_granted: false,
             panel_state: PanelState::Closed,
+            fullscreen_active: false,
             host_pid: None,
             cross_window_blur_supported: None,
             sensor_pid: None,
@@ -76,6 +78,7 @@ pub struct HubState {
     plugins: Arc<PluginRegistry>,
     backends: Arc<PluginBackends>,
     data_dir: PathBuf,
+    cache_dir: PathBuf,
     logs: Arc<LogRing>,
     ws_port: AtomicU16,
     ws_token: String,
@@ -95,6 +98,9 @@ impl HubState {
         logs: Arc<LogRing>,
         host_wake_tx: mpsc::UnboundedSender<HostWakeSignal>,
     ) -> Arc<Self> {
+        let cache_dir = data_dir
+            .parent()
+            .map_or_else(|| data_dir.join("cache"), |p| p.join("cache"));
         Arc::new(Self {
             started_at: Instant::now(),
             host_package,
@@ -102,6 +108,7 @@ impl HubState {
             plugins,
             backends: Arc::new(PluginBackends::new()),
             data_dir,
+            cache_dir,
             logs,
             ws_port: AtomicU16::new(0),
             ws_token: generate_hex_token(),
@@ -131,6 +138,11 @@ impl HubState {
     #[must_use]
     pub fn data_dir(&self) -> &Path {
         &self.data_dir
+    }
+
+    #[must_use]
+    pub fn cache_dir(&self) -> &Path {
+        &self.cache_dir
     }
 
     #[must_use]

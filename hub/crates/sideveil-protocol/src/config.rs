@@ -44,6 +44,8 @@ pub struct EdgeConfig {
     pub handle_visible: bool,
     pub handle_opacity: f32,
     pub dim_in_fullscreen: bool,
+    pub double_swipe_in_fullscreen: bool,
+    pub idle_auto_dim_ms: i32,
 }
 
 impl Default for EdgeConfig {
@@ -58,6 +60,8 @@ impl Default for EdgeConfig {
             handle_visible: true,
             handle_opacity: 0.62,
             dim_in_fullscreen: true,
+            double_swipe_in_fullscreen: false,
+            idle_auto_dim_ms: 3500,
         }
     }
 }
@@ -80,6 +84,8 @@ impl EdgeConfig {
             handle_visible: self.handle_visible,
             handle_opacity: opacity,
             dim_in_fullscreen: self.dim_in_fullscreen,
+            double_swipe_in_fullscreen: self.double_swipe_in_fullscreen,
+            idle_auto_dim_ms: self.idle_auto_dim_ms.clamp(0, 30_000),
         }
     }
 }
@@ -252,6 +258,18 @@ impl SideveilConfig {
         }
         next.sanitized()
     }
+
+    #[must_use]
+    pub fn apply_edge_patch(&self, patch: &EdgePatchParams) -> Self {
+        let mut next = self.clone();
+        if let Some(side) = patch.side {
+            next.edge.side = side;
+        }
+        if let Some(top_percent) = patch.top_percent {
+            next.edge.top_percent = top_percent;
+        }
+        next.sanitized()
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -262,6 +280,13 @@ pub struct AppearancePatchParams {
     pub native_blur_enabled: Option<bool>,
     pub blur_radius_px: Option<i32>,
     pub corner_radius_dp: Option<i32>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct EdgePatchParams {
+    pub side: Option<EdgeSide>,
+    pub top_percent: Option<i32>,
 }
 
 #[cfg(test)]
@@ -295,6 +320,8 @@ mod tests {
                 handle_visible: false,
                 handle_opacity: f32::NAN,
                 dim_in_fullscreen: false,
+                double_swipe_in_fullscreen: true,
+                idle_auto_dim_ms: 99_999,
             },
             panel: PanelConfig {
                 width_dp: 100,
@@ -320,6 +347,8 @@ mod tests {
         assert_eq!(clean.edge.trigger_distance_dp, 18);
         assert_eq!(clean.edge.edge_offset_dp, 0);
         assert!((clean.edge.handle_opacity - 0.62).abs() < 1e-6);
+        assert!(clean.edge.double_swipe_in_fullscreen);
+        assert_eq!(clean.edge.idle_auto_dim_ms, 30_000);
         assert_eq!(clean.panel.width_dp, 260);
         assert_eq!(clean.panel.height_percent, 92);
         assert_eq!(clean.panel.corner_radius_dp, 8);

@@ -1,18 +1,17 @@
 //! Async JSON-RPC 2.0 request dispatcher shared by `hub.sock` CLI and `SideveilHost` WS.
 
+mod control;
+mod plugins;
+mod sandbox;
+
 use std::sync::Arc;
 
 use serde_json::{Value, json};
-use sideveil_protocol::config::AppearancePatchParams;
-use sideveil_protocol::plugin::{
-    BUILTIN_DIAG_PLUGIN_ID, PluginInvokeParams, PluginSelectParams, PluginSetEnabledParams,
-    PluginSetPriorityParams, PluginSetScopeOverrideParams,
-};
+use sideveil_protocol::plugin::BUILTIN_DIAG_PLUGIN_ID;
 use sideveil_protocol::rpc::{
     PanelCommand, PingResult, RpcRequest, RpcResponse, error_codes, methods,
 };
 
-use crate::plugin_acl;
 use crate::state::HubState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,7 +75,11 @@ async fn dispatch_inner(
         }
         methods::CONFIG_PATCH_APPEARANCE => {
             require_privileged(is_privileged, &req.method)?;
-            handle_patch_appearance(state, req.params)
+            control::handle_patch_appearance(state, req.params)
+        }
+        methods::CONFIG_PATCH_EDGE => {
+            require_privileged(is_privileged, &req.method)?;
+            control::handle_patch_edge(state, req.params)
         }
         methods::PANEL_OPEN => {
             require_privileged(is_privileged, &req.method)?;
@@ -106,39 +109,29 @@ async fn dispatch_inner(
         }
         methods::PLUGINS_SET_ENABLED => {
             require_privileged(is_privileged, &req.method)?;
-            handle_set_enabled(state, req.params)
+            plugins::handle_set_enabled(state, req.params)
         }
         methods::PLUGINS_SET_PRIORITY => {
             require_privileged(is_privileged, &req.method)?;
-            handle_set_priority(state, req.params)
+            plugins::handle_set_priority(state, req.params)
         }
         methods::PLUGINS_SET_SCOPE_OVERRIDE => {
             require_privileged(is_privileged, &req.method)?;
-            handle_set_scope_override(state, req.params)
+            plugins::handle_set_scope_override(state, req.params)
         }
         methods::PLUGINS_SELECT => {
             require_privileged(is_privileged, &req.method)?;
-            handle_select_plugin(state, req.params)
+            plugins::handle_select_plugin(state, req.params)
         }
         methods::PLUGIN_INVOKE => {
-            handle_plugin_invoke(state, req.plugin_id.as_deref(), req.params).await
+            sandbox::handle_plugin_invoke(state, req.plugin_id.as_deref(), req.params).await
         }
-        methods::FS_READ => {
-            let pid = require_plugin_id(req.plugin_id.as_deref())?;
-            plugin_acl::handle_fs_read(state.plugin_registry(), state.data_dir(), pid, req.params)
-        }
+        methods::FS_READ => sandbox::handle_fs_read(state, req.plugin_id.as_deref(), req.params),
         methods::FS_WRITE_ATOMIC => {
-            let pid = require_plugin_id(req.plugin_id.as_deref())?;
-            plugin_acl::handle_fs_write_atomic(
-                state.plugin_registry(),
-                state.data_dir(),
-                pid,
-                req.params,
-            )
+            sandbox::handle_fs_write_atomic(state, req.plugin_id.as_deref(), req.params)
         }
         methods::SYSTEM_EXEC => {
-            let pid = require_plugin_id(req.plugin_id.as_deref())?;
-            plugin_acl::handle_system_exec(state.plugin_registry(), pid, req.params).await
+            sandbox::handle_system_exec(state, req.plugin_id.as_deref(), req.params).await
         }
         other => Err((
             error_codes::METHOD_NOT_FOUND,
@@ -158,7 +151,7 @@ fn require_privileged(allowed: bool, method: &str) -> Result<(), (i32, String)> 
     }
 }
 
-fn require_plugin_id(plugin_id: Option<&str>) -> Result<&str, (i32, String)> {
+pub(crate) fn require_plugin_id(plugin_id: Option<&str>) -> Result<&str, (i32, String)> {
     plugin_id
         .map(str::trim)
         .filter(|s| !s.is_empty())
@@ -170,107 +163,7 @@ fn require_plugin_id(plugin_id: Option<&str>) -> Result<&str, (i32, String)> {
         })
 }
 
-async fn handle_plugin_invoke(
-    state: &Arc<HubState>,
-    caller_plugin_id: Option<&str>,
-    params: Option<Value>,
-) -> Result<Value, (i32, String)> {
-    let plugin_id = require_plugin_id(caller_plugin_id)?;
-    let parsed: PluginInvokeParams = decode_params(params)?;
-    if parsed.method.trim().is_empty() {
-        return Err((
-            error_codes::INVALID_PARAMS,
-            "plugin.invoke method must not be blank".to_owned(),
-        ));
-    }
-    state
-        .plugin_backends()
-        .invoke(plugin_id, parsed.method, parsed.params)
-        .await
-}
-
-fn handle_set_enabled(
-    state: &Arc<HubState>,
-    params: Option<Value>,
-) -> Result<Value, (i32, String)> {
-    let parsed: PluginSetEnabledParams = decode_params(params)?;
-    state
-        .plugin_registry()
-        .set_enabled(&parsed.plugin_id, parsed.enabled)
-        .map_err(|msg| (error_codes::INVALID_PARAMS, msg))?;
-    state.on_plugins_changed();
-    serialize_result(&state.plugins_snapshot())
-}
-
-fn handle_set_priority(
-    state: &Arc<HubState>,
-    params: Option<Value>,
-) -> Result<Value, (i32, String)> {
-    let parsed: PluginSetPriorityParams = decode_params(params)?;
-    state
-        .plugin_registry()
-        .set_priority(&parsed.plugin_id, parsed.priority)
-        .map_err(|msg| (error_codes::INVALID_PARAMS, msg))?;
-    state.on_plugins_changed();
-    serialize_result(&state.plugins_snapshot())
-}
-
-fn handle_set_scope_override(
-    state: &Arc<HubState>,
-    params: Option<Value>,
-) -> Result<Value, (i32, String)> {
-    let parsed: PluginSetScopeOverrideParams = decode_params(params)?;
-    state
-        .plugin_registry()
-        .set_scope_override(
-            &parsed.plugin_id,
-            parsed.packages,
-            parsed.global,
-            parsed.clear,
-        )
-        .map_err(|msg| (error_codes::INVALID_PARAMS, msg))?;
-    state.on_plugins_changed();
-    serialize_result(&state.plugins_snapshot())
-}
-
-fn handle_select_plugin(
-    state: &Arc<HubState>,
-    params: Option<Value>,
-) -> Result<Value, (i32, String)> {
-    let parsed: PluginSelectParams = decode_params(params)?;
-    let active = state
-        .select_active_plugin(&parsed.plugin_id, parsed.package_name.as_deref())
-        .map_err(|msg| (error_codes::INVALID_PARAMS, msg))?;
-    serialize_result(&active)
-}
-
-fn handle_patch_appearance(
-    state: &Arc<HubState>,
-    params: Option<Value>,
-) -> Result<Value, (i32, String)> {
-    let patch = match params {
-        Some(val) => serde_json::from_value::<AppearancePatchParams>(val).map_err(|err| {
-            (
-                error_codes::INVALID_PARAMS,
-                format!("Invalid params: {err}"),
-            )
-        })?,
-        None => AppearancePatchParams::default(),
-    };
-    let updated = state
-        .config_store()
-        .patch_appearance(&patch)
-        .map_err(|err| {
-            (
-                error_codes::INTERNAL_ERROR,
-                format!("Failed to persist appearance patch: {err}"),
-            )
-        })?;
-    state.on_config_changed(&updated);
-    serialize_result(&updated)
-}
-
-fn decode_params<T: serde::de::DeserializeOwned>(
+pub(crate) fn decode_params<T: serde::de::DeserializeOwned>(
     params: Option<Value>,
 ) -> Result<T, (i32, String)> {
     let Some(val) = params else {
@@ -287,7 +180,7 @@ fn decode_params<T: serde::de::DeserializeOwned>(
     })
 }
 
-fn serialize_result<T: serde::Serialize>(value: &T) -> Result<Value, (i32, String)> {
+pub(crate) fn serialize_result<T: serde::Serialize>(value: &T) -> Result<Value, (i32, String)> {
     serde_json::to_value(value).map_err(|err| {
         (
             error_codes::INTERNAL_ERROR,

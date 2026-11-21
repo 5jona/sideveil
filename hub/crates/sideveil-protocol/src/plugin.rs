@@ -222,6 +222,8 @@ pub enum ManifestValidationError {
     BlankVersion,
     #[error("plugin entry '{0}' must be a relative path without '..' or leading '/'")]
     InvalidEntry(String),
+    #[error("plugin icon '{0}' must be a relative path without '..' or leading '/'")]
+    InvalidIcon(String),
 }
 
 /// Validates a plugin identifier for safe use in directory names and isolated virtual origins.
@@ -256,18 +258,26 @@ impl PluginManifest {
         if self.version.trim().is_empty() {
             return Err(ManifestValidationError::BlankVersion);
         }
-        let entry = self.entry.trim();
-        if entry.is_empty()
-            || entry.starts_with('/')
-            || entry.contains('\\')
-            || entry
-                .split('/')
-                .any(|seg| seg.is_empty() || seg == "." || seg == "..")
-        {
+        if !is_safe_relative_asset_path(&self.entry) {
             return Err(ManifestValidationError::InvalidEntry(self.entry.clone()));
+        }
+        if let Some(icon) = &self.icon
+            && !is_safe_relative_asset_path(icon)
+        {
+            return Err(ManifestValidationError::InvalidIcon(icon.clone()));
         }
         Ok(())
     }
+}
+
+fn is_safe_relative_asset_path(raw: &str) -> bool {
+    let trimmed = raw.trim();
+    !trimmed.is_empty()
+        && !trimmed.starts_with('/')
+        && !trimmed.contains('\\')
+        && !trimmed
+            .split('/')
+            .any(|seg| seg.is_empty() || seg == "." || seg == ".." || seg.starts_with('.'))
 }
 
 #[cfg(test)]

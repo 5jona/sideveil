@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, PoisonError, RwLock};
 use std::time::Duration;
 
-use sideveil_protocol::config::{AppearancePatchParams, SideveilConfig};
+use sideveil_protocol::config::{AppearancePatchParams, EdgePatchParams, SideveilConfig};
 use tokio::sync::broadcast;
 
 use crate::inotify::{DIR_CHANGE_MASK, InotifyDirWatcher};
@@ -85,6 +85,19 @@ impl ConfigStore {
         let next = {
             let mut guard = self.current.write().unwrap_or_else(PoisonError::into_inner);
             let updated = guard.apply_appearance_patch(patch);
+            *guard = updated.clone();
+            updated
+        };
+        self.persist_config(&next)?;
+        let _ = self.updates_tx.send(next.clone());
+        Ok(next)
+    }
+
+    /// Applies an edge handle position patch (side/topPercent), atomically persists it, and notifies subscribers.
+    pub fn patch_edge(&self, patch: &EdgePatchParams) -> io::Result<SideveilConfig> {
+        let next = {
+            let mut guard = self.current.write().unwrap_or_else(PoisonError::into_inner);
+            let updated = guard.apply_edge_patch(patch);
             *guard = updated.clone();
             updated
         };

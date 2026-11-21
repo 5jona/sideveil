@@ -204,6 +204,7 @@ async fn sensor_hub_host_and_ctl_pipeline_works_end_to_end() {
         SensorToHub::GestureDragEnd {
             should_open: true,
             velocity_px_per_sec: 900.0,
+            canceled: false,
         },
     ] {
         let line = format!("{}\n", serde_json::to_string(&msg).unwrap());

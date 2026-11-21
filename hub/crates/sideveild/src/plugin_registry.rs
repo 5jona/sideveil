@@ -182,6 +182,15 @@ impl PluginRegistry {
     }
 
     #[must_use]
+    pub fn plugin_icon(&self, plugin_id: &str) -> Option<String> {
+        let guard = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+        guard
+            .plugins
+            .get(plugin_id)
+            .and_then(|p| p.manifest.icon.clone())
+    }
+
+    #[must_use]
     pub fn contains_plugin(&self, plugin_id: &str) -> bool {
         let guard = self.inner.read().unwrap_or_else(PoisonError::into_inner);
         guard.plugins.contains_key(plugin_id)
