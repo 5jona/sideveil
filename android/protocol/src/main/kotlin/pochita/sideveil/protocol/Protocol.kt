@@ -15,6 +15,7 @@ object SideveilEvents {
     const val PANEL_COMMAND = "panel.command"
     const val HOST_HELLO = "host.hello"
     const val HOST_FULLSCREEN_CHANGED = "host.fullscreenChanged"
+    const val HOST_DYNAMIC_COLORS = "host.dynamicColors"
     const val HOST_SELECT_PLUGIN = "host.selectPlugin"
     const val PANEL_STATE_CHANGED = "panel.stateChanged"
     const val PANEL_VISIBILITY = "panel.visibility"
@@ -23,6 +24,9 @@ object SideveilEvents {
     const val PLUGINS_ACTIVE_CHANGED = "plugins.activeChanged"
     const val PLUGIN_BACKEND_STATE = "plugin.backendState"
     const val PLUGIN_EVENT = "plugin.event"
+    const val THEME_PALETTE_UPDATED = "theme.paletteUpdated"
+    const val HUD_SCENE_UPDATED = "hud.sceneUpdated"
+    const val HUD_DISMISSED = "hud.dismissed"
 }
 
 object SideveilMethods {
@@ -44,6 +48,8 @@ object SideveilMethods {
     const val PLUGINS_SET_PRIORITY = "plugins.setPriority"
     const val PLUGIN_INVOKE = "plugin.invoke"
     const val UI_TOAST = "ui.toast"
+    const val HUD_UPDATE_SCENE = "hud.updateScene"
+    const val HUD_DISMISS = "hud.dismiss"
 }
 
 @Serializable
@@ -205,14 +211,28 @@ data class ContainerThemePayload(
 )
 
 @Serializable
+data class EdgeStatusPayload(
+    val badgeText: String? = null,
+    val accentColor: String? = null,
+    val pulse: Boolean = false,
+    val progress: Float? = null,
+    val clear: Boolean = false,
+)
+
+@Serializable
 data class ContainerActionPayload(
     val type: String,
     val focused: Boolean? = null,
     val widthDp: Int? = null,
     val heightDp: Int? = null,
     val heightPercent: Int? = null,
+    val xPercent: Float? = null,
+    val yPercent: Float? = null,
+    val clickThrough: Boolean? = null,
     val enabled: Boolean? = null,
     val backdrop: String? = null,
+    val mode: String? = null,
+    val status: EdgeStatusPayload? = null,
     val payload: ContainerThemePayload? = null,
 )
 

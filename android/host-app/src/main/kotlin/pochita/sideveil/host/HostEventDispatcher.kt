@@ -2,12 +2,15 @@ package pochita.sideveil.host
 
 import kotlinx.serialization.KSerializer
 import pochita.sideveil.protocol.ConfigUpdatedPayload
+import pochita.sideveil.protocol.DynamicThemePalette
 import pochita.sideveil.protocol.EdgeRepositionPayload
 import pochita.sideveil.protocol.GestureDragEndPayload
 import pochita.sideveil.protocol.GestureDragMovePayload
 import pochita.sideveil.protocol.GestureDragStartPayload
 import pochita.sideveil.protocol.GestureFullscreenHintPayload
 import pochita.sideveil.protocol.HostEventEnvelope
+import pochita.sideveil.protocol.HudDismissPayload
+import pochita.sideveil.protocol.NativeHudSceneHeader
 import pochita.sideveil.protocol.PanelCommand
 import pochita.sideveil.protocol.PanelCommandPayload
 import pochita.sideveil.protocol.PluginActiveChangedPayload
@@ -28,6 +31,20 @@ internal interface HostGestureEventCallbacks {
     fun onFullscreenHint(decoded: GestureFullscreenHintPayload)
 
     fun onEdgeReposition(decoded: EdgeRepositionPayload)
+}
+
+internal interface HostOverlayEventCallbacks {
+    fun onThemePaletteUpdated(
+        decoded: DynamicThemePalette,
+        rawEnvelope: HostEventEnvelope,
+    )
+
+    fun onHudSceneUpdated(
+        rawSceneJson: String,
+        header: NativeHudSceneHeader,
+    )
+
+    fun onHudDismissed(decoded: HudDismissPayload)
 }
 
 internal interface HostEventCallbacks {
@@ -56,11 +73,12 @@ internal interface HostEventCallbacks {
 
 /**
  * Decodes and routes inbound `sideveild` [HostEventEnvelope] messages to typed
- * [HostEventCallbacks] and [HostGestureEventCallbacks].
+ * [HostEventCallbacks], [HostGestureEventCallbacks], and [HostOverlayEventCallbacks].
  */
 internal class HostEventDispatcher(
     private val callbacks: HostEventCallbacks,
     private val gestureCallbacks: HostGestureEventCallbacks,
+    private val overlayCallbacks: HostOverlayEventCallbacks,
 ) {
     private val handlers: Map<String, (HostEventEnvelope) -> Unit> =
         mapOf(
@@ -83,6 +101,27 @@ internal class HostEventDispatcher(
             },
             SideveilEvents.PLUGIN_EVENT to { env ->
                 decode(env, PluginScopedEventPayload.serializer())?.let(callbacks::onPluginScopedEvent)
+            },
+            SideveilEvents.THEME_PALETTE_UPDATED to { env ->
+                decode(env, DynamicThemePalette.serializer())?.let { overlayCallbacks.onThemePaletteUpdated(it, env) }
+            },
+            SideveilEvents.HUD_SCENE_UPDATED to { env ->
+                env.payload?.let { payload ->
+                    runCatching {
+                        val header = SideveilWireJson.decodeFromJsonElement(NativeHudSceneHeader.serializer(), payload)
+                        val rawJson =
+                            SideveilWireJson.encodeToString(
+                                kotlinx.serialization.json.JsonElement
+                                    .serializer(),
+                                payload,
+                            )
+                        overlayCallbacks.onHudSceneUpdated(rawJson, header)
+                    }
+                }
+            },
+            SideveilEvents.HUD_DISMISSED to { env ->
+                val decoded = decode(env, HudDismissPayload.serializer()) ?: HudDismissPayload()
+                overlayCallbacks.onHudDismissed(decoded)
             },
             SideveilEvents.GESTURE_DRAG_START to { env ->
                 decode(env, GestureDragStartPayload.serializer())?.let(gestureCallbacks::onGestureStart)

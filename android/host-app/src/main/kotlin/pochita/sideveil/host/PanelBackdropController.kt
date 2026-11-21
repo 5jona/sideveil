@@ -6,6 +6,7 @@ import android.view.View
 import android.view.Window
 import android.view.WindowManager
 import androidx.core.view.isVisible
+import pochita.sideveil.protocol.GlassTintOverride
 import pochita.sideveil.protocol.PanelConfig
 import pochita.sideveil.protocol.PluginSurfaceBackdrop
 import java.util.function.Consumer
@@ -35,6 +36,7 @@ internal class PanelBackdropController(
 
     private var panelConfig: PanelConfig = PanelConfig()
     private var pluginBackdrop: PluginSurfaceBackdrop = PluginSurfaceBackdrop.NATIVE_GLASS
+    private var dynamicTint: GlassTintOverride? = null
     private var lastAppliedBlurRadius: Int = -1
     private var lastAppliedCornerPx: Float = -1f
 
@@ -107,6 +109,12 @@ internal class PanelBackdropController(
         apply()
     }
 
+    fun setDynamicTint(tint: GlassTintOverride?) {
+        if (dynamicTint == tint) return
+        dynamicTint = tint
+        apply()
+    }
+
     fun clearWindowBlur(window: Window) {
         backdropDrawable.alpha = 255
         backdropDrawable.updateMotion(1f, 0f)
@@ -167,6 +175,7 @@ internal class PanelBackdropController(
                 isDark = colorScheme != "light",
                 blurActive = effectiveBlurRadius > 0,
                 cornerRadiusPx = cornerRadiusPx,
+                dynamicOverride = dynamicTint,
             ),
         )
         applyBlurRadius(window, effectiveBlurRadius)

@@ -1,5 +1,6 @@
 package pochita.sideveil.host
 
+import pochita.sideveil.protocol.GlassTintOverride
 import kotlin.math.roundToInt
 
 /**
@@ -10,6 +11,7 @@ data class GlassBackdropStyle(
     val isDark: Boolean = true,
     val blurActive: Boolean = true,
     val cornerRadiusPx: Float = 56f,
+    val dynamicOverride: GlassTintOverride? = null,
 )
 
 /**
@@ -60,11 +62,41 @@ data class GlassOpticalPalette(
 
         fun from(style: GlassBackdropStyle): GlassOpticalPalette {
             val isColorOs = style.themeId == "coloros-glass"
-            return if (style.blurActive) {
-                if (isColorOs) colorOsBlurPalette(style.isDark) else saasBlurPalette(style.isDark)
-            } else {
-                if (isColorOs) colorOsOpaquePalette(style.isDark) else saasOpaquePalette(style.isDark)
-            }
+            val base =
+                if (style.blurActive) {
+                    if (isColorOs) colorOsBlurPalette(style.isDark) else saasBlurPalette(style.isDark)
+                } else {
+                    if (isColorOs) colorOsOpaquePalette(style.isDark) else saasOpaquePalette(style.isDark)
+                }
+            val dyn = style.dynamicOverride ?: return base
+            return applyDynamicTint(base, dyn, style.blurActive)
+        }
+
+        private fun applyDynamicTint(
+            base: GlassOpticalPalette,
+            dyn: GlassTintOverride,
+            blurActive: Boolean,
+        ): GlassOpticalPalette {
+            val top = dyn.tintTopArgb.toInt()
+            val bot = dyn.tintBottomArgb.toInt()
+            val rim = dyn.rimArgb.toInt()
+            val topA = if (blurActive) ((top ushr 24) and 0xFF) / 255f else 1.0f
+            val botA = if (blurActive) ((bot ushr 24) and 0xFF) / 255f else 1.0f
+            return base.copy(
+                tintTopR = ((top ushr 16) and 0xFF) / 255f,
+                tintTopG = ((top ushr 8) and 0xFF) / 255f,
+                tintTopB = (top and 0xFF) / 255f,
+                tintTopA = topA,
+                tintBottomR = ((bot ushr 16) and 0xFF) / 255f,
+                tintBottomG = ((bot ushr 8) and 0xFF) / 255f,
+                tintBottomB = (bot and 0xFF) / 255f,
+                tintBottomA = botA,
+                rimR = ((rim ushr 16) and 0xFF) / 255f,
+                rimG = ((rim ushr 8) and 0xFF) / 255f,
+                rimB = (rim and 0xFF) / 255f,
+                fallbackFillArgb = if (blurActive) dyn.fallbackFillArgb.toInt() else (dyn.fallbackFillArgb.toInt() or 0xFF000000.toInt()),
+                fallbackStrokeArgb = dyn.fallbackStrokeArgb.toInt(),
+            )
         }
 
         private fun colorOsBlurPalette(isDark: Boolean): GlassOpticalPalette = if (isDark) COLOROS_BLUR_DARK else COLOROS_BLUR_LIGHT

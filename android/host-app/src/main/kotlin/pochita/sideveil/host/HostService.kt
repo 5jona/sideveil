@@ -13,6 +13,7 @@ import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import kotlinx.serialization.json.encodeToJsonElement
 import pochita.sideveil.protocol.ConfigUpdatedPayload
+import pochita.sideveil.protocol.EdgeStatusPayload
 import pochita.sideveil.protocol.HostEventEnvelope
 import pochita.sideveil.protocol.HostFullscreenChangedPayload
 import pochita.sideveil.protocol.HostHelloPayload
@@ -21,6 +22,7 @@ import pochita.sideveil.protocol.PanelState
 import pochita.sideveil.protocol.PanelStateChangedPayload
 import pochita.sideveil.protocol.PluginBackendStatePayload
 import pochita.sideveil.protocol.PluginDescriptor
+import pochita.sideveil.protocol.PluginPresentationMode
 import pochita.sideveil.protocol.PluginScopedEventPayload
 import pochita.sideveil.protocol.PluginSelectEventPayload
 import pochita.sideveil.protocol.PluginSurfaceBackdrop
@@ -45,8 +47,12 @@ class HostService : LifecycleService() {
     private lateinit var edgeIndicator: EdgeIndicatorWindow
     private lateinit var pluginRail: PluginRailWindow
     private lateinit var panelWindow: SidebarPanelWindow
+    private lateinit var pinnedWindow: PinnedContainerWindow
+    private lateinit var nativeHudWindow: NativeHudWindow
+    private lateinit var dynamicThemeExtractor: DynamicThemeExtractor
     private lateinit var pluginManager: PluginWebViewManager
     private lateinit var gestureCoordinator: HostGestureCoordinator
+    private lateinit var overlayCoordinator: HostOverlayCoordinator
     private lateinit var eventDispatcher: HostEventDispatcher
 
     private var latestConfig: SideveilConfig = SideveilConfig.DEFAULT
@@ -83,30 +89,34 @@ class HostService : LifecycleService() {
         super.onConfigurationChanged(newConfig)
         latestDarkSurface = HostServiceSupport.resolveDarkSurface(latestConfig, newConfig)
         panelWindow.onSystemConfigurationChanged()
-        refreshPluginRailStyle()
+        overlayCoordinator.refreshOverlayStyles()
         refreshEdgeIndicator()
+        dynamicThemeExtractor.refresh(latestDarkSurface)
     }
 
     override fun onDestroy() {
+        dynamicThemeExtractor.stop()
         daemonClient.close()
         iconLoader.clear()
         edgeIndicator.detach()
         pluginRail.detach()
+        pinnedWindow.hide()
+        nativeHudWindow.detach()
         panelWindow.detach()
         pluginManager.destroyAll()
         super.onDestroy()
     }
 
     private fun initializeRuntimeComponents() {
+        initializeWindows()
+        initializeCoordinators()
+    }
+
+    private fun initializeWindows() {
         daemonClient = createDaemonClient()
         haptics = EdgeHapticsController(this)
         iconLoader = RailIconLoader(lifecycleScope) { daemonClient.currentEndpoint() }
-        edgeIndicator =
-            EdgeIndicatorWindow(
-                context = this,
-                windowManager = windowManager,
-                onFullscreenChanged = ::handleFullscreenChanged,
-            )
+        edgeIndicator = EdgeIndicatorWindow(this, windowManager, ::handleFullscreenChanged)
         pluginRail =
             PluginRailWindow(
                 context = this,
@@ -126,12 +136,48 @@ class HostService : LifecycleService() {
                 isBackIntercepted = { pluginManager.isBackIntercepted() },
                 onRailMotionProgress = { progress -> pluginRail.updateMotionProgress(progress) },
             )
+        pinnedWindow =
+            PinnedContainerWindow(
+                context = this,
+                windowManager = windowManager,
+                onUnpinToDrawer = { overlayCoordinator.handleUnpinToDrawer() },
+                onDismissPinned = { pinnedWindow.hide() },
+            )
+        nativeHudWindow = NativeHudWindow(this, windowManager)
+    }
+
+    private fun initializeCoordinators() {
+        overlayCoordinator =
+            HostOverlayCoordinator(
+                daemonClient = daemonClient,
+                edgeIndicator = edgeIndicator,
+                pluginRail = pluginRail,
+                panelWindow = panelWindow,
+                pinnedWindow = pinnedWindow,
+                nativeHudWindow = nativeHudWindow,
+                pluginManagerProvider = { pluginManager },
+                configProvider = { latestConfig },
+                themeIdProvider = { latestThemeId },
+                darkSurfaceProvider = { latestDarkSurface },
+            )
+        dynamicThemeExtractor =
+            DynamicThemeExtractor(this) { colors ->
+                overlayCoordinator.onDynamicColorsExtracted(colors)
+            }
         pluginManager =
             PluginWebViewManager(
                 context = this,
                 scope = lifecycleScope,
                 daemonClient = daemonClient,
-                surfaceDelegate = createSurfaceDelegate(),
+                surfaceDelegate =
+                    overlayCoordinator.createSurfaceDelegate { themeId, colorScheme ->
+                        latestThemeId = themeId
+                        latestDarkSurface = colorScheme != "light"
+                        panelWindow.syncRuntimeAppearance(themeId, colorScheme)
+                        overlayCoordinator.refreshOverlayStyles()
+                        refreshEdgeIndicator()
+                        dynamicThemeExtractor.refresh(latestDarkSurface)
+                    },
             )
         gestureCoordinator =
             HostGestureCoordinator(
@@ -147,14 +193,16 @@ class HostService : LifecycleService() {
                 configProvider = { latestConfig },
                 onSelectPlugin = ::handleRailPluginSelected,
             )
-        eventDispatcher = HostEventDispatcher(createEventCallbacks(), gestureCoordinator)
+        eventDispatcher = HostEventDispatcher(createEventCallbacks(), gestureCoordinator, overlayCoordinator)
     }
 
     private fun attachWarmWindows() {
         edgeIndicator.attach()
         pluginRail.attachWarm()
+        nativeHudWindow.attachWarm()
         panelWindow.attachWarm()
         pluginManager.warmStartDefault()
+        dynamicThemeExtractor.start(latestDarkSurface)
     }
 
     private fun handleRailPluginSelected(pluginId: String) {
@@ -211,56 +259,18 @@ class HostService : LifecycleService() {
             )
         }
         handleFullscreenChanged(edgeIndicator.isFullscreenActive())
+        dynamicThemeExtractor.refresh(latestDarkSurface, force = true)
     }
 
     private fun handleDaemonDisconnected() {
         latestScopeActive = false
         pluginRail.setPanelOpen(false)
+        overlayCoordinator.hideTransientOverlays()
         if (panelWindow.currentState != PanelState.CLOSED) {
             panelWindow.close()
         }
         refreshEdgeIndicator()
     }
-
-    private fun createSurfaceDelegate(): PluginHostSurfaceDelegate =
-        object : PluginHostSurfaceDelegate {
-            override fun mountPluginWebView(
-                webView: WebView,
-                backdrop: PluginSurfaceBackdrop,
-                sizeOverride: PluginSizeOverride,
-            ) {
-                panelWindow.setContentWebView(webView)
-                panelWindow.setPluginBackdrop(backdrop)
-                panelWindow.setPluginSizeOverride(sizeOverride)
-            }
-
-            override fun onDismissPanel() = panelWindow.close()
-
-            override fun onSetImeFocused(focused: Boolean) = panelWindow.setImeFocused(focused)
-
-            override fun onSyncAppearance(
-                themeId: String,
-                colorScheme: String,
-            ) {
-                latestThemeId = themeId
-                latestDarkSurface = colorScheme != "light"
-                panelWindow.syncRuntimeAppearance(themeId, colorScheme)
-                refreshPluginRailStyle()
-                refreshEdgeIndicator()
-            }
-
-            override fun onPluginSizeChanged(sizeOverride: PluginSizeOverride) = panelWindow.setPluginSizeOverride(sizeOverride)
-
-            override fun onPluginBackdropChanged(backdrop: PluginSurfaceBackdrop) = panelWindow.setPluginBackdrop(backdrop)
-
-            override fun onMatchedPluginsUpdated(
-                matchedPlugins: List<PluginDescriptor>,
-                activePluginId: String,
-            ) {
-                pluginRail.updatePlugins(matchedPlugins, activePluginId)
-                panelWindow.setRailInsetDp(pluginRail.railInsetDp())
-            }
-        }
 
     private fun createEventCallbacks(): HostEventCallbacks =
         object : HostEventCallbacks {
@@ -274,8 +284,9 @@ class HostService : LifecycleService() {
                 latestThemeId = decoded.config.panel.themeId
                 latestDarkSurface = HostServiceSupport.resolveDarkSurface(decoded.config, resources.configuration)
                 panelWindow.updateConfig(decoded.config.edge.side, decoded.config.panel)
-                refreshPluginRailStyle()
+                overlayCoordinator.refreshOverlayStyles()
                 refreshEdgeIndicator()
+                dynamicThemeExtractor.refresh(latestDarkSurface)
                 pluginManager.broadcastGlobalEvent(rawEnvelope)
             }
 
@@ -285,6 +296,10 @@ class HostService : LifecycleService() {
             ) {
                 latestScopeActive = decoded.active
                 latestForegroundPackage = decoded.foregroundPackage
+                if (!decoded.active) {
+                    pinnedWindow.hide()
+                    edgeIndicator.setEdgeStatus(null)
+                }
                 refreshEdgeIndicator()
                 pluginManager.broadcastGlobalEvent(rawEnvelope)
             }
@@ -294,7 +309,7 @@ class HostService : LifecycleService() {
                 latestScopeActive = decoded.matchedPluginIds.isNotEmpty()
                 iconLoader.clear()
                 pluginManager.onPluginsSnapshot(decoded)
-                refreshPluginRailStyle()
+                overlayCoordinator.refreshOverlayStyles()
                 refreshEdgeIndicator()
             }
 
@@ -335,16 +350,6 @@ class HostService : LifecycleService() {
             latestScopeActive,
             panelWindow.currentState,
             latestDarkSurface,
-        )
-    }
-
-    private fun refreshPluginRailStyle() {
-        pluginRail.updateStyle(
-            side = latestConfig.edge.side,
-            config = latestConfig.panel,
-            themeId = latestThemeId,
-            dark = latestDarkSurface,
-            blurSupported = panelWindow.isSystemBlurSupported,
         )
     }
 

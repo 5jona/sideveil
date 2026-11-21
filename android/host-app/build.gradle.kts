@@ -48,6 +48,9 @@ android {
         targetSdk = 37
         versionCode = moduleVersionCode
         versionName = moduleVersionName
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
     }
 
     signingConfigs {
@@ -116,6 +119,7 @@ android {
         abortOnError = true
         warningsAsErrors = true
         checkDependencies = false
+        disable += "ChromeOsAbiSupport"
     }
 
     packaging {

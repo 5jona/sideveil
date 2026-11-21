@@ -40,6 +40,9 @@ enum class PluginCapability {
 
     @SerialName("system-exec")
     SYSTEM_EXEC,
+
+    @SerialName("native-hud")
+    NATIVE_HUD,
 }
 
 @Serializable
@@ -55,8 +58,27 @@ enum class PluginSurfaceBackdrop {
 }
 
 @Serializable
+enum class PluginPresentationMode {
+    @SerialName("drawer")
+    DRAWER,
+
+    @SerialName("peek")
+    PEEK,
+
+    @SerialName("pinned")
+    PINNED,
+
+    @SerialName("wide")
+    WIDE,
+
+    @SerialName("native-hud")
+    NATIVE_HUD,
+}
+
+@Serializable
 data class PluginSurfacePrefs(
     val backdrop: PluginSurfaceBackdrop = PluginSurfaceBackdrop.NATIVE_GLASS,
+    val presentation: PluginPresentationMode = PluginPresentationMode.DRAWER,
     val widthDp: Int? = null,
     val heightPercent: Int? = null,
 )

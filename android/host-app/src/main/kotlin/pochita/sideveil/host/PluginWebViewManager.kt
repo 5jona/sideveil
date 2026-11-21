@@ -9,75 +9,18 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
 import pochita.sideveil.protocol.BUILTIN_DIAG_PLUGIN_ID
+import pochita.sideveil.protocol.EdgeStatusPayload
 import pochita.sideveil.protocol.HostEventEnvelope
 import pochita.sideveil.protocol.PanelState
 import pochita.sideveil.protocol.PanelVisibilityPayload
 import pochita.sideveil.protocol.PluginBackendStatePayload
 import pochita.sideveil.protocol.PluginDescriptor
+import pochita.sideveil.protocol.PluginPresentationMode
 import pochita.sideveil.protocol.PluginScopedEventPayload
 import pochita.sideveil.protocol.PluginSurfaceBackdrop
 import pochita.sideveil.protocol.PluginsSnapshotPayload
 import pochita.sideveil.protocol.SideveilEvents
 import pochita.sideveil.protocol.SideveilWireJson
-
-data class PluginSizeOverride(
-    val widthDp: Int? = null,
-    val heightDp: Int? = null,
-    val heightPercent: Int? = null,
-)
-
-interface PluginContainerCallbacks {
-    fun onDismissRequested(pluginId: String)
-
-    fun onImeFocusRequested(
-        pluginId: String,
-        focused: Boolean,
-    )
-
-    fun onAppearanceSynced(
-        pluginId: String,
-        themeId: String,
-        colorScheme: String,
-    )
-
-    fun onPreferredSizeChanged(
-        pluginId: String,
-        size: PluginSizeOverride,
-    )
-
-    fun onBackdropChanged(
-        pluginId: String,
-        backdrop: PluginSurfaceBackdrop,
-    )
-
-    fun onRenderProcessCrashed(pluginId: String)
-}
-
-interface PluginHostSurfaceDelegate {
-    fun mountPluginWebView(
-        webView: WebView,
-        backdrop: PluginSurfaceBackdrop,
-        sizeOverride: PluginSizeOverride,
-    )
-
-    fun onDismissPanel()
-
-    fun onSetImeFocused(focused: Boolean)
-
-    fun onSyncAppearance(
-        themeId: String,
-        colorScheme: String,
-    )
-
-    fun onPluginSizeChanged(sizeOverride: PluginSizeOverride)
-
-    fun onPluginBackdropChanged(backdrop: PluginSurfaceBackdrop)
-
-    fun onMatchedPluginsUpdated(
-        matchedPlugins: List<PluginDescriptor>,
-        activePluginId: String,
-    )
-}
 
 /**
  * Manages the LRU warm pool (max [MAX_WARM_INSTANCES] WebViews) of isolated plugin sandboxes,
@@ -97,6 +40,7 @@ class PluginWebViewManager(
     private var activePluginId: String = BUILTIN_DIAG_PLUGIN_ID
     private var panelState: PanelState = PanelState.CLOSED
     private var lastConfigEnvelope: HostEventEnvelope? = null
+    private var lastPaletteEnvelope: HostEventEnvelope? = null
 
     init {
         descriptors[BUILTIN_DIAG_PLUGIN_ID] = PluginDescriptor.builtinDiagnostic()
@@ -173,6 +117,8 @@ class PluginWebViewManager(
     fun broadcastGlobalEvent(envelope: HostEventEnvelope) {
         if (envelope.event == SideveilEvents.CONFIG_UPDATED) {
             lastConfigEnvelope = envelope
+        } else if (envelope.event == SideveilEvents.THEME_PALETTE_UPDATED) {
+            lastPaletteEnvelope = envelope
         }
         for (instance in warmInstances.values) {
             instance.pushEnvelope(envelope)
@@ -236,6 +182,7 @@ class PluginWebViewManager(
             surfaceDelegate.mountPluginWebView(
                 webView = instance.webView,
                 backdrop = instance.surfaceBackdrop,
+                presentationMode = instance.presentationMode,
                 sizeOverride = instance.sizeOverride,
             )
         }
@@ -302,6 +249,35 @@ class PluginWebViewManager(
                             }
                         }
 
+                        override fun onPresentationModeChanged(
+                            pluginId: String,
+                            mode: PluginPresentationMode,
+                        ) {
+                            if (pluginId == activePluginId) {
+                                warmInstances[pluginId]?.let { activeInst ->
+                                    surfaceDelegate.onPluginPresentationChanged(
+                                        webView = activeInst.webView,
+                                        backdrop = activeInst.surfaceBackdrop,
+                                        mode = mode,
+                                    )
+                                }
+                            }
+                        }
+
+                        override fun onPinnedBoundsChanged(
+                            pluginId: String,
+                            bounds: PinnedBoundsSpec,
+                        ) {
+                            if (pluginId == activePluginId) surfaceDelegate.onPinnedBoundsChanged(bounds)
+                        }
+
+                        override fun onEdgeStatusChanged(
+                            pluginId: String,
+                            status: EdgeStatusPayload?,
+                        ) {
+                            if (pluginId == activePluginId) surfaceDelegate.onEdgeStatusChanged(status)
+                        }
+
                         override fun onRenderProcessCrashed(pluginId: String) {
                             recoverCrashedPlugin(pluginId)
                         }
@@ -310,6 +286,7 @@ class PluginWebViewManager(
         warmInstances[descriptor.id] = instance
         instance.loadEntry()
         lastConfigEnvelope?.let { instance.pushEnvelope(it) }
+        lastPaletteEnvelope?.let { instance.pushEnvelope(it) }
         return instance
     }
 

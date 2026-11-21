@@ -48,9 +48,9 @@ dir = "{{config_root}}/hub"
 run = "cargo fmt --all"
 
 [tasks."hub:build"]
-description = "Cross-compile Rust hub binaries for aarch64-linux-android"
+description = "Cross-compile Rust hub binaries and HUD JNI cdylib for aarch64-linux-android"
 dir = "{{config_root}}/hub"
-run = "cargo build --release --target aarch64-linux-android"
+run = "cargo build --release --target aarch64-linux-android -p sideveild -p sideveil-ctl -p sideveil-hud-jni"
 
 [tasks.check]
 description = "Run all Rust, WebUI, and Android quality gates"
@@ -58,4 +58,4 @@ run = "mise run hub:check && mise run webui:check && mise run android:check"
 
 [tasks.clean]
 description = "Clean Gradle, Rust, and WebUI build outputs"
-run = "rm -rf out webroot bin/sideveild bin/sideveil-ctl bin/sideveil-sensor.dex system/priv-app/SideveilHost/SideveilHost.apk android/host-app/src/main/assets/panel hub/target && cd android && ./gradlew clean"
+run = "rm -rf out webroot bin/sideveild bin/sideveil-ctl bin/sideveil-sensor.dex system/priv-app/SideveilHost/SideveilHost.apk android/host-app/src/main/assets/panel android/host-app/src/main/jniLibs hub/target && cd android && ./gradlew clean"

@@ -4,17 +4,22 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowManager
 import android.widget.FrameLayout
+import android.widget.TextView
+import androidx.core.graphics.toColorInt
 import pochita.sideveil.protocol.EdgeConfig
 import pochita.sideveil.protocol.EdgeSide
+import pochita.sideveil.protocol.EdgeStatusPayload
 import pochita.sideveil.protocol.PanelState
 
 /**
@@ -36,6 +41,15 @@ class EdgeIndicatorWindow(
 
     private val rootView = FrameLayout(context)
     private val pillView = View(context)
+    private val badgeView =
+        TextView(context).apply {
+            gravity = Gravity.CENTER
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 9f)
+            typeface = Typeface.DEFAULT_BOLD
+            fontFeatureSettings = "tnum"
+            setTextColor(Color.WHITE)
+            visibility = View.GONE
+        }
     private val pillDrawable = GradientDrawable()
 
     private val layoutParams =
@@ -65,6 +79,7 @@ class EdgeIndicatorWindow(
     private var latestScopeActive = false
     private var latestPanelState = PanelState.CLOSED
     private var latestDarkSurface = false
+    private var activeEdgeStatus: EdgeStatusPayload? = null
 
     private val idleDimRunnable =
         Runnable {
@@ -83,6 +98,12 @@ class EdgeIndicatorWindow(
                 gravity = Gravity.CENTER_VERTICAL or Gravity.RIGHT
             }
         rootView.addView(pillView, pillParams)
+        rootView.addView(
+            badgeView,
+            FrameLayout.LayoutParams(dp(26f), dp(18f)).apply {
+                gravity = Gravity.CENTER_VERTICAL or Gravity.RIGHT
+            },
+        )
         rootView.visibility = View.GONE
 
         rootView.setOnApplyWindowInsetsListener { _, insets ->
@@ -168,9 +189,6 @@ class EdgeIndicatorWindow(
         scheduleIdleDim(extraDelayMs = FULLSCREEN_HINT_HOLD_MS)
     }
 
-    /**
-     * Shows a live accented handle preview while long-press repositioning `side` and `topPercent`.
-     */
     fun setRepositionPreview(
         active: Boolean,
         side: EdgeSide,
@@ -179,11 +197,13 @@ class EdgeIndicatorWindow(
         repositionActive = active
         repositionSide = side
         repositionTopPercent = topPercent.coerceIn(5, 85)
-        if (active) {
-            cancelIdleDim(restoreActive = true)
-        } else {
-            scheduleIdleDim()
-        }
+        if (active) cancelIdleDim(restoreActive = true) else scheduleIdleDim()
+        applyAppearance()
+    }
+
+    fun setEdgeStatus(status: EdgeStatusPayload?) {
+        activeEdgeStatus = if (status == null || status.clear) null else status
+        if (activeEdgeStatus != null) cancelIdleDim(restoreActive = true) else scheduleIdleDim()
         applyAppearance()
     }
 
@@ -196,11 +216,9 @@ class EdgeIndicatorWindow(
 
     private fun applyAppearance() {
         if (!attached) return
-
         val shouldShow =
             repositionActive ||
                 (latestScopeActive && latestEdge.handleVisible && latestPanelState == PanelState.CLOSED)
-
         rootView.visibility = if (shouldShow) View.VISIBLE else View.GONE
         if (!shouldShow) {
             mainHandler.removeCallbacks(idleDimRunnable)
@@ -209,55 +227,104 @@ class EdgeIndicatorWindow(
 
         val activeSide = if (repositionActive) repositionSide else latestEdge.side
         val activeTopPercent = if (repositionActive) repositionTopPercent else latestEdge.topPercent
-
         val screenHeight =
             runCatching { windowManager.currentWindowMetrics.bounds.height() }
                 .getOrDefault(context.resources.displayMetrics.heightPixels)
                 .coerceAtLeast(480)
         val heightPx = dp(latestEdge.heightDp.toFloat()).coerceAtMost(screenHeight)
-        val maxTop = (screenHeight - heightPx).coerceAtLeast(0)
-        val topPx = ((activeTopPercent / 100f) * screenHeight).toInt().coerceIn(0, maxTop)
+        val topPx = ((activeTopPercent / 100f) * screenHeight).toInt().coerceIn(0, (screenHeight - heightPx).coerceAtLeast(0))
 
-        val gravityHorizontal = if (activeSide == EdgeSide.LEFT) Gravity.LEFT else Gravity.RIGHT
-        layoutParams.gravity = Gravity.TOP or gravityHorizontal
-        layoutParams.width = dp(if (repositionActive) 10f else 8f)
+        val badgeText =
+            if (repositionActive) {
+                null
+            } else {
+                activeEdgeStatus
+                    ?.badgeText
+                    ?.trim()
+                    ?.take(4)
+                    ?.takeIf { it.isNotEmpty() }
+            }
+        val horiz = if (activeSide == EdgeSide.LEFT) Gravity.LEFT else Gravity.RIGHT
+        layoutParams.gravity = Gravity.TOP or horiz
+        layoutParams.width =
+            dp(
+                when {
+                    badgeText != null -> 30f
+                    repositionActive -> 10f
+                    else -> 8f
+                },
+            )
         layoutParams.height = heightPx
         layoutParams.x = dpOrZero(latestEdge.edgeOffsetDp.toFloat())
         layoutParams.y = topPx
 
-        val pillParams = pillView.layoutParams as FrameLayout.LayoutParams
-        pillParams.width = dp(if (repositionActive) 6f else 4f)
-        pillParams.height = (heightPx * 0.64f).toInt().coerceAtLeast(dp(44f))
-        pillParams.gravity = Gravity.CENTER_VERTICAL or gravityHorizontal
-        pillView.layoutParams = pillParams
-
+        applyBadgeOrPill(badgeText, horiz, heightPx)
         applyPillColors()
-
-        val activeAlpha = computeActiveAlpha()
-        rootView.alpha = if (idleDimmed && !repositionActive) activeAlpha * IDLE_ALPHA_FACTOR else activeAlpha
-        pillView.translationX = if (idleDimmed && !repositionActive) tuckTranslationPx(activeSide) else 0f
-        pillView.scaleX = if (repositionActive) 1.25f else 1f + dragPulseProgress * 0.45f
-        pillView.scaleY = if (repositionActive) 1.04f else 1f + dragPulseProgress * 0.08f
-
+        applyTransformAndAlpha(activeSide)
         runCatching { windowManager.updateViewLayout(rootView, layoutParams) }
     }
 
+    private fun applyBadgeOrPill(
+        badgeText: String?,
+        gravityHorizontal: Int,
+        heightPx: Int,
+    ) {
+        val pillParams = pillView.layoutParams as FrameLayout.LayoutParams
+        pillParams.width = dp(if (repositionActive) 6f else 4f)
+        val progressFactor = activeEdgeStatus?.progress?.coerceIn(0.15f, 1f) ?: 1f
+        pillParams.height = (heightPx * 0.64f * progressFactor).toInt().coerceAtLeast(dp(36f))
+        pillParams.gravity = Gravity.CENTER_VERTICAL or gravityHorizontal
+        pillView.layoutParams = pillParams
+        if (badgeText != null) {
+            badgeView.text = badgeText
+            badgeView.visibility = View.VISIBLE
+            (badgeView.layoutParams as FrameLayout.LayoutParams).gravity = Gravity.CENTER_VERTICAL or gravityHorizontal
+            badgeView.background =
+                GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = dp(9f).toFloat()
+                    setColor(parseStatusAccent() ?: Color.argb(230, 37, 99, 235))
+                }
+            pillView.visibility = View.GONE
+        } else {
+            badgeView.visibility = View.GONE
+            pillView.visibility = View.VISIBLE
+        }
+    }
+
+    private fun applyTransformAndAlpha(activeSide: EdgeSide) {
+        val activeAlpha = computeActiveAlpha()
+        val dimmed = idleDimmed && !repositionActive
+        rootView.alpha = if (dimmed) activeAlpha * IDLE_ALPHA_FACTOR else activeAlpha
+        pillView.translationX = if (dimmed) tuckTranslationPx(activeSide) else 0f
+        pillView.scaleX = if (repositionActive) 1.25f else 1f + dragPulseProgress * 0.45f
+        pillView.scaleY = if (repositionActive) 1.04f else 1f + dragPulseProgress * 0.08f
+    }
+
     private fun applyPillColors() {
+        val statusAccent = parseStatusAccent()
         val fillColor =
             when {
                 repositionActive -> Color.argb(240, 56, 189, 248)
+                statusAccent != null -> statusAccent
                 latestDarkSurface -> Color.argb(215, 240, 246, 255)
                 else -> Color.argb(190, 24, 34, 48)
             }
         val strokeColor =
             when {
-                repositionActive -> Color.argb(235, 255, 255, 255)
+                repositionActive || statusAccent != null -> Color.argb(235, 255, 255, 255)
                 latestDarkSurface -> Color.argb(110, 96, 165, 250)
                 else -> Color.argb(90, 255, 255, 255)
             }
         pillDrawable.cornerRadius = dp(4f).toFloat()
         pillDrawable.setColor(fillColor)
         pillDrawable.setStroke(dp(1f), strokeColor)
+    }
+
+    private fun parseStatusAccent(): Int? {
+        val raw = activeEdgeStatus?.accentColor?.trim().orEmpty()
+        if (raw.isEmpty()) return null
+        return runCatching { raw.toColorInt() }.getOrNull()
     }
 
     private fun computeActiveAlpha(): Float {

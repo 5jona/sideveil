@@ -19,6 +19,7 @@ import android.window.OnBackInvokedDispatcher
 import pochita.sideveil.protocol.EdgeSide
 import pochita.sideveil.protocol.PanelConfig
 import pochita.sideveil.protocol.PanelState
+import pochita.sideveil.protocol.PluginPresentationMode
 
 /**
  * Geometry and [WindowManager.LayoutParams] coordinator for [SidebarPanelWindow].
@@ -125,6 +126,7 @@ internal class PanelWindowLayout(
         railInsetDp: Int,
         sizeOverride: PluginSizeOverride,
         liveInsets: WindowInsets? = null,
+        presentationMode: PluginPresentationMode = PluginPresentationMode.DRAWER,
     ) {
         val resolved = PanelInsetsCoordinator.resolveBounds(context, windowManager, liveInsets)
         safeBounds = resolved
@@ -136,6 +138,7 @@ internal class PanelWindowLayout(
                 panelConfig = panelConfig,
                 railInsetDp = railInsetDp,
                 sizeOverride = sizeOverride,
+                presentationMode = presentationMode,
             )
         cachedWidthPx = widthPx
         cachedHeightPx = heightPx

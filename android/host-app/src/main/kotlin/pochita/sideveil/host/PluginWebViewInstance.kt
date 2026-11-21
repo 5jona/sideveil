@@ -16,8 +16,10 @@ import androidx.core.net.toUri
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.serialization.json.JsonElement
 import pochita.sideveil.protocol.ContainerActionPayload
+import pochita.sideveil.protocol.EdgeStatusPayload
 import pochita.sideveil.protocol.HostEventEnvelope
 import pochita.sideveil.protocol.PluginDescriptor
+import pochita.sideveil.protocol.PluginPresentationMode
 import pochita.sideveil.protocol.PluginSurfaceBackdrop
 import pochita.sideveil.protocol.SideveilWireJson
 
@@ -48,6 +50,10 @@ class PluginWebViewInstance(
 
     @Volatile
     var surfaceBackdrop: PluginSurfaceBackdrop = initialDescriptor.surface.backdrop
+        private set
+
+    @Volatile
+    var presentationMode: PluginPresentationMode = initialDescriptor.surface.presentation
         private set
 
     @Volatile
@@ -192,6 +198,29 @@ class PluginWebViewInstance(
                 callbacks.onBackdropChanged(pluginId, parsed)
             }
 
+            "setPresentationMode" -> {
+                val parsed = parsePresentationMode(action.mode) ?: return
+                presentationMode = parsed
+                callbacks.onPresentationModeChanged(pluginId, parsed)
+            }
+
+            "setPinnedBounds" -> {
+                callbacks.onPinnedBoundsChanged(
+                    pluginId,
+                    PinnedBoundsSpec(
+                        widthDp = action.widthDp,
+                        heightDp = action.heightDp,
+                        xPercent = action.xPercent,
+                        yPercent = action.yPercent,
+                        clickThrough = action.clickThrough,
+                    ),
+                )
+            }
+
+            "setEdgeStatus" -> {
+                callbacks.onEdgeStatusChanged(pluginId, action.status)
+            }
+
             else -> {
                 Log.d(TAG, "Ignored unknown container.action type=${action?.type}")
             }
@@ -203,6 +232,16 @@ class PluginWebViewInstance(
             "native-glass" -> PluginSurfaceBackdrop.NATIVE_GLASS
             "transparent" -> PluginSurfaceBackdrop.TRANSPARENT
             "opaque" -> PluginSurfaceBackdrop.OPAQUE
+            else -> null
+        }
+
+    private fun parsePresentationMode(raw: String?): PluginPresentationMode? =
+        when (raw) {
+            "drawer" -> PluginPresentationMode.DRAWER
+            "peek" -> PluginPresentationMode.PEEK
+            "pinned" -> PluginPresentationMode.PINNED
+            "wide" -> PluginPresentationMode.WIDE
+            "native-hud" -> PluginPresentationMode.NATIVE_HUD
             else -> null
         }
 

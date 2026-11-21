@@ -5,6 +5,7 @@ import android.view.WindowInsets
 import android.view.WindowManager
 import pochita.sideveil.protocol.EdgeSide
 import pochita.sideveil.protocol.PanelConfig
+import pochita.sideveil.protocol.PluginPresentationMode
 import kotlin.math.roundToInt
 
 /**
@@ -73,18 +74,23 @@ internal object PanelInsetsCoordinator {
         panelConfig: PanelConfig,
         railInsetDp: Int,
         sizeOverride: PluginSizeOverride,
+        presentationMode: PluginPresentationMode = PluginPresentationMode.DRAWER,
     ): Pair<Int, Int> {
         val edgeCutout = if (edgeSide == EdgeSide.LEFT) safe.safeLeftPx else safe.safeRightPx
         val reservedHorizontal = dp(density, (24 + railInsetDp).toFloat()) + edgeCutout
         val screenLimitW = (safe.screenWidthPx - reservedHorizontal).coerceAtLeast(dp(density, MIN_PANEL_WIDTH_DP))
+        val isWide = presentationMode == PluginPresentationMode.WIDE
+        val tabletFraction = if (isWide) WIDE_TABLET_MAX_WIDTH_FRACTION else TABLET_MAX_WIDTH_FRACTION
         val tabletCapW =
             if (safe.isTabletLandscape) {
-                (safe.screenWidthPx * TABLET_MAX_WIDTH_FRACTION).roundToInt()
+                (safe.screenWidthPx * tabletFraction).roundToInt()
             } else {
                 screenLimitW
             }
         val maxW = minOf(screenLimitW, tabletCapW).coerceAtLeast(dp(density, MIN_PANEL_WIDTH_DP))
-        val targetWidthDp = (sizeOverride.widthDp ?: panelConfig.widthDp).coerceIn(260, 480)
+        val defaultWidthDp = if (isWide && safe.isTabletLandscape) WIDE_DEFAULT_WIDTH_DP else panelConfig.widthDp
+        val widthCapDp = if (isWide) WIDE_MAX_WIDTH_DP else 480
+        val targetWidthDp = (sizeOverride.widthDp ?: defaultWidthDp).coerceIn(260, widthCapDp)
         val widthPx = dp(density, targetWidthDp.toFloat()).coerceAtMost(maxW)
 
         val marginPx = dp(density, VERTICAL_MARGIN_DP)
@@ -92,7 +98,7 @@ internal object PanelInsetsCoordinator {
         val availableH =
             (safe.screenHeightPx - safe.safeTopPx - bottomObstruction - marginPx * 2)
                 .coerceAtLeast(dp(density, MIN_PANEL_HEIGHT_DP))
-        val desiredH = resolveDesiredHeightPx(safe.screenHeightPx, density, panelConfig, sizeOverride)
+        val desiredH = resolveDesiredHeightPx(safe.screenHeightPx, density, panelConfig, sizeOverride, presentationMode)
         val heightPx = desiredH.coerceIn(dp(density, MIN_PANEL_HEIGHT_DP), availableH)
 
         return widthPx to heightPx
@@ -128,6 +134,7 @@ internal object PanelInsetsCoordinator {
         density: Float,
         panelConfig: PanelConfig,
         sizeOverride: PluginSizeOverride,
+        presentationMode: PluginPresentationMode,
     ): Int {
         val overrideHeightDp = sizeOverride.heightDp
         val overrideHeightPercent = sizeOverride.heightPercent
@@ -141,11 +148,20 @@ internal object PanelInsetsCoordinator {
                 (screenH * (pct / 100f)).toInt()
             }
 
+            presentationMode == PluginPresentationMode.PEEK -> {
+                (screenH * PEEK_HEIGHT_FRACTION).toInt().coerceIn(dp(density, 220f), dp(density, 440f))
+            }
+
             else -> {
                 (screenH * (panelConfig.heightPercent / 100f)).toInt()
             }
         }
     }
+
+    private const val WIDE_TABLET_MAX_WIDTH_FRACTION = 0.68f
+    private const val WIDE_DEFAULT_WIDTH_DP = 560
+    private const val WIDE_MAX_WIDTH_DP = 680
+    private const val PEEK_HEIGHT_FRACTION = 0.44f
 
     private fun dp(
         density: Float,

@@ -14,6 +14,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import pochita.sideveil.protocol.EdgeSide
+import pochita.sideveil.protocol.GlassTintOverride
 import pochita.sideveil.protocol.PanelConfig
 import pochita.sideveil.protocol.PluginDescriptor
 import kotlin.math.roundToInt
@@ -66,6 +67,7 @@ internal class PluginRailWindow(
     private var panelConfig = PanelConfig()
     private var syncedThemeId = "coloros-glass"
     private var isDark = true
+    private var dynamicTint: GlassTintOverride? = null
     private var systemBlurSupported = runCatching { windowManager.isCrossWindowBlurEnabled }.getOrDefault(false)
     private var lastAppliedBlurRadius = -1
     private var matchedPlugins: List<PluginDescriptor> = emptyList()
@@ -158,12 +160,14 @@ internal class PluginRailWindow(
         themeId: String,
         dark: Boolean,
         blurSupported: Boolean,
+        tint: GlassTintOverride? = dynamicTint,
     ) {
         edgeSide = side
         panelConfig = config
         syncedThemeId = themeId
         isDark = dark
         systemBlurSupported = blurSupported
+        dynamicTint = tint
         backdropDrawable.updateDensity(density)
         rebuildItems()
         refreshVisibility()
@@ -296,6 +300,7 @@ internal class PluginRailWindow(
                 isDark = isDark,
                 blurActive = radius > 0,
                 cornerRadiusPx = cornerPx(),
+                dynamicOverride = dynamicTint,
             ),
         )
         backdropDrawable.updateMotion(progress, 0f)

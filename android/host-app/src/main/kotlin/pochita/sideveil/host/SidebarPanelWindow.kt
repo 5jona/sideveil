@@ -13,8 +13,10 @@ import android.view.WindowManager
 import android.webkit.WebView
 import android.widget.FrameLayout
 import pochita.sideveil.protocol.EdgeSide
+import pochita.sideveil.protocol.GlassTintOverride
 import pochita.sideveil.protocol.PanelConfig
 import pochita.sideveil.protocol.PanelState
+import pochita.sideveil.protocol.PluginPresentationMode
 import pochita.sideveil.protocol.PluginSurfaceBackdrop
 
 /**
@@ -46,6 +48,7 @@ class SidebarPanelWindow(
     private var railInsetDp = 0
     private var panelConfig = PanelConfig()
     private var pluginSizeOverride = PluginSizeOverride()
+    private var presentationMode = PluginPresentationMode.DRAWER
     private var gestureStartYFraction = 0.5f
     private var lastLiveInsets: WindowInsets? = null
     private var pendingCollapse: Runnable? = null
@@ -128,9 +131,13 @@ class SidebarPanelWindow(
         refreshOpenGeometry()
     }
 
-    fun setPluginSizeOverride(override: PluginSizeOverride) {
-        if (pluginSizeOverride == override) return
+    fun setPluginSizeOverride(
+        override: PluginSizeOverride,
+        mode: PluginPresentationMode = presentationMode,
+    ) {
+        if (pluginSizeOverride == override && presentationMode == mode) return
         pluginSizeOverride = override
+        presentationMode = mode
         refreshOpenGeometry()
     }
 
@@ -153,11 +160,8 @@ class SidebarPanelWindow(
     }
 
     fun onSystemConfigurationChanged() {
-        windowLayout.recomputeDimensions(edgeSide, panelConfig, railInsetDp, pluginSizeOverride, lastLiveInsets)
+        refreshOpenGeometry(reapplyBackdrop = false)
         backdropController.onSystemConfigurationChanged()
-        if (currentState == PanelState.OPEN && attached) {
-            applyOpenLayout(settled = true)
-        }
     }
 
     fun updateConfig(
@@ -166,17 +170,20 @@ class SidebarPanelWindow(
     ) {
         edgeSide = side
         panelConfig = config
-        windowLayout.recomputeDimensions(edgeSide, panelConfig, railInsetDp, pluginSizeOverride, lastLiveInsets)
+        refreshOpenGeometry(reapplyBackdrop = false)
         backdropController.updateConfig(config)
-        if (currentState == PanelState.OPEN && attached) {
-            applyOpenLayout(settled = true)
-        }
     }
 
     fun syncRuntimeAppearance(
         themeId: String,
         colorScheme: String,
-    ) = backdropController.syncRuntimeAppearance(themeId, colorScheme)
+        dynamicTint: GlassTintOverride? = null,
+    ) {
+        if (dynamicTint != null) {
+            backdropController.setDynamicTint(dynamicTint)
+        }
+        backdropController.syncRuntimeAppearance(themeId, colorScheme)
+    }
 
     fun onGestureStart(startYFraction: Float = 0.5f) {
         prepareAndShow(resetOrigin = true, startYFraction = startYFraction, startProgress = 0f, focusable = false)
@@ -231,7 +238,7 @@ class SidebarPanelWindow(
         backAnimator.resetVisuals(animated = false)
         closingInProgress = true
         setImeFocused(false)
-        windowLayout.recomputeDimensions(edgeSide, panelConfig, railInsetDp, pluginSizeOverride, lastLiveInsets)
+        windowLayout.recomputeDimensions(edgeSide, panelConfig, railInsetDp, pluginSizeOverride, lastLiveInsets, presentationMode)
 
         val outwardPx = if (initialVelocityPx <= 0f) initialVelocityPx else -initialVelocityPx
         val velocityNorm = (outwardPx / windowLayout.cachedWidthPx.coerceAtLeast(1).toFloat()).coerceIn(-12f, 0f)
@@ -260,32 +267,29 @@ class SidebarPanelWindow(
         backAnimator.resetVisuals(animated = false)
         closingInProgress = false
         if (resetOrigin) gestureStartYFraction = startYFraction.coerceIn(0f, 1f)
-        windowLayout.recomputeDimensions(edgeSide, panelConfig, railInsetDp, pluginSizeOverride, lastLiveInsets)
+        windowLayout.recomputeDimensions(edgeSide, panelConfig, railInsetDp, pluginSizeOverride, lastLiveInsets, presentationMode)
         springController.snapTo(startProgress)
         val frame = computeMotionFrame(startProgress, 0f)
         dialog.window?.let { win ->
             windowLayout.showInteractive(
-                window = win,
-                edgeSide = edgeSide,
-                panelConfig = panelConfig,
-                xPx = frame.windowX,
-                yPx = frame.windowY + windowLayout.safeCenterOffsetY,
-                focusable = focusable,
-                allowOffscreen = true,
+                win,
+                edgeSide,
+                panelConfig,
+                frame.windowX,
+                frame.windowY + windowLayout.safeCenterOffsetY,
+                focusable,
+                true,
             )
             backdropController.apply()
             applyMotionVisuals(win, frame, focusable = focusable, allowOffscreen = true)
         }
     }
 
-    fun toggle() {
-        if (currentState == PanelState.OPEN && !closingInProgress) close() else open()
-    }
+    fun toggle() = if (currentState == PanelState.OPEN && !closingInProgress) close() else open()
 
     fun setImeFocused(focused: Boolean) {
         if (!attached || currentState == PanelState.CLOSED) return
-        val webView = activeWebView ?: return
-        windowLayout.applyImeFocus(dialog.window, webView, panelConfig, focused)
+        activeWebView?.let { windowLayout.applyImeFocus(dialog.window, it, panelConfig, focused) }
     }
 
     fun detach() {
@@ -307,15 +311,10 @@ class SidebarPanelWindow(
         velocityPerSec: Float,
     ): PanelMotionFrame =
         PanelMotionChoreographer.computeFrame(
-            rawProgress = progress,
-            velocityPerSec = velocityPerSec,
-            startYFraction = gestureStartYFraction,
-            geometry =
-                windowLayout.buildMotionGeometry(
-                    edgeSide = edgeSide,
-                    railInsetDp = railInsetDp,
-                    targetBlurRadiusPx = backdropController.targetBlurRadiusPx(),
-                ),
+            progress,
+            velocityPerSec,
+            gestureStartYFraction,
+            windowLayout.buildMotionGeometry(edgeSide, railInsetDp, backdropController.targetBlurRadiusPx()),
         )
 
     private fun applyMotionVisuals(
@@ -325,33 +324,36 @@ class SidebarPanelWindow(
         allowOffscreen: Boolean,
     ) {
         windowLayout.updatePosition(
-            window = window,
-            panelConfig = panelConfig,
-            xPx = frame.windowX,
-            yPx = frame.windowY + windowLayout.safeCenterOffsetY,
-            focusable = focusable,
-            allowOffscreen = allowOffscreen,
+            window,
+            panelConfig,
+            frame.windowX,
+            frame.windowY + windowLayout.safeCenterOffsetY,
+            focusable,
+            allowOffscreen,
         )
         activeWebView?.alpha = frame.contentAlpha
         backdropController.applyMotionFrame(
-            window = window,
-            blurRadiusPx = frame.blurRadiusPx,
-            backdropAlpha = frame.backdropAlpha,
-            motionProgress = frame.shaderMotionProgress,
-            velocityShift = frame.shaderVelocityShift,
+            window,
+            frame.blurRadiusPx,
+            frame.backdropAlpha,
+            frame.shaderMotionProgress,
+            frame.shaderVelocityShift,
         )
         onRailMotionProgress(frame.railProgress)
     }
 
-    private fun refreshOpenGeometry() {
-        windowLayout.recomputeDimensions(edgeSide, panelConfig, railInsetDp, pluginSizeOverride, lastLiveInsets)
-        if (currentState == PanelState.OPEN && attached) applyOpenLayout(settled = true)
+    private fun refreshOpenGeometry(reapplyBackdrop: Boolean = true) {
+        windowLayout.recomputeDimensions(edgeSide, panelConfig, railInsetDp, pluginSizeOverride, lastLiveInsets, presentationMode)
+        if (currentState == PanelState.OPEN && attached) applyOpenLayout(settled = true, reapplyBackdrop = reapplyBackdrop)
     }
 
-    private fun applyOpenLayout(settled: Boolean) {
+    private fun applyOpenLayout(
+        settled: Boolean,
+        reapplyBackdrop: Boolean = true,
+    ) {
         val window = dialog.window ?: return
         applyMotionVisuals(window, computeMotionFrame(1f, 0f), focusable = true, allowOffscreen = !settled)
-        backdropController.apply()
+        if (reapplyBackdrop) backdropController.apply()
     }
 
     private fun scheduleWarmCollapse() {
