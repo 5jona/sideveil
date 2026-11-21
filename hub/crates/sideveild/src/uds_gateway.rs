@@ -10,8 +10,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::Value;
-use sideveil_protocol::plugin::PluginBackendState;
-use sideveil_protocol::rpc::{HostEventEnvelope, RpcResponse};
+use sideveil_protocol::hud::NativeHudScene;
+use sideveil_protocol::plugin::{PluginBackendState, PluginCapability};
+use sideveil_protocol::rpc::{HostEventEnvelope, RpcResponse, methods};
 use sideveil_protocol::sensor::{HubToSensor, SensorToHub};
 use sideveil_protocol::uds::{UdsClientHello, UdsHandshakeAck};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
@@ -278,7 +279,21 @@ async fn handle_plugin_backend_session<R: AsyncRead + Unpin>(
         if obj.contains_key("event")
             && let Ok(env) = serde_json::from_value::<HostEventEnvelope>(val)
         {
-            state.emit_plugin_scoped_event(&plugin_id, env.event, env.payload);
+            match env.event.as_str() {
+                methods::HUD_UPDATE_SCENE => {
+                    if state
+                        .plugin_registry()
+                        .has_capability(&plugin_id, PluginCapability::NativeHud)
+                        && let Some(payload) = env.payload
+                        && let Ok(mut scene) = serde_json::from_value::<NativeHudScene>(payload)
+                    {
+                        scene.plugin_id = plugin_id.clone();
+                        state.push_hud_scene(scene);
+                    }
+                }
+                methods::HUD_DISMISS => state.dismiss_hud(Some(plugin_id.clone())),
+                _ => state.emit_plugin_scoped_event(&plugin_id, env.event, env.payload),
+            }
         }
     }
 
@@ -287,6 +302,7 @@ async fn handle_plugin_backend_session<R: AsyncRead + Unpin>(
         state
             .logs()
             .info(format!("Plugin backend disconnected: id={plugin_id}"));
+        state.dismiss_hud(Some(plugin_id.clone()));
         state.emit_plugin_backend_state(&plugin_id, PluginBackendState::Offline);
     }
 }

@@ -1,5 +1,7 @@
 //! CLI argument parser for `sideveil-ctl`.
 
+mod hud_cmd;
+
 use std::path::PathBuf;
 
 use serde_json::{Value, json};
@@ -85,6 +87,7 @@ pub(crate) fn parse_args(
             OutputMode::FullEnvelope,
         ),
         "plugins" => parse_plugins_subcommand(&positional[1..])?,
+        "hud" => hud_cmd::parse_hud_subcommand(&positional[1..])?,
         "rpc" => parse_raw_rpc(&positional[1..])?,
         other => return Err((2, format!("Unknown command: {other}"))),
     };

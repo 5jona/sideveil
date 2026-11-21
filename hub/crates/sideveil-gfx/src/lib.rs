@@ -1,8 +1,11 @@
 //! Shared pure-Rust vector graphics and perceptual color core for Sideveil.
 //!
-//! Built on the Linebender ecosystem (`vello_cpu`, `kurbo`, `peniko`, `color`) + `usvg` with
-//! zero GPU runtime dependencies and automatic AArch64 NEON SIMD acceleration.
+//! Built on the Linebender ecosystem (`vello_cpu`, `kurbo`, `peniko`, `color`) + optional `usvg`
+//! with zero GPU runtime dependencies and automatic AArch64 NEON SIMD acceleration.
 
+pub mod hud_renderer;
+pub mod palette;
+#[cfg(feature = "svg-icon")]
 pub mod svg_icon;
 
 use thiserror::Error;
@@ -21,4 +24,6 @@ pub enum GfxError {
     InvalidViewport,
     #[error("failed to encode PNG output: {0}")]
     PngEncode(String),
+    #[error("invalid HUD canvas dimensions ({width}x{height}) or output buffer size")]
+    InvalidCanvas { width: u16, height: u16 },
 }

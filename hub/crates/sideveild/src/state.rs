@@ -11,6 +11,7 @@ use sideveil_protocol::config::PanelState;
 use sideveil_protocol::plugin::PluginsSnapshotPayload;
 use sideveil_protocol::rpc::{DaemonHealth, DaemonStatus};
 use sideveil_protocol::sensor::{DisplayGeometry, HubToSensor};
+use sideveil_protocol::theme::HostDynamicColorsPayload;
 use tokio::sync::mpsc;
 
 use crate::config_store::ConfigStore;
@@ -48,6 +49,8 @@ pub(crate) struct RuntimeSnapshot {
     pub(crate) overlay_permission_granted: bool,
     pub(crate) panel_state: PanelState,
     pub(crate) fullscreen_active: bool,
+    pub(crate) dynamic_colors: Option<HostDynamicColorsPayload>,
+    pub(crate) active_hud_plugin: Option<String>,
     pub(crate) host_pid: Option<u32>,
     pub(crate) cross_window_blur_supported: Option<bool>,
     pub(crate) sensor_pid: Option<u32>,
@@ -63,6 +66,8 @@ impl Default for RuntimeSnapshot {
             overlay_permission_granted: false,
             panel_state: PanelState::Closed,
             fullscreen_active: false,
+            dynamic_colors: None,
+            active_hud_plugin: None,
             host_pid: None,
             cross_window_blur_supported: None,
             sensor_pid: None,

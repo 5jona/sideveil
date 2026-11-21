@@ -5,10 +5,18 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[features]
+default = ["svg-icon"]
+svg-icon = ["dep:usvg", "vello_cpu/png"]
+
 [dependencies]
+sideveil-protocol.workspace = true
 thiserror.workspace = true
-usvg.workspace = true
-vello_cpu.workspace = true
+usvg = { workspace = true, optional = true }
+vello_cpu = { version = "0.4", default-features = false, features = [
+    "std",
+    "u8_pipeline",
+] }
 
 [lints]
 workspace = true

@@ -31,8 +31,7 @@ pub(super) fn builtin_diag_manifest() -> PluginManifest {
         capabilities: vec![PluginCapability::Toast],
         surface: PluginSurfacePrefs {
             backdrop: PluginSurfaceBackdrop::NativeGlass,
-            width_dp: None,
-            height_percent: None,
+            ..PluginSurfacePrefs::default()
         },
     }
 }

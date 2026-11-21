@@ -6,7 +6,9 @@ use std::sync::PoisonError;
 
 use serde::Serialize;
 use serde_json::Value;
+use sideveil_gfx::palette::synthesize_glass_palette;
 use sideveil_protocol::config::SideveilConfig;
+use sideveil_protocol::hud::{HudDismissPayload, NativeHudScene};
 use sideveil_protocol::plugin::{
     PluginActiveChangedPayload, PluginBackendState, PluginBackendStatePayload,
     PluginScopedEventPayload, PluginSelectParams,
@@ -16,6 +18,7 @@ use sideveil_protocol::rpc::{
     PanelCommand, PanelCommandPayload, PanelStateChangedPayload, events,
 };
 use sideveil_protocol::sensor::HubToSensor;
+use sideveil_protocol::theme::HostDynamicColorsPayload;
 
 use crate::state::{HostWakeSignal, HubState};
 
@@ -24,6 +27,7 @@ impl HubState {
         self.sync_sensor_state();
         self.push_config_snapshot_to_host();
         self.push_plugins_snapshot_to_host();
+        self.push_dynamic_palette_if_available();
     }
 
     pub fn on_plugins_changed(&self) {
@@ -85,6 +89,61 @@ impl HubState {
 
     pub fn send_panel_command(&self, command: PanelCommand) {
         self.emit_host_event_critical(events::PANEL_COMMAND, &PanelCommandPayload { command });
+    }
+
+    pub fn push_hud_scene(&self, scene: NativeHudScene) {
+        let clean = scene.sanitized();
+        {
+            let mut rt = self.runtime.write().unwrap_or_else(PoisonError::into_inner);
+            rt.active_hud_plugin = Some(clean.plugin_id.clone());
+        }
+        // High-frequency HUD updates ride the coalescing ephemeral channel so control frames never stall.
+        self.emit_host_event_ephemeral(events::HUD_SCENE_UPDATED, &clean);
+    }
+
+    pub fn dismiss_hud(&self, plugin_id: Option<String>) {
+        let should_emit = {
+            let mut rt = self.runtime.write().unwrap_or_else(PoisonError::into_inner);
+            match (&plugin_id, &rt.active_hud_plugin) {
+                (None, _) => {
+                    rt.active_hud_plugin = None;
+                    true
+                }
+                (Some(req), Some(active)) if req == active => {
+                    rt.active_hud_plugin = None;
+                    true
+                }
+                (Some(_), None) => true,
+                _ => false,
+            }
+        };
+        if should_emit {
+            self.emit_host_event_critical(events::HUD_DISMISSED, &HudDismissPayload { plugin_id });
+        }
+    }
+
+    pub fn push_dynamic_palette_if_available(&self) {
+        let colors = self
+            .runtime
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .dynamic_colors;
+        let Some(colors) = colors else {
+            return;
+        };
+        let cfg = self.config_store().current();
+        let is_dark = match cfg.panel.color_mode.as_str() {
+            "light" => false,
+            "dark" => true,
+            _ => colors.is_dark,
+        };
+        let palette = synthesize_glass_palette(
+            colors.seed_argb,
+            colors.luma_hint,
+            is_dark,
+            &cfg.panel.theme_id,
+        );
+        self.emit_host_event_critical(events::THEME_PALETTE_UPDATED, &palette);
     }
 
     pub fn request_sensor_permission_refresh(&self) {
@@ -194,6 +253,17 @@ impl HubState {
                     if updated {
                         self.sync_sensor_state();
                     }
+                }
+            }
+            events::HOST_DYNAMIC_COLORS => {
+                if let Some(payload) = envelope.payload
+                    && let Ok(colors) = serde_json::from_value::<HostDynamicColorsPayload>(payload)
+                {
+                    {
+                        let mut rt = self.runtime.write().unwrap_or_else(PoisonError::into_inner);
+                        rt.dynamic_colors = Some(colors);
+                    }
+                    self.push_dynamic_palette_if_available();
                 }
             }
             events::PANEL_STATE_CHANGED => {

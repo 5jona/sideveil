@@ -33,6 +33,7 @@ pub enum PluginCapability {
     Storage,
     Toast,
     SystemExec,
+    NativeHud,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -42,6 +43,17 @@ pub enum PluginSurfaceBackdrop {
     NativeGlass,
     Transparent,
     Opaque,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PluginPresentationMode {
+    #[default]
+    Drawer,
+    Peek,
+    Pinned,
+    Wide,
+    NativeHud,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -56,6 +68,7 @@ pub struct PluginTriggers {
 #[serde(rename_all = "camelCase", default)]
 pub struct PluginSurfacePrefs {
     pub backdrop: PluginSurfaceBackdrop,
+    pub presentation: PluginPresentationMode,
     pub width_dp: Option<i32>,
     pub height_percent: Option<i32>,
 }

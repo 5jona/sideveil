@@ -133,6 +133,12 @@ async fn dispatch_inner(
         methods::SYSTEM_EXEC => {
             sandbox::handle_system_exec(state, req.plugin_id.as_deref(), req.params).await
         }
+        methods::HUD_UPDATE_SCENE => {
+            sandbox::handle_hud_update(state, is_privileged, req.plugin_id.as_deref(), req.params)
+        }
+        methods::HUD_DISMISS => {
+            sandbox::handle_hud_dismiss(state, is_privileged, req.plugin_id.as_deref(), req.params)
+        }
         other => Err((
             error_codes::METHOD_NOT_FOUND,
             format!("Method not found: {other}"),

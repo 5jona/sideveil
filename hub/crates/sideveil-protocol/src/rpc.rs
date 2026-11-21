@@ -16,6 +16,7 @@ pub mod events {
     pub const PANEL_COMMAND: &str = "panel.command";
     pub const HOST_HELLO: &str = "host.hello";
     pub const HOST_FULLSCREEN_CHANGED: &str = "host.fullscreenChanged";
+    pub const HOST_DYNAMIC_COLORS: &str = "host.dynamicColors";
     pub const HOST_SELECT_PLUGIN: &str = "host.selectPlugin";
     pub const PANEL_STATE_CHANGED: &str = "panel.stateChanged";
     pub const PANEL_VISIBILITY: &str = "panel.visibility";
@@ -24,6 +25,9 @@ pub mod events {
     pub const PLUGINS_ACTIVE_CHANGED: &str = "plugins.activeChanged";
     pub const PLUGIN_BACKEND_STATE: &str = "plugin.backendState";
     pub const PLUGIN_EVENT: &str = "plugin.event";
+    pub const THEME_PALETTE_UPDATED: &str = "theme.paletteUpdated";
+    pub const HUD_SCENE_UPDATED: &str = "hud.sceneUpdated";
+    pub const HUD_DISMISSED: &str = "hud.dismissed";
 }
 
 pub mod methods {
@@ -51,6 +55,8 @@ pub mod methods {
     pub const FS_WRITE_ATOMIC: &str = "fs.writeAtomic";
     pub const SYSTEM_EXEC: &str = "system.exec";
     pub const UI_TOAST: &str = "ui.toast";
+    pub const HUD_UPDATE_SCENE: &str = "hud.updateScene";
+    pub const HUD_DISMISS: &str = "hud.dismiss";
 }
 
 pub mod error_codes {
@@ -262,6 +268,20 @@ pub struct EdgeRepositionPayload {
 #[serde(rename_all = "camelCase")]
 pub struct HostFullscreenChangedPayload {
     pub fullscreen: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+#[derive(Default)]
+pub struct EdgeStatusPayload {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub badge_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accent_color: Option<String>,
+    pub pulse: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub progress: Option<f32>,
+    pub clear: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
