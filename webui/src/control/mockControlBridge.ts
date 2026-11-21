@@ -297,9 +297,9 @@ export async function handleMockControlExec(cmd: string): Promise<ExecResult> {
         : p.global;
       const nextPackages = pkgsMatch
         ? pkgsMatch[1]
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean)
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean)
         : hasEmptyPkgs
           ? []
           : p.packages;

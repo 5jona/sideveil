@@ -10,7 +10,9 @@
     "edgeOffsetDp": 1,
     "handleVisible": true,
     "handleOpacity": 0.62,
-    "dimInFullscreen": true
+    "dimInFullscreen": true,
+    "doubleSwipeInFullscreen": false,
+    "idleAutoDimMs": 3500
   },
   "panel": {
     "widthDp": 340,

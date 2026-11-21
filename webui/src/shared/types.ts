@@ -14,6 +14,8 @@ export interface EdgeConfig {
   handleVisible: boolean;
   handleOpacity: number;
   dimInFullscreen: boolean;
+  doubleSwipeInFullscreen: boolean;
+  idleAutoDimMs: number;
 }
 
 export interface PanelConfig {
@@ -133,6 +135,8 @@ export const DEFAULT_CONFIG: SideveilConfig = {
     handleVisible: true,
     handleOpacity: 0.62,
     dimInFullscreen: true,
+    doubleSwipeInFullscreen: false,
+    idleAutoDimMs: 3500,
   },
   panel: {
     widthDp: 340,
@@ -176,6 +180,9 @@ export function normalizeSideveilConfig(
       handleVisible: edge?.handleVisible ?? DEFAULT_CONFIG.edge.handleVisible,
       handleOpacity: clampFloat(edge?.handleOpacity, 0.1, 1.0, DEFAULT_CONFIG.edge.handleOpacity),
       dimInFullscreen: edge?.dimInFullscreen ?? DEFAULT_CONFIG.edge.dimInFullscreen,
+      doubleSwipeInFullscreen:
+        edge?.doubleSwipeInFullscreen ?? DEFAULT_CONFIG.edge.doubleSwipeInFullscreen,
+      idleAutoDimMs: clampInt(edge?.idleAutoDimMs, 0, 30000, DEFAULT_CONFIG.edge.idleAutoDimMs),
     },
     panel: {
       widthDp: clampInt(panel?.widthDp, 260, 480, DEFAULT_CONFIG.panel.widthDp),

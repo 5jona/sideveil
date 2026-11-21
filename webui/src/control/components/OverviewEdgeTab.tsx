@@ -220,6 +220,35 @@ export function OverviewEdgeTab({ config, status, onChange }: OverviewEdgeTabPro
                 />
               }
             />
+
+            <SettingRow
+              variant="plain"
+              title="全屏二次滑入防误触"
+              description="全屏游戏或视频下首次内滑仅点亮胶囊，1.5s 内再次滑入展开"
+              control={
+                <Switch
+                  checked={config.edge.doubleSwipeInFullscreen}
+                  onCheckedChange={(v) => updateEdge('doubleSwipeInFullscreen', v)}
+                  aria-label="全屏二次滑入防误触"
+                />
+              }
+            />
+
+            <Slider
+              label="静置自动隐蔽延迟"
+              value={config.edge.idleAutoDimMs}
+              min={0}
+              max={15000}
+              step={500}
+              unit="ms"
+              presets={[
+                { label: '关闭', value: 0 },
+                { label: '3.5秒', value: 3500 },
+                { label: '8秒', value: 8000 },
+              ]}
+              disabled={!config.edge.handleVisible}
+              onValueChange={(v) => updateEdge('idleAutoDimMs', v)}
+            />
           </CardContent>
         </Card>
 

@@ -192,7 +192,7 @@ export function PluginCard({
                                 <input
                                     type="number"
                                     aria-label={`编辑 ${plugin.name} 优先级`}
-                                    className="w-16 rounded border border-[var(--border-subtle)] bg-[var(--surface-elevated)] px-1.5 py-0.5 text-xs text-[var(--text-primary)]"
+                                    className="w-16 rounded border border-[var(--border-hairline)] bg-[var(--surface-elevated)] px-1.5 py-0.5 text-xs text-[var(--text-primary)]"
                                     value={tempPriority}
                                     onChange={(e) => setTempPriority(Number(e.target.value))}
                                 />

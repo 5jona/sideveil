@@ -61,7 +61,7 @@ export function PluginsTab({
                 />
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius-panel)] bg-[var(--surface-soft)] p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius-panel)] bg-[var(--surface-elevated)] p-3">
                 <div className="flex items-center gap-2">
                     <Boxes className="size-4 text-[var(--accent)]" />
                     <span className="text-xs font-medium text-[var(--text-primary)]">

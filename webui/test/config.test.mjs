@@ -29,6 +29,8 @@ test('DEFAULT_CONFIG conforms to expected structural and numerical bounds', () =
   assert.ok(DEFAULT_CONFIG.edge.handleOpacity >= 0.1 && DEFAULT_CONFIG.edge.handleOpacity <= 1.0);
   assert.equal(typeof DEFAULT_CONFIG.edge.handleVisible, 'boolean');
   assert.equal(typeof DEFAULT_CONFIG.edge.dimInFullscreen, 'boolean');
+  assert.equal(typeof DEFAULT_CONFIG.edge.doubleSwipeInFullscreen, 'boolean');
+  assert.ok(DEFAULT_CONFIG.edge.idleAutoDimMs >= 0 && DEFAULT_CONFIG.edge.idleAutoDimMs <= 30000);
 
   // Panel bounds
   assert.ok(DEFAULT_CONFIG.panel.widthDp >= 260 && DEFAULT_CONFIG.panel.widthDp <= 480);
@@ -83,6 +85,8 @@ test('normalizeSideveilConfig clamps numerical values to valid ranges', () => {
       handleVisible: false,
       handleOpacity: 0.01,
       dimInFullscreen: false,
+      doubleSwipeInFullscreen: true,
+      idleAutoDimMs: -500,
     },
     panel: {
       widthDp: 100,
@@ -106,6 +110,8 @@ test('normalizeSideveilConfig clamps numerical values to valid ranges', () => {
   assert.equal(clampedMin.edge.handleOpacity, 0.1);
   assert.equal(clampedMin.edge.handleVisible, false);
   assert.equal(clampedMin.edge.dimInFullscreen, false);
+  assert.equal(clampedMin.edge.doubleSwipeInFullscreen, true);
+  assert.equal(clampedMin.edge.idleAutoDimMs, 0);
 
   assert.equal(clampedMin.panel.widthDp, 260);
   assert.equal(clampedMin.panel.heightPercent, 40);
@@ -126,6 +132,8 @@ test('normalizeSideveilConfig clamps numerical values to valid ranges', () => {
       handleVisible: true,
       handleOpacity: 9.99,
       dimInFullscreen: true,
+      doubleSwipeInFullscreen: false,
+      idleAutoDimMs: 999999,
     },
     panel: {
       widthDp: 999,
@@ -146,6 +154,7 @@ test('normalizeSideveilConfig clamps numerical values to valid ranges', () => {
   assert.equal(clampedMax.edge.triggerDistanceDp, 96);
   assert.equal(clampedMax.edge.edgeOffsetDp, 24);
   assert.equal(clampedMax.edge.handleOpacity, 1.0);
+  assert.equal(clampedMax.edge.idleAutoDimMs, 30000);
 
   assert.equal(clampedMax.panel.widthDp, 480);
   assert.equal(clampedMax.panel.heightPercent, 92);
