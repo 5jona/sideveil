@@ -43,6 +43,18 @@ enum class PluginCapability {
 
     @SerialName("native-hud")
     NATIVE_HUD,
+
+    @SerialName("clipboard")
+    CLIPBOARD,
+
+    @SerialName("haptics")
+    HAPTICS,
+
+    @SerialName("telemetry")
+    TELEMETRY,
+
+    @SerialName("inter-plugin-bus")
+    INTER_PLUGIN_BUS,
 }
 
 @Serializable
@@ -79,6 +91,7 @@ enum class PluginPresentationMode {
 data class PluginSurfacePrefs(
     val backdrop: PluginSurfaceBackdrop = PluginSurfaceBackdrop.NATIVE_GLASS,
     val presentation: PluginPresentationMode = PluginPresentationMode.DRAWER,
+    val crossOriginIsolated: Boolean = false,
     val widthDp: Int? = null,
     val heightPercent: Int? = null,
 )
@@ -94,8 +107,10 @@ data class PluginDescriptor(
     val enabled: Boolean = true,
     val priority: Int = 0,
     val packages: List<String> = emptyList(),
+    val activities: List<String> = emptyList(),
     val global: Boolean = false,
     val hasScopeOverride: Boolean = false,
+    val devServerUrl: String? = null,
     val backend: PluginBackendKind = PluginBackendKind.NONE,
     val backendState: PluginBackendState = PluginBackendState.NONE,
     val capabilities: List<PluginCapability> = emptyList(),
@@ -122,6 +137,15 @@ data class PluginsSnapshotPayload(
     val matchedPluginIds: List<String> = emptyList(),
     val activePluginId: String? = null,
     val foregroundPackage: String = "",
+    val foregroundActivity: String = "",
+)
+
+@Serializable
+data class HostPluginDiagnosticsPayload(
+    val warmPluginIds: List<String> = emptyList(),
+    val activeHudPluginId: String? = null,
+    val hostNativeHeapKb: Long? = null,
+    val hostPssKb: Long? = null,
 )
 
 @Serializable

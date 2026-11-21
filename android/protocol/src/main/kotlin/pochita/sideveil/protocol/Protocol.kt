@@ -16,6 +16,8 @@ object SideveilEvents {
     const val HOST_HELLO = "host.hello"
     const val HOST_FULLSCREEN_CHANGED = "host.fullscreenChanged"
     const val HOST_DYNAMIC_COLORS = "host.dynamicColors"
+    const val HOST_DIAGNOSTICS = "host.diagnostics"
+    const val HOST_WEBVIEW_CONSOLE = "host.webviewConsole"
     const val HOST_SELECT_PLUGIN = "host.selectPlugin"
     const val PANEL_STATE_CHANGED = "panel.stateChanged"
     const val PANEL_VISIBILITY = "panel.visibility"
@@ -24,6 +26,7 @@ object SideveilEvents {
     const val PLUGINS_ACTIVE_CHANGED = "plugins.activeChanged"
     const val PLUGIN_BACKEND_STATE = "plugin.backendState"
     const val PLUGIN_EVENT = "plugin.event"
+    const val PLUGIN_BUS_MESSAGE = "plugin.busMessage"
     const val THEME_PALETTE_UPDATED = "theme.paletteUpdated"
     const val HUD_SCENE_UPDATED = "hud.sceneUpdated"
     const val HUD_DISMISSED = "hud.dismissed"
@@ -46,7 +49,14 @@ object SideveilMethods {
     const val PLUGINS_RELOAD = "plugins.reload"
     const val PLUGINS_SET_ENABLED = "plugins.setEnabled"
     const val PLUGINS_SET_PRIORITY = "plugins.setPriority"
+    const val PLUGINS_SET_DEV_URL = "plugins.setDevUrl"
+    const val PLUGINS_AUDIT = "plugins.audit"
     const val PLUGIN_INVOKE = "plugin.invoke"
+    const val PLUGIN_BUS_PUBLISH = "plugin.busPublish"
+    const val TELEMETRY_SNAPSHOT = "telemetry.snapshot"
+    const val CLIPBOARD_GET = "clipboard.get"
+    const val CLIPBOARD_SET = "clipboard.set"
+    const val HAPTICS_TRIGGER = "haptics.trigger"
     const val UI_TOAST = "ui.toast"
     const val HUD_UPDATE_SCENE = "hud.updateScene"
     const val HUD_DISMISS = "hud.dismiss"
@@ -136,7 +146,17 @@ data class ConfigUpdatedPayload(
 @Serializable
 data class ScopeChangedPayload(
     val foregroundPackage: String,
+    val foregroundActivity: String = "",
     val active: Boolean,
+)
+
+@Serializable
+data class HostWebViewConsolePayload(
+    val pluginId: String,
+    val level: String,
+    val message: String,
+    val sourceId: String = "",
+    val lineNumber: Int = 0,
 )
 
 @Serializable

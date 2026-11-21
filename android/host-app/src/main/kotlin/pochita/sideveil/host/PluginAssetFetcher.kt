@@ -10,9 +10,9 @@ import java.net.HttpURLConnection
 import java.net.URI
 
 /**
- * Resolves isolated per-plugin virtual HTTPS origins (`https://<pluginId>.plugins.sideveil.local/`)
- * and loads static assets either from APK `assets/panel/` (built-in) or from `sideveild`'s
- * authenticated loopback HTTP endpoint (`127.0.0.1:<port>/plugins/<pluginId>/...`).
+ * Resolves isolated per-plugin virtual HTTPS origins (`https://<pluginId>.plugins.sideveil.local/`),
+ * injects on-demand COOP/COEP headers for WASM/WebGPU plugins, proxies per-plugin loopback Dev Mode
+ * servers, and loads static assets either from APK `assets/panel/` or `sideveild`'s loopback HTTP.
  */
 class PluginAssetFetcher(
     private val context: Context,
@@ -23,7 +23,15 @@ class PluginAssetFetcher(
     fun originFor(pluginId: String): String = "https://${hostFor(pluginId)}"
 
     fun entryUrlFor(descriptor: PluginDescriptor): String {
-        val cleanEntry = descriptor.entry.trimStart('/').ifEmpty { "index.html" }
+        val cleanEntry =
+            if (!descriptor.devServerUrl.isNullOrBlank()) {
+                descriptor.entry
+                    .trimStart('/')
+                    .removePrefix("web/")
+                    .ifEmpty { "index.html" }
+            } else {
+                descriptor.entry.trimStart('/').ifEmpty { "index.html" }
+            }
         return "${originFor(descriptor.id)}/$cleanEntry"
     }
 
@@ -48,23 +56,34 @@ class PluginAssetFetcher(
         if (rawPath.contains("..") || rawPath.contains('\\')) {
             return errorResponse(403, "Forbidden")
         }
+        val coi = descriptor.surface.crossOriginIsolated
+        val devBase = descriptor.devServerUrl?.trim()?.takeIf { isValidLoopbackDevUrl(it) }
+        if (devBase != null) {
+            val rel = rawPath.removePrefix("web/").ifEmpty { "index.html" }
+            val querySuffix = uri.encodedQuery?.let { "?$it" }.orEmpty()
+            return fetchLoopbackUrl("$devBase/$rel$querySuffix", authToken = null, fallbackPath = rel, coi = coi)
+        }
         return if (descriptor.builtin) {
-            openBuiltinAsset(rawPath.ifEmpty { "index.html" })
+            openBuiltinAsset(rawPath.ifEmpty { "index.html" }, coi = coi)
         } else {
-            fetchExternalAsset(descriptor, rawPath.ifEmpty { descriptor.entry.trimStart('/') })
+            fetchExternalAsset(descriptor, rawPath.ifEmpty { descriptor.entry.trimStart('/') }, coi = coi)
         }
     }
 
-    private fun openBuiltinAsset(relativePath: String): WebResourceResponse {
+    private fun openBuiltinAsset(
+        relativePath: String,
+        coi: Boolean,
+    ): WebResourceResponse {
         val normalized = relativePath.trimStart('/').ifEmpty { "index.html" }
         val assetPath = "panel/$normalized"
+        val headers = buildResponseHeaders(coi)
         return try {
             val stream = context.assets.open(assetPath)
-            WebResourceResponse(mimeTypeFor(normalized), "UTF-8", stream)
+            WebResourceResponse(mimeTypeFor(normalized), "UTF-8", 200, "OK", headers, stream)
         } catch (_: IOException) {
             runCatching {
                 val indexStream = context.assets.open("panel/index.html")
-                WebResourceResponse("text/html", "UTF-8", indexStream)
+                WebResourceResponse("text/html", "UTF-8", 200, "OK", headers, indexStream)
             }.getOrElse {
                 errorResponse(404, "Not Found")
             }
@@ -74,18 +93,30 @@ class PluginAssetFetcher(
     private fun fetchExternalAsset(
         descriptor: PluginDescriptor,
         relativePath: String,
+        coi: Boolean,
     ): WebResourceResponse {
         val (port, token) = endpointProvider() ?: return errorResponse(503, "Hub Unavailable")
         val normalized = relativePath.trimStart('/')
-        val url = URI("http://127.0.0.1:$port/plugins/${descriptor.id}/$normalized").toURL()
-        return runCatching {
+        val url = "http://127.0.0.1:$port/plugins/${descriptor.id}/$normalized"
+        return fetchLoopbackUrl(url, authToken = token, fallbackPath = normalized, coi = coi)
+    }
+
+    private fun fetchLoopbackUrl(
+        targetUrl: String,
+        authToken: String?,
+        fallbackPath: String,
+        coi: Boolean,
+    ): WebResourceResponse =
+        runCatching {
             val conn =
-                (url.openConnection() as HttpURLConnection).apply {
+                (URI(targetUrl).toURL().openConnection() as HttpURLConnection).apply {
                     requestMethod = "GET"
                     connectTimeout = CONNECT_TIMEOUT_MS
                     readTimeout = READ_TIMEOUT_MS
                     useCaches = false
-                    setRequestProperty("Authorization", "Bearer $token")
+                    if (authToken != null) {
+                        setRequestProperty("Authorization", "Bearer $authToken")
+                    }
                 }
             try {
                 val code = conn.responseCode
@@ -95,15 +126,20 @@ class PluginAssetFetcher(
                     } else {
                         conn.errorStream?.use { it.readBytes() } ?: ByteArray(0)
                     }
-                val contentType = conn.contentType ?: mimeTypeFor(normalized)
-                val mime = contentType.substringBefore(';').trim().ifEmpty { mimeTypeFor(normalized) }
-                val encoding = if (mime.startsWith("text/") || mime.contains("javascript") || mime.contains("json")) "UTF-8" else null
+                val contentType = conn.contentType ?: mimeTypeFor(fallbackPath)
+                val mime = contentType.substringBefore(';').trim().ifEmpty { mimeTypeFor(fallbackPath) }
+                val encoding =
+                    if (mime.startsWith("text/") || mime.contains("javascript") || mime.contains("json")) {
+                        "UTF-8"
+                    } else {
+                        null
+                    }
                 WebResourceResponse(
                     mime,
                     encoding,
                     code,
                     conn.responseMessage ?: if (code == 200) "OK" else "Error",
-                    mapOf("Cache-Control" to "no-store"),
+                    buildResponseHeaders(coi),
                     ByteArrayInputStream(body),
                 )
             } finally {
@@ -112,7 +148,6 @@ class PluginAssetFetcher(
         }.getOrElse {
             errorResponse(502, "Asset Fetch Failed")
         }
-    }
 
     private fun errorResponse(
         status: Int,
@@ -145,5 +180,24 @@ class PluginAssetFetcher(
         const val PLUGIN_ORIGIN_SUFFIX = "plugins.sideveil.local"
         private const val CONNECT_TIMEOUT_MS = 2_000
         private const val READ_TIMEOUT_MS = 4_000
+
+        fun buildResponseHeaders(crossOriginIsolated: Boolean): Map<String, String> =
+            if (crossOriginIsolated) {
+                mapOf(
+                    "Cache-Control" to "no-store",
+                    "Cross-Origin-Opener-Policy" to "same-origin",
+                    "Cross-Origin-Embedder-Policy" to "require-corp",
+                    "Cross-Origin-Resource-Policy" to "same-origin",
+                )
+            } else {
+                mapOf("Cache-Control" to "no-store")
+            }
+
+        fun isValidLoopbackDevUrl(raw: String): Boolean {
+            val trimmed = raw.trim().trimEnd('/')
+            if (!trimmed.startsWith("http://")) return false
+            val host = trimmed.removePrefix("http://").substringBefore('/').substringBefore(':')
+            return host == "127.0.0.1" || host == "localhost"
+        }
     }
 }

@@ -1,6 +1,7 @@
 package pochita.sideveil.host
 
 import android.content.Context
+import android.os.Debug
 import android.util.Log
 import android.webkit.WebView
 import kotlinx.coroutines.CoroutineScope
@@ -11,6 +12,7 @@ import kotlinx.serialization.json.encodeToJsonElement
 import pochita.sideveil.protocol.BUILTIN_DIAG_PLUGIN_ID
 import pochita.sideveil.protocol.EdgeStatusPayload
 import pochita.sideveil.protocol.HostEventEnvelope
+import pochita.sideveil.protocol.HostPluginDiagnosticsPayload
 import pochita.sideveil.protocol.PanelState
 import pochita.sideveil.protocol.PanelVisibilityPayload
 import pochita.sideveil.protocol.PluginBackendStatePayload
@@ -24,17 +26,21 @@ import pochita.sideveil.protocol.SideveilWireJson
 
 /**
  * Manages the LRU warm pool (max [MAX_WARM_INSTANCES] WebViews) of isolated plugin sandboxes,
- * active plugin switching, back-press interception, scoped event routing, and render-crash recovery.
+ * active plugin switching, renderer priority / WebGPU VRAM reclamation, per-plugin DevTools,
+ * back-press interception, scoped event routing, and render-crash recovery.
  */
-class PluginWebViewManager(
+internal class PluginWebViewManager(
     private val context: Context,
     private val scope: CoroutineScope,
     private val daemonClient: DaemonClient,
+    haptics: EdgeHapticsController,
     private val surfaceDelegate: PluginHostSurfaceDelegate,
 ) {
     private val assetFetcher = PluginAssetFetcher(context) { daemonClient.currentEndpoint() }
+    private val localRpcHandler = PluginLocalRpcHandler(context, haptics)
     private val descriptors = LinkedHashMap<String, PluginDescriptor>()
     private val warmInstances = LinkedHashMap<String, PluginWebViewInstance>(4, 0.75f, true)
+    private var devToolsEnabled = false
 
     private var matchedPluginIds: List<String> = emptyList()
     private var activePluginId: String = BUILTIN_DIAG_PLUGIN_ID
@@ -93,11 +99,26 @@ class PluginWebViewManager(
 
     fun onPanelStateChanged(nextState: PanelState) {
         panelState = nextState
+        warmInstances.forEach { (id, inst) ->
+            inst.setForegroundPriority(nextState != PanelState.CLOSED && id == activePluginId)
+        }
         val payload =
             SideveilWireJson.encodeToJsonElement(
                 PanelVisibilityPayload(visible = nextState != PanelState.CLOSED, state = nextState),
             )
         warmInstances[activePluginId]?.pushEvent(SideveilEvents.PANEL_VISIBILITY, payload)
+        reportDiagnostics()
+    }
+
+    fun reportDiagnostics(activeHudPluginId: String? = null) {
+        val diag =
+            HostPluginDiagnosticsPayload(
+                warmPluginIds = warmInstances.keys.toList(),
+                activeHudPluginId = activeHudPluginId,
+                hostNativeHeapKb = Debug.getNativeHeapAllocatedSize() / 1024L,
+                hostPssKb = runCatching { Debug.getPss() }.getOrNull(),
+            )
+        daemonClient.sendEvent(SideveilEvents.HOST_DIAGNOSTICS, SideveilWireJson.encodeToJsonElement(diag))
     }
 
     fun isBackIntercepted(): Boolean = warmInstances[activePluginId]?.backInterceptEnabled == true
@@ -178,6 +199,9 @@ class PluginWebViewManager(
 
         activePluginId = descriptor.id
         val instance = getOrCreateInstance(descriptor)
+        warmInstances.forEach { (id, inst) ->
+            inst.setForegroundPriority(panelState != PanelState.CLOSED && id == activePluginId)
+        }
         if (switching || forceMount) {
             surfaceDelegate.mountPluginWebView(
                 webView = instance.webView,
@@ -186,6 +210,7 @@ class PluginWebViewManager(
                 sizeOverride = instance.sizeOverride,
             )
         }
+        reportDiagnostics()
         if (switching && panelState != PanelState.CLOSED) {
             instance.pushEvent(
                 SideveilEvents.PANEL_VISIBILITY,
@@ -208,6 +233,7 @@ class PluginWebViewManager(
                 context = context,
                 scope = scope,
                 daemonClient = daemonClient,
+                localRpcHandler = localRpcHandler,
                 assetFetcher = assetFetcher,
                 initialDescriptor = descriptor,
                 callbacks =
@@ -301,8 +327,13 @@ class PluginWebViewManager(
 
     private fun evictLruIfNeeded(keepId: String) {
         while (warmInstances.size >= MAX_WARM_INSTANCES) {
+            // Reclaim inactive COOP/COEP (WebGPU/WASM) renderers first to free GPU VRAM aggressively.
             val candidate =
-                warmInstances.keys.firstOrNull { it != activePluginId && it != keepId }
+                warmInstances.entries
+                    .firstOrNull { (id, inst) ->
+                        id != activePluginId && id != keepId && inst.descriptor.surface.crossOriginIsolated
+                    }?.key
+                    ?: warmInstances.keys.firstOrNull { it != activePluginId && it != keepId }
                     ?: break
             Log.i(TAG, "Evicting LRU warm plugin WebView: $candidate")
             warmInstances.remove(candidate)?.destroy()

@@ -1,12 +1,10 @@
 package pochita.sideveil.host
 
-import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
-import android.widget.Toast
 import androidx.core.net.toUri
 import androidx.webkit.WebMessageCompat
 import androidx.webkit.WebMessagePortCompat
@@ -17,13 +15,9 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import org.json.JSONObject
 import pochita.sideveil.protocol.ContainerActionPayload
-import pochita.sideveil.protocol.PluginCapability
 import pochita.sideveil.protocol.PluginDescriptor
-import pochita.sideveil.protocol.RpcError
 import pochita.sideveil.protocol.RpcRequest
 import pochita.sideveil.protocol.RpcResponse
 import pochita.sideveil.protocol.SideveilMethods
@@ -31,13 +25,13 @@ import pochita.sideveil.protocol.SideveilWireJson
 
 /**
  * Manages the `WebMessagePort` / `window.__POCHITA_HOST__` channel, queued pre-ready
- * event flushing, `ui.toast` capability checks, container action decoding, and
- * server-stamped JSON-RPC forwarding for a single [PluginWebViewInstance].
+ * event flushing, host-local ACL RPCs, container action decoding, and server-stamped
+ * JSON-RPC forwarding for a single [PluginWebViewInstance].
  */
 internal class PluginWebMessageBridge(
-    private val context: Context,
     private val scope: CoroutineScope,
     private val daemonClient: DaemonClient,
+    private val localRpcHandler: PluginLocalRpcHandler,
     private val webView: WebView,
     private val pluginOrigin: String,
     private val descriptorProvider: () -> PluginDescriptor,
@@ -128,11 +122,14 @@ internal class PluginWebMessageBridge(
 
     private fun handleMessageFromWebView(raw: String) {
         val req = runCatching { SideveilWireJson.decodeFromString<RpcRequest>(raw) }.getOrNull() ?: return
-        when (req.method) {
-            SideveilMethods.CONTAINER_ACTION -> handleContainerAction(req)
-            SideveilMethods.UI_TOAST -> handleToastRpc(req)
-            else -> forwardDaemonRpc(req)
+        if (req.method == SideveilMethods.CONTAINER_ACTION) {
+            handleContainerAction(req)
+            return
         }
+        if (localRpcHandler.tryHandle(req, descriptorProvider(), ::sendToWebView)) {
+            return
+        }
+        forwardDaemonRpc(req)
     }
 
     private fun forwardDaemonRpc(req: RpcRequest) {
@@ -142,34 +139,6 @@ internal class PluginWebMessageBridge(
             val response = daemonClient.forwardRpc(stamped)
             val encoded = SideveilWireJson.encodeToString(response)
             mainHandler.post { sendToWebView(encoded) }
-        }
-    }
-
-    private fun handleToastRpc(req: RpcRequest) {
-        val descriptor = descriptorProvider()
-        val allowed = descriptor.builtin || descriptor.capabilities.contains(PluginCapability.TOAST)
-        if (!allowed) {
-            val denied =
-                RpcResponse(
-                    id = req.id,
-                    error = RpcError(-32003, "Plugin '${descriptor.id}' lacks 'toast' capability"),
-                )
-            mainHandler.post { sendToWebView(SideveilWireJson.encodeToString(denied)) }
-            return
-        }
-        val message =
-            req.params
-                ?.jsonObject
-                ?.get("message")
-                ?.jsonPrimitive
-                ?.content
-                .orEmpty()
-        mainHandler.post {
-            if (message.isNotBlank()) {
-                Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
-            }
-            val ok = RpcResponse(id = req.id, result = buildJsonObject { put("ok", JsonPrimitive(true)) })
-            sendToWebView(SideveilWireJson.encodeToString(ok))
         }
     }
 

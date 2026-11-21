@@ -39,12 +39,14 @@ sealed interface SensorToHub {
         val gestureMonitorActive: Boolean,
         val overlayPermissionGranted: Boolean,
         val foregroundPackage: String,
+        val foregroundActivity: String = "",
     ) : SensorToHub
 
     @Serializable
     @SerialName("foregroundChanged")
     data class ForegroundChanged(
         val packageName: String,
+        val activityName: String = "",
     ) : SensorToHub
 
     @Serializable

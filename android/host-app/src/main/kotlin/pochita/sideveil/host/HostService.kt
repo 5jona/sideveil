@@ -169,6 +169,7 @@ class HostService : LifecycleService() {
                 context = this,
                 scope = lifecycleScope,
                 daemonClient = daemonClient,
+                haptics = haptics,
                 surfaceDelegate =
                     overlayCoordinator.createSurfaceDelegate { themeId, colorScheme ->
                         latestThemeId = themeId

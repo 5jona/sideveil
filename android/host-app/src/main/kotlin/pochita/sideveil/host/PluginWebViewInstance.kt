@@ -29,10 +29,11 @@ import pochita.sideveil.protocol.SideveilWireJson
  * per-plugin container preferences, and [PluginWebMessageBridge] IPC routing.
  */
 @SuppressLint("SetJavaScriptEnabled")
-class PluginWebViewInstance(
+internal class PluginWebViewInstance(
     context: Context,
     scope: CoroutineScope,
     daemonClient: DaemonClient,
+    localRpcHandler: PluginLocalRpcHandler,
     private val assetFetcher: PluginAssetFetcher,
     initialDescriptor: PluginDescriptor,
     private val callbacks: PluginContainerCallbacks,
@@ -66,9 +67,9 @@ class PluginWebViewInstance(
 
     private val messageBridge =
         PluginWebMessageBridge(
-            context = context,
             scope = scope,
             daemonClient = daemonClient,
+            localRpcHandler = localRpcHandler,
             webView = webView,
             pluginOrigin = assetFetcher.originFor(initialDescriptor.id),
             descriptorProvider = { descriptor },
@@ -96,10 +97,20 @@ class PluginWebViewInstance(
 
         webView.addJavascriptInterface(messageBridge.createJsHostObject(), "__POCHITA_HOST__")
         webView.webViewClient = createWebViewClient()
+        webView.webChromeClient = PluginWebChromeClient({ descriptor.id }, daemonClient)
     }
 
     fun updateDescriptor(next: PluginDescriptor) {
+        val devUrlChanged = descriptor.devServerUrl != next.devServerUrl
         descriptor = next
+        if (devUrlChanged) {
+            loadEntry()
+        }
+    }
+
+    fun setForegroundPriority(foreground: Boolean) {
+        val priority = if (foreground) WebView.RENDERER_PRIORITY_IMPORTANT else WebView.RENDERER_PRIORITY_BOUND
+        webView.setRendererPriorityPolicy(priority, !foreground)
     }
 
     fun loadEntry() {

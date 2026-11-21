@@ -60,8 +60,8 @@ object SensorMain {
             ForegroundMonitor(
                 hostPackage = parsed.hostPackage,
                 handler = workerHandler,
-                onForegroundChanged = { pkg ->
-                    hubClient.send(SensorToHub.ForegroundChanged(packageName = pkg))
+                onForegroundChanged = { pkg, act ->
+                    hubClient.send(SensorToHub.ForegroundChanged(packageName = pkg, activityName = act))
                 },
             )
 
@@ -80,6 +80,7 @@ object SensorMain {
                             gestureMonitorActive = edgeMonitor.gestureMonitorActive,
                             overlayPermissionGranted = perms.overlayGranted,
                             foregroundPackage = foregroundMonitor.foregroundPackage,
+                            foregroundActivity = foregroundMonitor.foregroundActivity,
                         ),
                     )
                 },

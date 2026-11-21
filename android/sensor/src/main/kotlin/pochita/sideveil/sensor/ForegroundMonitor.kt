@@ -16,10 +16,14 @@ import java.lang.reflect.Proxy
 class ForegroundMonitor(
     private val hostPackage: String,
     private val handler: Handler = Handler(Looper.getMainLooper()),
-    private val onForegroundChanged: (String) -> Unit,
+    private val onForegroundChanged: (packageName: String, activityName: String) -> Unit,
 ) {
     @Volatile
     var foregroundPackage: String = ""
+        private set
+
+    @Volatile
+    var foregroundActivity: String = ""
         private set
 
     @Volatile
@@ -76,11 +80,12 @@ class ForegroundMonitor(
     }
 
     fun refreshNow(): String {
-        val detected = queryTopPackage()
-        if (detected.isNotBlank() && detected != foregroundPackage) {
-            foregroundPackage = detected
-            SensorLog.info("Foreground package changed -> $detected")
-            onForegroundChanged(detected)
+        val (pkg, act) = queryTopComponent()
+        if (pkg.isNotBlank() && (pkg != foregroundPackage || act != foregroundActivity)) {
+            foregroundPackage = pkg
+            foregroundActivity = act
+            SensorLog.info("Foreground changed -> $pkg/$act")
+            onForegroundChanged(pkg, act)
         }
         return foregroundPackage
     }
@@ -135,15 +140,15 @@ class ForegroundMonitor(
         }
     }
 
-    private fun queryTopPackage(): String {
+    private fun queryTopComponent(): Pair<String, String> {
         val fromTasks = queryViaAtmGetTasks()
-        if (fromTasks.isNotBlank()) {
+        if (fromTasks.first.isNotBlank()) {
             return fromTasks
         }
         return queryViaOplusWindowManager()
     }
 
-    private fun queryViaAtmGetTasks(): String =
+    private fun queryViaAtmGetTasks(): Pair<String, String> =
         runCatching {
             val atm =
                 atmService
@@ -152,7 +157,7 @@ class ForegroundMonitor(
                         .getMethod("getService")
                         .invoke(null)
                         ?.also { atmService = it }
-                    ?: return ""
+                    ?: return "" to ""
 
             val method =
                 getTasksMethod
@@ -173,38 +178,37 @@ class ForegroundMonitor(
                 val component: ComponentName = task.topActivity ?: task.baseActivity ?: continue
                 val pkg = component.packageName
                 if (pkg.isNotBlank() && pkg != hostPackage) {
-                    return@runCatching pkg
+                    return@runCatching pkg to component.shortClassName.orEmpty()
                 }
             }
-            ""
+            "" to ""
         }.onFailure { err ->
             SensorLog.warn("ATM.getTasks query failed", err)
-        }.getOrDefault("")
+        }.getOrDefault("" to "")
 
-    private fun queryViaOplusWindowManager(): String =
+    private fun queryViaOplusWindowManager(): Pair<String, String> =
         runCatching {
             val rawFocus = oplusFocusCaller?.invoke()
-            extractValidPackageName(rawFocus, hostPackage)
-        }.getOrDefault("")
+            extractValidComponent(rawFocus, hostPackage)
+        }.getOrDefault("" to "")
 
     companion object {
         private const val DEBOUNCE_MS = 50L
         private const val POLL_INTERVAL_MS = 2_000L
         private val PACKAGE_NAME_REGEX = Regex("^[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z0-9_]+)+$")
 
-        internal fun extractValidPackageName(
+        internal fun extractValidComponent(
             rawFocus: String?,
             hostPackage: String,
-        ): String {
-            if (rawFocus.isNullOrBlank()) return ""
-            val candidate =
-                rawFocus
-                    .trim()
-                    .substringBefore('/')
-                    .substringBefore(' ')
-                    .trim()
-            if (candidate.isEmpty() || candidate == hostPackage) return ""
-            return if (PACKAGE_NAME_REGEX.matches(candidate)) candidate else ""
+        ): Pair<String, String> {
+            if (rawFocus.isNullOrBlank()) return "" to ""
+            val trimmed = rawFocus.trim().substringBefore(' ').trim()
+            val pkg = trimmed.substringBefore('/').trim()
+            if (pkg.isEmpty() || pkg == hostPackage || !PACKAGE_NAME_REGEX.matches(pkg)) {
+                return "" to ""
+            }
+            val act = if (trimmed.contains('/')) trimmed.substringAfter('/').trim() else ""
+            return pkg to act
         }
     }
 }
