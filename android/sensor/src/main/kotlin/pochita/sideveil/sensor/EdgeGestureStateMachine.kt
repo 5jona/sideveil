@@ -1,11 +1,9 @@
 package pochita.sideveil.sensor
 
-import pochita.sideveil.protocol.DisplayGeometry
-import pochita.sideveil.protocol.EdgeConfig
 import pochita.sideveil.protocol.EdgeSide
 import pochita.sideveil.protocol.PanelState
-import pochita.sideveil.protocol.SideveilConfig
 import kotlin.math.abs
+import kotlin.math.hypot
 
 interface EdgeGestureCallbacks {
     fun onPilferPointers()
@@ -26,19 +24,44 @@ interface EdgeGestureCallbacks {
     fun onDragEnd(
         shouldOpen: Boolean,
         velocityPxPerSec: Float,
+        canceled: Boolean = false,
     )
+
+    fun onFullscreenHint(side: EdgeSide) {}
+
+    fun onEdgeRepositionStart(
+        side: EdgeSide,
+        topPercent: Int,
+    ) {}
+
+    fun onEdgeRepositionMove(
+        side: EdgeSide,
+        topPercent: Int,
+    ) {}
+
+    fun onEdgeRepositionEnd(
+        side: EdgeSide,
+        topPercent: Int,
+        committed: Boolean,
+    ) {}
+
+    fun onScheduleLongPress(pointerId: Int) {}
+
+    fun onCancelLongPress() {}
 }
 
 /**
  * Pure JVM edge-gesture state machine decoupled from Android MotionEvent / InputMonitor APIs.
  *
- * Tracks inward edge swipes inside the configured hotzone, rejects vertical scrolls and
- * pre-pilfer multi-touch ambiguity, throttles move updates (~125Hz), and zeros stale velocity
- * after finger pause before release.
+ * Supports inward swipe pilfering, vertical-scroll & multi-touch rejection, `240px` reverse-pull
+ * cancellation, optional fullscreen double-swipe anti-accidental trigger, and long-press edge
+ * handle repositioning.
  */
 class EdgeGestureStateMachine(
     private val callbacks: EdgeGestureCallbacks,
 ) {
+    private val repositionTracker = EdgeRepositionTracker()
+
     private var tracking = false
     private var pilfered = false
     private var activePointerId = INVALID_POINTER_ID
@@ -46,16 +69,22 @@ class EdgeGestureStateMachine(
     private var downX = 0f
     private var downY = 0f
     private var lastX = 0f
+    private var lastY = 0f
+    private var maxInwardDx = 0f
     private var lastEventTimeMs = 0L
     private var lastSignificantMoveTimeMs = 0L
     private var lastVelocityPxPerSec = 0f
     private var lastMoveEmitMs = 0L
+    private var lastFullscreenHintMs = Long.MIN_VALUE
 
     val isTracking: Boolean
         get() = tracking
 
     val isPilfered: Boolean
         get() = pilfered
+
+    val isRepositioning: Boolean
+        get() = repositionTracker.active
 
     val currentPointerId: Int
         get() = activePointerId
@@ -65,34 +94,56 @@ class EdgeGestureStateMachine(
         rawX: Float,
         rawY: Float,
         eventTimeMs: Long,
-        config: SideveilConfig,
-        geometry: DisplayGeometry,
-        scopeActive: Boolean,
-        panelState: PanelState,
+        env: EdgeGestureEnv,
     ) {
         reset(notifyAbortIfPilfered = true)
-        if (!scopeActive || panelState == PanelState.OPEN) {
+        if (!env.scopeActive || env.panelState == PanelState.OPEN) {
             return
         }
-        if (!isInsideHotzone(rawX, rawY, config.edge, geometry)) {
+        if (!EdgeGestureMath.isInsideHotzone(rawX, rawY, env.config.edge, env.geometry)) {
             return
         }
 
         tracking = true
         pilfered = false
         activePointerId = pointerId
-        activeEdge = config.edge.side
+        activeEdge = env.config.edge.side
         downX = rawX
         downY = rawY
         lastX = rawX
+        lastY = rawY
+        maxInwardDx = 0f
         lastEventTimeMs = eventTimeMs
         lastSignificantMoveTimeMs = eventTimeMs
         lastVelocityPxPerSec = 0f
         lastMoveEmitMs = 0L
+
+        if (env.config.edge.handleVisible) {
+            callbacks.onScheduleLongPress(pointerId)
+        }
+    }
+
+    fun onLongPressTimeout(
+        pointerId: Int,
+        env: EdgeGestureEnv,
+    ) {
+        val eligible = tracking && !pilfered && !repositionTracker.active
+        val envAllows = env.scopeActive && env.panelState != PanelState.OPEN && env.config.edge.handleVisible
+        if (!eligible || pointerId != activePointerId || !envAllows) {
+            return
+        }
+        val touchSlopPx = TOUCH_SLOP_DP * env.geometry.density
+        if (hypot((lastX - downX).toDouble(), (lastY - downY).toDouble()) > touchSlopPx) {
+            return
+        }
+        pilfered = true
+        callbacks.onPilferPointers()
+        val (side, topPercent) = repositionTracker.begin(env.config.edge, lastY, env.geometry)
+        callbacks.onEdgeRepositionStart(side, topPercent)
     }
 
     fun onPointerDown() {
-        // Multi-touch cancels edge gesture ambiguity unless already committed via pilferPointers().
+        callbacks.onCancelLongPress()
         if (tracking && !pilfered) {
             reset(notifyAbortIfPilfered = false)
         }
@@ -104,8 +155,7 @@ class EdgeGestureStateMachine(
         rawY: Float,
         eventTimeMs: Long,
         uptimeMs: Long,
-        config: SideveilConfig,
-        geometry: DisplayGeometry,
+        env: EdgeGestureEnv,
     ) {
         if (!tracking) return
         if (pointerId != activePointerId) {
@@ -113,14 +163,29 @@ class EdgeGestureStateMachine(
             return
         }
 
+        lastY = rawY
+        if (repositionTracker.active) {
+            repositionTracker.onMove(rawX, rawY, uptimeMs, env.config.edge, env.geometry)?.let { (side, top) ->
+                callbacks.onEdgeRepositionMove(side, top)
+            }
+            lastX = rawX
+            return
+        }
+
         val dx = rawX - downX
         val dy = rawY - downY
-        val inwardDx = inwardDelta(activeEdge, dx)
-        val touchSlopPx = TOUCH_SLOP_DP * geometry.density
+        val inwardDx = EdgeGestureMath.inwardDelta(activeEdge, dx)
+        val touchSlopPx = TOUCH_SLOP_DP * env.geometry.density
+        if (hypot(dx.toDouble(), dy.toDouble()) > touchSlopPx) {
+            callbacks.onCancelLongPress()
+        }
 
         updateVelocity(rawX, eventTimeMs)
-        if (!pilfered && !tryCommitPilfer(dx, dy, inwardDx, touchSlopPx, geometry)) {
+        if (!pilfered && !tryCommitPilfer(dx, dy, inwardDx, touchSlopPx, eventTimeMs, env)) {
             return
+        }
+        if (inwardDx > maxInwardDx) {
+            maxInwardDx = inwardDx
         }
 
         if (uptimeMs - lastMoveEmitMs < MOVE_THROTTLE_MS) {
@@ -128,7 +193,7 @@ class EdgeGestureStateMachine(
         }
         lastMoveEmitMs = uptimeMs
 
-        val panelWidthPx = (config.panel.widthDp * geometry.density).coerceAtLeast(MIN_PANEL_WIDTH_PX)
+        val panelWidthPx = (env.config.panel.widthDp * env.geometry.density).coerceAtLeast(MIN_PANEL_WIDTH_PX)
         val progress = ((inwardDx - touchSlopPx) / panelWidthPx).coerceIn(0f, MAX_PROGRESS)
         callbacks.onDragMove(
             side = activeEdge,
@@ -143,11 +208,10 @@ class EdgeGestureStateMachine(
         liftedPointerId: Int,
         rawX: Float,
         eventTimeMs: Long,
-        config: SideveilConfig,
-        geometry: DisplayGeometry,
+        env: EdgeGestureEnv,
     ) {
         if (tracking && liftedPointerId == activePointerId) {
-            onUpOrCancel(rawX, eventTimeMs, canceled = false, config = config, geometry = geometry)
+            onUpOrCancel(rawX, eventTimeMs, canceled = false, env = env)
         }
     }
 
@@ -155,44 +219,73 @@ class EdgeGestureStateMachine(
         rawX: Float?,
         eventTimeMs: Long,
         canceled: Boolean,
-        config: SideveilConfig,
-        geometry: DisplayGeometry,
+        env: EdgeGestureEnv,
     ) {
+        callbacks.onCancelLongPress()
         if (!tracking) return
+        if (repositionTracker.active) {
+            repositionTracker.finish()?.let { (side, top) ->
+                callbacks.onEdgeRepositionEnd(side, top, committed = !canceled)
+            }
+            pilfered = false
+            reset(notifyAbortIfPilfered = false)
+            return
+        }
         if (pilfered) {
             pilfered = false
             val finalX = rawX ?: lastX
-            val inwardDx = inwardDelta(activeEdge, finalX - downX)
-            val triggerDistPx = config.edge.triggerDistanceDp * geometry.density
+            val inwardDx = EdgeGestureMath.inwardDelta(activeEdge, finalX - downX)
+            val triggerDistPx = env.config.edge.triggerDistanceDp * env.geometry.density
+            val panelWidthPx = (env.config.panel.widthDp * env.geometry.density).coerceAtLeast(MIN_PANEL_WIDTH_PX)
             val releaseVelocity =
-                resolveReleaseVelocity(
+                EdgeGestureMath.resolveReleaseVelocity(
                     trackedVelocityPxPerSec = lastVelocityPxPerSec,
                     lastSignificantMoveTimeMs = lastSignificantMoveTimeMs,
                     upEventTimeMs = eventTimeMs,
                 )
+            val reverseCanceled =
+                EdgeGestureMath.isReversePullCanceled(
+                    inwardDx = inwardDx,
+                    maxInwardDx = maxInwardDx,
+                    releaseVelocityPxPerSec = releaseVelocity,
+                    panelWidthPx = panelWidthPx,
+                    touchSlopPx = TOUCH_SLOP_DP * env.geometry.density,
+                )
             val shouldOpen =
                 !canceled &&
-                    (inwardDx >= triggerDistPx || releaseVelocity >= FLING_OPEN_VELOCITY_PX_PER_SEC)
-            callbacks.onDragEnd(shouldOpen = shouldOpen, velocityPxPerSec = releaseVelocity)
+                    !reverseCanceled &&
+                    (inwardDx >= triggerDistPx || releaseVelocity >= EdgeGestureMath.FLING_OPEN_VELOCITY_PX_PER_SEC)
+            callbacks.onDragEnd(
+                shouldOpen = shouldOpen,
+                velocityPxPerSec = releaseVelocity,
+                canceled = canceled || reverseCanceled,
+            )
         }
         reset(notifyAbortIfPilfered = false)
     }
 
     fun onScopeInactive() {
+        callbacks.onCancelLongPress()
         if (tracking && !pilfered) {
             reset(notifyAbortIfPilfered = false)
         }
     }
 
     fun reset(notifyAbortIfPilfered: Boolean = true) {
+        callbacks.onCancelLongPress()
+        val wasRepositioning = repositionTracker.active
+        val finishedReposition = repositionTracker.finish()
         val wasPilfered = pilfered
         tracking = false
         pilfered = false
         activePointerId = INVALID_POINTER_ID
+        maxInwardDx = 0f
         lastSignificantMoveTimeMs = 0L
         lastVelocityPxPerSec = 0f
-        if (notifyAbortIfPilfered && wasPilfered) {
-            callbacks.onDragEnd(shouldOpen = false, velocityPxPerSec = 0f)
+        if (notifyAbortIfPilfered && wasRepositioning && finishedReposition != null) {
+            callbacks.onEdgeRepositionEnd(finishedReposition.first, finishedReposition.second, committed = false)
+        } else if (notifyAbortIfPilfered && wasPilfered) {
+            callbacks.onDragEnd(shouldOpen = false, velocityPxPerSec = 0f, canceled = true)
         }
     }
 
@@ -201,13 +294,13 @@ class EdgeGestureStateMachine(
         eventTimeMs: Long,
     ) {
         val rawDtMs = eventTimeMs - lastEventTimeMs
-        val stepInward = inwardDelta(activeEdge, rawX - lastX)
+        val stepInward = EdgeGestureMath.inwardDelta(activeEdge, rawX - lastX)
         if (rawDtMs > 0L) {
             val dtMs = rawDtMs.coerceAtLeast(MIN_VELOCITY_DT_MS)
             val instantVelocity =
                 ((stepInward * 1000f) / dtMs.toFloat()).coerceIn(-MAX_VELOCITY_PX_PER_SEC, MAX_VELOCITY_PX_PER_SEC)
             val baseVelocity =
-                if (eventTimeMs - lastSignificantMoveTimeMs > STALE_VELOCITY_WINDOW_MS) {
+                if (eventTimeMs - lastSignificantMoveTimeMs > EdgeGestureMath.STALE_VELOCITY_WINDOW_MS) {
                     0f
                 } else {
                     lastVelocityPxPerSec
@@ -226,26 +319,45 @@ class EdgeGestureStateMachine(
         dy: Float,
         inwardDx: Float,
         touchSlopPx: Float,
-        geometry: DisplayGeometry,
+        eventTimeMs: Long,
+        env: EdgeGestureEnv,
     ): Boolean {
         if (abs(dy) > touchSlopPx && abs(dy) > abs(dx) * VERTICAL_SLOPE_REJECT_RATIO) {
             reset(notifyAbortIfPilfered = false)
             return false
         }
-        if (inwardDx > touchSlopPx && inwardDx > abs(dy)) {
-            pilfered = true
-            callbacks.onPilferPointers()
-            val startYFraction = (downY / geometry.heightPx.coerceAtLeast(1).toFloat()).coerceIn(0f, 1f)
-            callbacks.onDragStart(activeEdge, startYFraction)
-            return true
+        if (inwardDx <= touchSlopPx || inwardDx <= abs(dy)) {
+            return false
         }
-        return false
+        if (env.fullscreenActive && env.config.edge.doubleSwipeInFullscreen) {
+            val withinWindow =
+                lastFullscreenHintMs != Long.MIN_VALUE &&
+                    eventTimeMs - lastFullscreenHintMs in 0..DOUBLE_SWIPE_WINDOW_MS
+            if (!withinWindow) {
+                lastFullscreenHintMs = eventTimeMs
+                callbacks.onFullscreenHint(activeEdge)
+                reset(notifyAbortIfPilfered = false)
+                return false
+            }
+            lastFullscreenHintMs = Long.MIN_VALUE
+        }
+        pilfered = true
+        callbacks.onPilferPointers()
+        val startYFraction =
+            (
+                downY /
+                    env.geometry.heightPx
+                        .coerceAtLeast(1)
+                        .toFloat()
+            ).coerceIn(0f, 1f)
+        callbacks.onDragStart(activeEdge, startYFraction)
+        return true
     }
 
     companion object {
         const val INVALID_POINTER_ID = -1
-        const val STALE_VELOCITY_WINDOW_MS = 64L
-        const val FLING_OPEN_VELOCITY_PX_PER_SEC = 450f
+        const val DOUBLE_SWIPE_WINDOW_MS = 1500L
+        const val LONG_PRESS_TIMEOUT_MS = 450L
         private const val TOUCH_SLOP_DP = 10f
         private const val MOVE_THROTTLE_MS = 8L
         private const val MIN_PANEL_WIDTH_PX = 120f
@@ -254,42 +366,5 @@ class EdgeGestureStateMachine(
         private const val MAX_VELOCITY_PX_PER_SEC = 12_000f
         private const val SIGNIFICANT_MOVE_PX = 0.5f
         private const val VERTICAL_SLOPE_REJECT_RATIO = 1.15f
-
-        fun inwardDelta(
-            side: EdgeSide,
-            dx: Float,
-        ): Float = if (side == EdgeSide.RIGHT) -dx else dx
-
-        fun isInsideHotzone(
-            rawX: Float,
-            rawY: Float,
-            edge: EdgeConfig,
-            geometry: DisplayGeometry,
-        ): Boolean {
-            val hotzoneWidthPx = edge.hotzoneWidthDp * geometry.density
-            val xMatch =
-                when (edge.side) {
-                    EdgeSide.LEFT -> rawX in 0f..hotzoneWidthPx
-                    EdgeSide.RIGHT -> rawX in (geometry.widthPx - hotzoneWidthPx)..geometry.widthPx.toFloat()
-                }
-            if (!xMatch) return false
-
-            val heightPx = edge.heightDp * geometry.density
-            val maxTop = (geometry.heightPx - heightPx).coerceAtLeast(0f)
-            val topPx = ((edge.topPercent / 100f) * geometry.heightPx).coerceIn(0f, maxTop)
-            return rawY in topPx..(topPx + heightPx)
-        }
-
-        fun resolveReleaseVelocity(
-            trackedVelocityPxPerSec: Float,
-            lastSignificantMoveTimeMs: Long,
-            upEventTimeMs: Long,
-            staleWindowMs: Long = STALE_VELOCITY_WINDOW_MS,
-        ): Float =
-            if (upEventTimeMs - lastSignificantMoveTimeMs > staleWindowMs) {
-                0f
-            } else {
-                trackedVelocityPxPerSec
-            }
     }
 }

@@ -83,6 +83,35 @@ sealed interface SensorToHub {
     data class GestureDragEnd(
         val shouldOpen: Boolean,
         val velocityPxPerSec: Float,
+        val canceled: Boolean = false,
+    ) : SensorToHub
+
+    @Serializable
+    @SerialName("gestureFullscreenHint")
+    data class GestureFullscreenHint(
+        val side: EdgeSide,
+    ) : SensorToHub
+
+    @Serializable
+    @SerialName("edgeRepositionStart")
+    data class EdgeRepositionStart(
+        val side: EdgeSide,
+        val topPercent: Int,
+    ) : SensorToHub
+
+    @Serializable
+    @SerialName("edgeRepositionMove")
+    data class EdgeRepositionMove(
+        val side: EdgeSide,
+        val topPercent: Int,
+    ) : SensorToHub
+
+    @Serializable
+    @SerialName("edgeRepositionEnd")
+    data class EdgeRepositionEnd(
+        val side: EdgeSide,
+        val topPercent: Int,
+        val committed: Boolean,
     ) : SensorToHub
 
     @Serializable
@@ -104,6 +133,7 @@ sealed interface HubToSensor {
         val config: SideveilConfig,
         val scopeActive: Boolean,
         val panelState: PanelState,
+        val fullscreenActive: Boolean = false,
     ) : HubToSensor
 
     @Serializable

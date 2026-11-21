@@ -134,8 +134,35 @@ object SensorMain {
                     override fun onDragEnd(
                         shouldOpen: Boolean,
                         velocityPxPerSec: Float,
+                        canceled: Boolean,
                     ) {
-                        clientProvider().send(SensorToHub.GestureDragEnd(shouldOpen, velocityPxPerSec))
+                        clientProvider().send(SensorToHub.GestureDragEnd(shouldOpen, velocityPxPerSec, canceled))
+                    }
+
+                    override fun onFullscreenHint(side: EdgeSide) {
+                        clientProvider().send(SensorToHub.GestureFullscreenHint(side))
+                    }
+
+                    override fun onEdgeRepositionStart(
+                        side: EdgeSide,
+                        topPercent: Int,
+                    ) {
+                        clientProvider().send(SensorToHub.EdgeRepositionStart(side, topPercent))
+                    }
+
+                    override fun onEdgeRepositionMove(
+                        side: EdgeSide,
+                        topPercent: Int,
+                    ) {
+                        clientProvider().send(SensorToHub.EdgeRepositionMove(side, topPercent))
+                    }
+
+                    override fun onEdgeRepositionEnd(
+                        side: EdgeSide,
+                        topPercent: Int,
+                        committed: Boolean,
+                    ) {
+                        clientProvider().send(SensorToHub.EdgeRepositionEnd(side, topPercent, committed))
                     }
 
                     override fun onDisplayChanged(geometry: DisplayGeometry) {
@@ -157,6 +184,7 @@ object SensorMain {
                     nextConfig = message.config,
                     nextScopeActive = message.scopeActive,
                     nextPanelState = message.panelState,
+                    nextFullscreenActive = message.fullscreenActive,
                 )
             }
 

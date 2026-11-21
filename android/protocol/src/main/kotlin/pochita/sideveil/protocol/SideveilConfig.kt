@@ -45,6 +45,8 @@ data class EdgeConfig(
     val handleVisible: Boolean = true,
     val handleOpacity: Float = 0.62f,
     val dimInFullscreen: Boolean = true,
+    val doubleSwipeInFullscreen: Boolean = false,
+    val idleAutoDimMs: Int = 3500,
 ) {
     fun sanitized(): EdgeConfig =
         copy(
@@ -54,6 +56,7 @@ data class EdgeConfig(
             triggerDistanceDp = triggerDistanceDp.coerceIn(18, 96),
             edgeOffsetDp = edgeOffsetDp.coerceIn(0, 24),
             handleOpacity = handleOpacity.coerceIn(0.1f, 1.0f),
+            idleAutoDimMs = idleAutoDimMs.coerceIn(0, 30_000),
         )
 }
 

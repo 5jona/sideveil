@@ -1,14 +1,12 @@
 package pochita.sideveil.sensor
 
 import android.content.Context
-import android.hardware.display.DisplayManager
 import android.hardware.input.InputManagerGlobal
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
 import android.os.Process
 import android.os.SystemClock
-import android.util.DisplayMetrics
 import android.view.Display
 import android.view.InputDevice
 import android.view.InputEvent
@@ -37,6 +35,25 @@ interface EdgeGestureListener {
     fun onDragEnd(
         shouldOpen: Boolean,
         velocityPxPerSec: Float,
+        canceled: Boolean,
+    )
+
+    fun onFullscreenHint(side: EdgeSide)
+
+    fun onEdgeRepositionStart(
+        side: EdgeSide,
+        topPercent: Int,
+    )
+
+    fun onEdgeRepositionMove(
+        side: EdgeSide,
+        topPercent: Int,
+    )
+
+    fun onEdgeRepositionEnd(
+        side: EdgeSide,
+        topPercent: Int,
+        committed: Boolean,
     )
 
     fun onDisplayChanged(geometry: DisplayGeometry)
@@ -55,9 +72,13 @@ class EdgeGestureMonitor(
     var gestureMonitorActive: Boolean = false
         private set
 
-    @Volatile
-    var geometry: DisplayGeometry = DisplayGeometry()
-        private set
+    private val displayWatcher =
+        DisplayGeometryWatcher(systemContext, handler) { updated ->
+            listener.onDisplayChanged(updated)
+        }
+
+    val geometry: DisplayGeometry
+        get() = displayWatcher.geometry
 
     @Volatile
     private var config: SideveilConfig = SideveilConfig.DEFAULT
@@ -68,14 +89,16 @@ class EdgeGestureMonitor(
     @Volatile
     private var panelState: PanelState = PanelState.CLOSED
 
-    private var displayManager: DisplayManager? = null
-    private var displayListener: DisplayManager.DisplayListener? = null
+    @Volatile
+    private var fullscreenActive: Boolean = false
+
     private var inputThread: HandlerThread? = null
     private var inputHandler: Handler? = null
     private var inputMonitor: InputMonitor? = null
     private var inputReceiver: InputEventReceiver? = null
+    private var pendingLongPress: Runnable? = null
 
-    private val stateMachine =
+    private val stateMachine: EdgeGestureStateMachine =
         EdgeGestureStateMachine(
             object : EdgeGestureCallbacks {
                 override fun onPilferPointers() {
@@ -99,7 +122,41 @@ class EdgeGestureMonitor(
                 override fun onDragEnd(
                     shouldOpen: Boolean,
                     velocityPxPerSec: Float,
-                ) = listener.onDragEnd(shouldOpen, velocityPxPerSec)
+                    canceled: Boolean,
+                ) = listener.onDragEnd(shouldOpen, velocityPxPerSec, canceled)
+
+                override fun onFullscreenHint(side: EdgeSide) = listener.onFullscreenHint(side)
+
+                override fun onEdgeRepositionStart(
+                    side: EdgeSide,
+                    topPercent: Int,
+                ) = listener.onEdgeRepositionStart(side, topPercent)
+
+                override fun onEdgeRepositionMove(
+                    side: EdgeSide,
+                    topPercent: Int,
+                ) = listener.onEdgeRepositionMove(side, topPercent)
+
+                override fun onEdgeRepositionEnd(
+                    side: EdgeSide,
+                    topPercent: Int,
+                    committed: Boolean,
+                ) = listener.onEdgeRepositionEnd(side, topPercent, committed)
+
+                override fun onScheduleLongPress(pointerId: Int) {
+                    cancelPendingLongPress()
+                    val runnable =
+                        Runnable {
+                            pendingLongPress = null
+                            stateMachine.onLongPressTimeout(pointerId, currentEnv())
+                        }
+                    pendingLongPress = runnable
+                    inputHandler?.postDelayed(runnable, EdgeGestureStateMachine.LONG_PRESS_TIMEOUT_MS)
+                }
+
+                override fun onCancelLongPress() {
+                    cancelPendingLongPress()
+                }
             },
         )
 
@@ -113,8 +170,7 @@ class EdgeGestureMonitor(
             inputThread = thread
             inputHandler = Handler(thread.looper)
         }
-        refreshDisplayGeometry(notify = false)
-        registerDisplayWatcher()
+        displayWatcher.start()
         openInputMonitor()
     }
 
@@ -122,10 +178,12 @@ class EdgeGestureMonitor(
         nextConfig: SideveilConfig,
         nextScopeActive: Boolean,
         nextPanelState: PanelState,
+        nextFullscreenActive: Boolean = fullscreenActive,
     ) {
         config = nextConfig
         scopeActive = nextScopeActive
         panelState = nextPanelState
+        fullscreenActive = nextFullscreenActive
         if (!nextScopeActive) {
             val dispatcher = inputHandler
             if (dispatcher != null && dispatcher.looper != Looper.myLooper()) {
@@ -141,9 +199,7 @@ class EdgeGestureMonitor(
     }
 
     fun stop() {
-        displayListener?.let { dl -> displayManager?.unregisterDisplayListener(dl) }
-        displayListener = null
-        displayManager = null
+        displayWatcher.stop()
 
         runCatching { inputReceiver?.dispose() }
         inputReceiver = null
@@ -151,6 +207,7 @@ class EdgeGestureMonitor(
         runCatching { inputMonitor?.dispose() }
         inputMonitor = null
 
+        pendingLongPress = null
         inputHandler?.removeCallbacksAndMessages(null)
         inputHandler = null
 
@@ -159,74 +216,6 @@ class EdgeGestureMonitor(
 
         gestureMonitorActive = false
         stateMachine.reset(notifyAbortIfPilfered = true)
-    }
-
-    private fun registerDisplayWatcher() {
-        val dm = systemContext.getSystemService(DisplayManager::class.java) ?: return
-        displayManager = dm
-        val dl =
-            object : DisplayManager.DisplayListener {
-                override fun onDisplayAdded(displayId: Int) = Unit
-
-                override fun onDisplayRemoved(displayId: Int) = Unit
-
-                override fun onDisplayChanged(displayId: Int) {
-                    if (displayId == Display.DEFAULT_DISPLAY) {
-                        refreshDisplayGeometry(notify = true)
-                    }
-                }
-            }
-        dm.registerDisplayListener(dl, handler)
-        displayListener = dl
-    }
-
-    private fun refreshDisplayGeometry(notify: Boolean) {
-        val updated = queryDisplayGeometry()
-        if (updated != geometry) {
-            geometry = updated
-            SensorLog.info("Display geometry: ${updated.widthPx}x${updated.heightPx} density=${updated.density}")
-            if (notify) {
-                listener.onDisplayChanged(updated)
-            }
-        }
-    }
-
-    private fun queryDisplayGeometry(): DisplayGeometry {
-        val fromGlobal =
-            runCatching {
-                val dmgClass = Class.forName("android.hardware.display.DisplayManagerGlobal")
-                val dmg = dmgClass.getMethod("getInstance").invoke(null)
-                val info =
-                    dmgClass
-                        .getMethod("getDisplayInfo", Int::class.javaPrimitiveType)
-                        .invoke(dmg, Display.DEFAULT_DISPLAY)
-                if (info != null) {
-                    val w = info.javaClass.getField("logicalWidth").getInt(info)
-                    val h = info.javaClass.getField("logicalHeight").getInt(info)
-                    val dpi = info.javaClass.getField("logicalDensityDpi").getInt(info)
-                    if (w > 0 && h > 0 && dpi > 0) {
-                        return@runCatching DisplayGeometry(w, h, dpi / 160f)
-                    }
-                }
-                null
-            }.getOrNull()
-        if (fromGlobal != null) {
-            return fromGlobal
-        }
-
-        val metrics = DisplayMetrics()
-        val display =
-            systemContext
-                .getSystemService(DisplayManager::class.java)
-                ?.getDisplay(Display.DEFAULT_DISPLAY)
-        if (display != null) {
-            @Suppress("DEPRECATION")
-            display.getRealMetrics(metrics)
-            if (metrics.widthPixels > 0 && metrics.heightPixels > 0) {
-                return DisplayGeometry(metrics.widthPixels, metrics.heightPixels, metrics.density)
-            }
-        }
-        return geometry
     }
 
     private fun openInputMonitor() {
@@ -264,8 +253,7 @@ class EdgeGestureMonitor(
         if ((event.source and InputDevice.SOURCE_TOUCHSCREEN) == 0) {
             return
         }
-        val cfg = config
-        val geo = geometry
+        val env = currentEnv()
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 stateMachine.onDown(
@@ -273,10 +261,7 @@ class EdgeGestureMonitor(
                     rawX = event.rawX,
                     rawY = event.rawY,
                     eventTimeMs = event.eventTime,
-                    config = cfg,
-                    geometry = geo,
-                    scopeActive = scopeActive,
-                    panelState = panelState,
+                    env = env,
                 )
             }
 
@@ -285,7 +270,7 @@ class EdgeGestureMonitor(
             }
 
             MotionEvent.ACTION_MOVE -> {
-                dispatchMove(event, cfg, geo)
+                dispatchMove(event, env)
             }
 
             MotionEvent.ACTION_POINTER_UP -> {
@@ -294,8 +279,7 @@ class EdgeGestureMonitor(
                     liftedPointerId = event.getPointerId(idx),
                     rawX = event.getRawX(idx),
                     eventTimeMs = event.eventTime,
-                    config = cfg,
-                    geometry = geo,
+                    env = env,
                 )
             }
 
@@ -304,8 +288,7 @@ class EdgeGestureMonitor(
                     rawX = event.rawX,
                     eventTimeMs = event.eventTime,
                     canceled = false,
-                    config = cfg,
-                    geometry = geo,
+                    env = env,
                 )
             }
 
@@ -314,8 +297,7 @@ class EdgeGestureMonitor(
                     rawX = null,
                     eventTimeMs = event.eventTime,
                     canceled = true,
-                    config = cfg,
-                    geometry = geo,
+                    env = env,
                 )
             }
         }
@@ -323,8 +305,7 @@ class EdgeGestureMonitor(
 
     private fun dispatchMove(
         event: MotionEvent,
-        cfg: SideveilConfig,
-        geo: DisplayGeometry,
+        env: EdgeGestureEnv,
     ) {
         if (!stateMachine.isTracking) return
         val activeId = stateMachine.currentPointerId
@@ -339,8 +320,21 @@ class EdgeGestureMonitor(
             rawY = event.getRawY(pointerIndex),
             eventTimeMs = event.eventTime,
             uptimeMs = SystemClock.uptimeMillis(),
-            config = cfg,
-            geometry = geo,
+            env = env,
         )
+    }
+
+    private fun currentEnv(): EdgeGestureEnv =
+        EdgeGestureEnv(
+            config = config,
+            geometry = geometry,
+            scopeActive = scopeActive,
+            panelState = panelState,
+            fullscreenActive = fullscreenActive,
+        )
+
+    private fun cancelPendingLongPress() {
+        pendingLongPress?.let { inputHandler?.removeCallbacks(it) }
+        pendingLongPress = null
     }
 }

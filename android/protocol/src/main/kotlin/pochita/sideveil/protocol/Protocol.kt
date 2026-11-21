@@ -10,8 +10,11 @@ object SideveilEvents {
     const val GESTURE_DRAG_START = "gesture.dragStart"
     const val GESTURE_DRAG_MOVE = "gesture.dragMove"
     const val GESTURE_DRAG_END = "gesture.dragEnd"
+    const val GESTURE_FULLSCREEN_HINT = "gesture.fullscreenHint"
+    const val EDGE_REPOSITION = "edge.reposition"
     const val PANEL_COMMAND = "panel.command"
     const val HOST_HELLO = "host.hello"
+    const val HOST_FULLSCREEN_CHANGED = "host.fullscreenChanged"
     const val HOST_SELECT_PLUGIN = "host.selectPlugin"
     const val PANEL_STATE_CHANGED = "panel.stateChanged"
     const val PANEL_VISIBILITY = "panel.visibility"
@@ -28,6 +31,7 @@ object SideveilMethods {
     const val DAEMON_LOGS = "daemon.logs"
     const val CONFIG_GET = "config.get"
     const val CONFIG_PATCH_APPEARANCE = "config.patchAppearance"
+    const val CONFIG_PATCH_EDGE = "config.patchEdge"
     const val CONFIG_RELOAD = "config.reload"
     const val PANEL_OPEN = "panel.open"
     const val PANEL_CLOSE = "panel.close"
@@ -36,6 +40,8 @@ object SideveilMethods {
     const val CONTAINER_ACTION = "container.action"
     const val PLUGINS_LIST = "plugins.list"
     const val PLUGINS_RELOAD = "plugins.reload"
+    const val PLUGINS_SET_ENABLED = "plugins.setEnabled"
+    const val PLUGINS_SET_PRIORITY = "plugins.setPriority"
     const val PLUGIN_INVOKE = "plugin.invoke"
     const val UI_TOAST = "ui.toast"
 }
@@ -146,6 +152,37 @@ data class GestureDragMovePayload(
 data class GestureDragEndPayload(
     val shouldOpen: Boolean,
     val velocityPxPerSec: Float,
+    val canceled: Boolean = false,
+)
+
+@Serializable
+data class GestureFullscreenHintPayload(
+    val side: EdgeSide,
+)
+
+@Serializable
+enum class EdgeRepositionPhase {
+    @SerialName("start")
+    START,
+
+    @SerialName("move")
+    MOVE,
+
+    @SerialName("end")
+    END,
+}
+
+@Serializable
+data class EdgeRepositionPayload(
+    val phase: EdgeRepositionPhase,
+    val side: EdgeSide,
+    val topPercent: Int,
+    val committed: Boolean = false,
+)
+
+@Serializable
+data class HostFullscreenChangedPayload(
+    val fullscreen: Boolean,
 )
 
 @Serializable
