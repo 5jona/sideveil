@@ -9,6 +9,7 @@ import {
     Bell,
     CheckCircle2,
     FolderLock,
+    Gauge,
     Globe,
     Pencil,
     Play,
@@ -72,6 +73,16 @@ function renderCapabilityBadge(cap: PluginCapability) {
                 >
                     <Terminal className="size-3 text-[var(--danger)]" />
                     Root 执行
+                </span>
+            );
+        case 'native-hud':
+            return (
+                <span
+                    key={cap}
+                    className="inline-flex items-center gap-1 rounded bg-[var(--surface-elevated)] px-1.5 py-0.5 text-[11px] text-[var(--text-secondary)]"
+                >
+                    <Gauge className="size-3 text-[var(--success)]" />
+                    原生 HUD
                 </span>
             );
         default:

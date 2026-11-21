@@ -1,5 +1,9 @@
 import { type BridgeOptions, type ContainerAction, useContainerThemeSync } from '@pochita/bridge';
-import { BUILTIN_DIAG_PLUGIN_ID, SideveilPluginProvider } from '@pochita/sideveil-sdk';
+import {
+  BUILTIN_DIAG_PLUGIN_ID,
+  SideveilPluginProvider,
+  useDynamicThemeTokens,
+} from '@pochita/sideveil-sdk';
 import {
   AppShell,
   Badge,
@@ -57,6 +61,8 @@ function PanelWorkbench({
     handleToggleBlur,
     handleImeFocus,
   } = useDiagnosticPanel({ onAppendLog, onHydrated });
+
+  useDynamicThemeTokens(isNativeHost);
 
   const fgPkg = status?.foregroundPackage || 'me.weishu.kernelsu';
   const shortPkg = fgPkg.split('.').slice(-1)[0] || fgPkg;
