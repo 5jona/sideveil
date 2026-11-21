@@ -318,6 +318,50 @@ export async function handleMockControlExec(cmd: string): Promise<ExecResult> {
     };
   }
 
+  const devMatch = normalized.match(/sideveil-ctl plugins dev ([^\s]+) ([^\s]+)/);
+  if (devMatch) {
+    const targetId = devMatch[1];
+    const arg = devMatch[2];
+    const nextUrl = arg === '--clear' ? undefined : arg;
+    mockState.plugins = mockState.plugins.map((p) =>
+      p.id === targetId ? { ...p, devServerUrl: nextUrl } : p,
+    );
+    appendMockLog(`Plugin ${targetId} devServerUrl -> ${nextUrl ?? 'cleared'}`);
+    return {
+      errno: 0,
+      stdout: JSON.stringify(getMockSnapshot()),
+      stderr: '',
+    };
+  }
+
+  if (normalized.includes('sideveil-ctl plugins audit')) {
+    return {
+      errno: 0,
+      stdout: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'mock-audit',
+        result: {
+          entries: [
+            {
+              timestampMs: Date.now() - 4000,
+              pluginId: 'com.gamer.hud',
+              action: 'telemetry.snapshot',
+              allowed: true,
+              detail: 'sampled /proc/stat',
+            },
+          ],
+          diagnostics: {
+            warmPluginIds: ['sideveil.diagnostic', 'com.gamer.hud'],
+            activeHudPluginId: 'com.gamer.hud',
+            hostNativeHeapKb: 16384,
+            hostPssKb: 54200,
+          },
+        },
+      }),
+      stderr: '',
+    };
+  }
+
   const selectMatch = normalized.match(/sideveil-ctl plugins select ([^\s]+)/);
   if (selectMatch) {
     const targetId = selectMatch[1];

@@ -1,5 +1,5 @@
 import { type BridgeClient, shellQuote } from '@pochita/bridge';
-import type { PluginsSnapshotPayload } from '@pochita/sideveil-sdk';
+import type { PluginAuditReport, PluginsSnapshotPayload } from '@pochita/sideveil-sdk';
 import { useCallback, useState } from 'react';
 import { CTL_BIN } from '../../shared/types.ts';
 
@@ -51,6 +51,7 @@ export function buildPluginScopeCommand(
 
 export function usePluginsControl(bridge: BridgeClient, pushToast: PushToast) {
   const [pluginsSnapshot, setPluginsSnapshot] = useState<PluginsSnapshotPayload | null>(null);
+  const [auditReport, setAuditReport] = useState<PluginAuditReport | null>(null);
   const [pluginBusyAction, setPluginBusyAction] = useState<string | null>(null);
 
   const refreshPlugins = useCallback(async () => {
@@ -193,14 +194,68 @@ export function usePluginsControl(bridge: BridgeClient, pushToast: PushToast) {
     [bridge, pushToast, refreshPlugins],
   );
 
+  const setPluginDevUrl = useCallback(
+    async (pluginId: string, devServerUrl: string | null) => {
+      setPluginBusyAction(`plugin-${pluginId}`);
+      try {
+        const arg = devServerUrl ? shellQuote(devServerUrl) : '--clear';
+        const res = await bridge.exec(
+          `${shellQuote(CTL_BIN)} plugins dev ${shellQuote(pluginId)} ${arg}`,
+        );
+        if (res.errno === 0) {
+          pushToast(
+            devServerUrl
+              ? `插件 ${pluginId} 已启用开发模式 (${devServerUrl})`
+              : `插件 ${pluginId} 已退出开发模式`,
+            'success',
+          );
+          await applySnapshotOrRefresh(res.stdout);
+        } else {
+          pushToast(`设置开发模式失败: ${res.stderr || res.stdout}`, 'warning');
+        }
+      } catch (err) {
+        pushToast(
+          `设置开发模式失败: ${err instanceof Error ? err.message : String(err)}`,
+          'warning',
+        );
+      } finally {
+        setPluginBusyAction(null);
+      }
+    },
+    [applySnapshotOrRefresh, bridge, pushToast],
+  );
+
+  const refreshPluginAudit = useCallback(async () => {
+    setPluginBusyAction('audit');
+    try {
+      const res = await bridge.exec(`${shellQuote(CTL_BIN)} plugins audit`);
+      if (res.errno === 0 && res.stdout.trim()) {
+        const parsed = JSON.parse(res.stdout.trim()) as
+          | PluginAuditReport
+          | { result?: PluginAuditReport };
+        const candidate = 'result' in parsed && parsed.result ? parsed.result : parsed;
+        if (candidate && 'diagnostics' in candidate) {
+          setAuditReport(candidate as PluginAuditReport);
+        }
+      }
+    } catch {
+      // Ignore transient audit failures.
+    } finally {
+      setPluginBusyAction(null);
+    }
+  }, [bridge]);
+
   return {
     pluginsSnapshot,
+    auditReport,
     pluginBusyAction,
     refreshPlugins,
     reloadPlugins,
     setPluginEnabled,
     setPluginPriority,
     setPluginScopeOverride,
+    setPluginDevUrl,
+    refreshPluginAudit,
     selectPlugin,
   };
 }

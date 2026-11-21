@@ -42,12 +42,15 @@ export function useSideveilControl() {
 
   const {
     pluginsSnapshot,
+    auditReport,
     pluginBusyAction,
     refreshPlugins,
     reloadPlugins,
     setPluginEnabled,
     setPluginPriority,
     setPluginScopeOverride,
+    setPluginDevUrl,
+    refreshPluginAudit,
     selectPlugin,
   } = usePluginsControl(bridge, pushToast);
 
@@ -277,6 +280,7 @@ export function useSideveilControl() {
     status,
     logs,
     pluginsSnapshot,
+    auditReport,
     busyAction,
     lastPingMs,
     saving,
@@ -291,6 +295,8 @@ export function useSideveilControl() {
     setPluginEnabled,
     setPluginPriority,
     setPluginScopeOverride,
+    setPluginDevUrl,
+    refreshPluginAudit,
     selectPlugin,
     runCtl,
     clearLogs,

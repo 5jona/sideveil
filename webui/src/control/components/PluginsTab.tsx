@@ -1,30 +1,39 @@
-import type { PluginsSnapshotPayload } from '@pochita/sideveil-sdk';
+import type { PluginAuditReport, PluginsSnapshotPayload } from '@pochita/sideveil-sdk';
 import { Button, Card, MetricTile } from '@pochita/ui';
-import { Boxes, Layers, RefreshCw, Sparkles } from 'lucide-react';
+import { Boxes, Layers, RefreshCw, Shield, Sparkles } from 'lucide-react';
+import { useState } from 'react';
 import type { PluginScopeOverrideInput } from '../hooks/usePluginsControl.ts';
+import { PluginAuditDrawer } from './PluginAuditDrawer.tsx';
 import { PluginCard } from './PluginCard.tsx';
 
 export interface PluginsTabProps {
   snapshot: PluginsSnapshotPayload | null;
+  auditReport: PluginAuditReport | null;
   busyAction: string | null;
   foregroundPackage: string;
   onReload: () => Promise<void>;
   onSetEnabled: (pluginId: string, enabled: boolean) => Promise<void>;
   onSetPriority: (pluginId: string, priority: number) => Promise<void>;
   onSetScopeOverride: (pluginId: string, override: PluginScopeOverrideInput) => Promise<void>;
+  onSetDevUrl: (pluginId: string, url: string | null) => Promise<void>;
+  onRefreshAudit: () => Promise<void>;
   onSelectPlugin: (pluginId: string) => Promise<void>;
 }
 
 export function PluginsTab({
   snapshot,
+  auditReport,
   busyAction,
   foregroundPackage,
   onReload,
   onSetEnabled,
   onSetPriority,
   onSetScopeOverride,
+  onSetDevUrl,
+  onRefreshAudit,
   onSelectPlugin,
 }: PluginsTabProps) {
+  const [showAudit, setShowAudit] = useState(false);
   const plugins = snapshot?.plugins ?? [];
   const activePluginId = snapshot?.activePluginId ?? null;
   const matchedIds = snapshot?.matchedPluginIds ?? [];
@@ -68,16 +77,39 @@ export function PluginsTab({
             插件目录：/data/system/sideveil/plugins/
           </span>
         </div>
-        <Button
-          size="sm"
-          variant="secondary"
-          disabled={busyAction !== null}
-          onClick={() => void onReload()}
-        >
-          <RefreshCw className="size-3.5" />
-          重新扫描插件
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={busyAction !== null}
+            onClick={() => {
+              const next = !showAudit;
+              setShowAudit(next);
+              if (next) void onRefreshAudit();
+            }}
+          >
+            <Shield className="size-3.5" />
+            {showAudit ? '收起审计' : '运行时与审计'}
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={busyAction !== null}
+            onClick={() => void onReload()}
+          >
+            <RefreshCw className="size-3.5" />
+            重新扫描插件
+          </Button>
+        </div>
       </div>
+
+      {showAudit ? (
+        <PluginAuditDrawer
+          report={auditReport}
+          loading={busyAction === 'audit'}
+          onRefresh={onRefreshAudit}
+        />
+      ) : null}
 
       <div className="space-y-3">
         {plugins.length === 0 ? (
@@ -97,6 +129,7 @@ export function PluginsTab({
               onSetEnabled={onSetEnabled}
               onSetPriority={onSetPriority}
               onSetScopeOverride={onSetScopeOverride}
+              onSetDevUrl={onSetDevUrl}
               onSelectPlugin={onSelectPlugin}
             />
           ))

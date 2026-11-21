@@ -33,6 +33,7 @@ function ControlWorkbench() {
     status,
     logs,
     pluginsSnapshot,
+    auditReport,
     busyAction,
     lastPingMs,
     saving,
@@ -46,6 +47,8 @@ function ControlWorkbench() {
     setPluginEnabled,
     setPluginPriority,
     setPluginScopeOverride,
+    setPluginDevUrl,
+    refreshPluginAudit,
     selectPlugin,
     runCtl,
     clearLogs,
@@ -160,12 +163,15 @@ function ControlWorkbench() {
         <TabsContent value="plugins">
           <PluginsTab
             snapshot={pluginsSnapshot}
+            auditReport={auditReport}
             busyAction={busyAction}
             foregroundPackage={status?.foregroundPackage ?? ''}
             onReload={reloadPlugins}
             onSetEnabled={setPluginEnabled}
             onSetPriority={setPluginPriority}
             onSetScopeOverride={setPluginScopeOverride}
+            onSetDevUrl={setPluginDevUrl}
+            onRefreshAudit={refreshPluginAudit}
             onSelectPlugin={selectPlugin}
           />
         </TabsContent>
