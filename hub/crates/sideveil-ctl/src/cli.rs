@@ -1,12 +1,16 @@
 //! CLI argument parser for `sideveil-ctl`.
 
 mod hud_cmd;
+mod plugins_cmd;
 
 use std::path::PathBuf;
+use std::time::Duration;
 
-use serde_json::{Value, json};
+use serde_json::Value;
 use sideveil_protocol::paths;
 use sideveil_protocol::rpc::methods;
+
+const DEFAULT_IO_TIMEOUT: Duration = Duration::from_secs(4);
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum OutputMode {
@@ -20,6 +24,7 @@ pub(crate) struct CliInvocation {
     pub(crate) method: String,
     pub(crate) params: Option<Value>,
     pub(crate) output_mode: OutputMode,
+    pub(crate) io_timeout: Duration,
 }
 
 pub(crate) fn parse_args(
@@ -40,6 +45,7 @@ pub(crate) fn parse_args(
     }
 
     let cmd = positional.first().map_or("status", String::as_str);
+    let mut io_timeout = DEFAULT_IO_TIMEOUT;
     let (method, params, output_mode) = match cmd {
         "status" => (
             methods::DAEMON_STATUS.to_owned(),
@@ -86,7 +92,13 @@ pub(crate) fn parse_args(
             None,
             OutputMode::FullEnvelope,
         ),
-        "plugins" => parse_plugins_subcommand(&positional[1..])?,
+        "plugins" => {
+            let parsed = plugins_cmd::parse_plugins_subcommand(&positional[1..])?;
+            if let Some(custom_timeout) = parsed.io_timeout {
+                io_timeout = custom_timeout;
+            }
+            (parsed.method, parsed.params, parsed.output_mode)
+        }
         "hud" => hud_cmd::parse_hud_subcommand(&positional[1..])?,
         "rpc" => parse_raw_rpc(&positional[1..])?,
         other => return Err((2, format!("Unknown command: {other}"))),
@@ -97,6 +109,7 @@ pub(crate) fn parse_args(
         method,
         params,
         output_mode,
+        io_timeout,
     })
 }
 
@@ -117,173 +130,10 @@ fn parse_raw_rpc(args: &[String]) -> Result<(String, Option<Value>, OutputMode),
     Ok((method_name.clone(), parsed_params, OutputMode::FullEnvelope))
 }
 
-fn parse_plugins_subcommand(
-    args: &[String],
-) -> Result<(String, Option<Value>, OutputMode), (u8, String)> {
-    let sub = args.first().map_or("list", String::as_str);
-    match sub {
-        "list" => Ok((
-            methods::PLUGINS_LIST.to_owned(),
-            None,
-            OutputMode::FullEnvelope,
-        )),
-        "reload" => Ok((
-            methods::PLUGINS_RELOAD.to_owned(),
-            None,
-            OutputMode::FullEnvelope,
-        )),
-        "enable" | "disable" => {
-            let Some(plugin_id) = args.get(1) else {
-                return Err((2, format!("Usage: sideveil-ctl plugins {sub} <plugin-id>")));
-            };
-            Ok((
-                methods::PLUGINS_SET_ENABLED.to_owned(),
-                Some(json!({
-                    "pluginId": plugin_id,
-                    "enabled": sub == "enable",
-                })),
-                OutputMode::FullEnvelope,
-            ))
-        }
-        "priority" => {
-            let (Some(plugin_id), Some(raw_priority)) = (args.get(1), args.get(2)) else {
-                return Err((
-                    2,
-                    "Usage: sideveil-ctl plugins priority <plugin-id> <priority>".to_owned(),
-                ));
-            };
-            let priority = raw_priority
-                .parse::<i32>()
-                .map_err(|_| (2, format!("Invalid priority integer: {raw_priority}")))?;
-            Ok((
-                methods::PLUGINS_SET_PRIORITY.to_owned(),
-                Some(json!({
-                    "pluginId": plugin_id,
-                    "priority": priority,
-                })),
-                OutputMode::FullEnvelope,
-            ))
-        }
-        "scope" => parse_plugins_scope(&args[1..]),
-        "dev" => {
-            let (Some(plugin_id), Some(second)) = (args.get(1), args.get(2)) else {
-                return Err((
-                    2,
-                    "Usage: sideveil-ctl plugins dev <plugin-id> <http://127.0.0.1:port|--clear>"
-                        .to_owned(),
-                ));
-            };
-            let clear = second == "--clear";
-            Ok((
-                methods::PLUGINS_SET_DEV_URL.to_owned(),
-                Some(json!({
-                    "pluginId": plugin_id,
-                    "devServerUrl": if clear { Value::Null } else { Value::String(second.clone()) },
-                    "clear": clear,
-                })),
-                OutputMode::FullEnvelope,
-            ))
-        }
-        "audit" => Ok((
-            methods::PLUGINS_AUDIT.to_owned(),
-            None,
-            OutputMode::FullEnvelope,
-        )),
-        "select" => {
-            let Some(plugin_id) = args.get(1) else {
-                return Err((
-                    2,
-                    "Usage: sideveil-ctl plugins select <plugin-id> [package-name]".to_owned(),
-                ));
-            };
-            let pkg = args.get(2).cloned();
-            Ok((
-                methods::PLUGINS_SELECT.to_owned(),
-                Some(json!({
-                    "pluginId": plugin_id,
-                    "packageName": pkg,
-                })),
-                OutputMode::FullEnvelope,
-            ))
-        }
-        other => Err((2, format!("Unknown plugins subcommand: {other}"))),
-    }
-}
-
-fn parse_plugins_scope(
-    args: &[String],
-) -> Result<(String, Option<Value>, OutputMode), (u8, String)> {
-    let Some(plugin_id) = args.first() else {
-        return Err((
-            2,
-            "Usage: sideveil-ctl plugins scope <plugin-id> [--global true|false] [--packages a,b] [--clear]"
-                .to_owned(),
-        ));
-    };
-
-    let mut clear = false;
-    let mut global: Option<bool> = None;
-    let mut packages: Option<Vec<String>> = None;
-    let mut idx = 1;
-
-    while idx < args.len() {
-        match args[idx].as_str() {
-            "--clear" => {
-                clear = true;
-                idx += 1;
-            }
-            "--global" => {
-                let Some(val) = args.get(idx + 1) else {
-                    return Err((
-                        2,
-                        "Missing value for --global (expected true|false)".to_owned(),
-                    ));
-                };
-                global = Some(match val.as_str() {
-                    "true" | "1" => true,
-                    "false" | "0" => false,
-                    _ => return Err((2, format!("Invalid boolean for --global: {val}"))),
-                });
-                idx += 2;
-            }
-            "--packages" => {
-                let Some(val) = args.get(idx + 1) else {
-                    return Err((2, "Missing value for --packages".to_owned()));
-                };
-                let parsed: Vec<String> = val
-                    .split(',')
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .map(str::to_owned)
-                    .collect();
-                packages = Some(parsed);
-                idx += 2;
-            }
-            flag => return Err((2, format!("Unknown flag for plugins scope: {flag}"))),
-        }
-    }
-
-    if !clear && global.is_none() && packages.is_none() {
-        return Err((
-            2,
-            "Specify at least one of --global, --packages, or --clear".to_owned(),
-        ));
-    }
-
-    Ok((
-        methods::PLUGINS_SET_SCOPE_OVERRIDE.to_owned(),
-        Some(json!({
-            "pluginId": plugin_id,
-            "packages": packages,
-            "global": global,
-            "clear": clear,
-        })),
-        OutputMode::FullEnvelope,
-    ))
-}
-
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
 
     #[test]
@@ -357,5 +207,36 @@ mod tests {
                 "clear": true,
             }))
         );
+
+        let inv = parse_args([
+            "plugins".to_owned(),
+            "invoke".to_owned(),
+            "com.example.alpha".to_owned(),
+            "daemon.ping".to_owned(),
+            r#"{"verbose":true}"#.to_owned(),
+            "--timeout-ms".to_owned(),
+            "25000".to_owned(),
+        ])
+        .expect("plugins invoke");
+        assert_eq!(inv.method, methods::PLUGIN_INVOKE);
+        assert_eq!(
+            inv.params,
+            Some(json!({
+                "pluginId": "com.example.alpha",
+                "method": "daemon.ping",
+                "params": { "verbose": true },
+                "timeoutMs": 25_000,
+            }))
+        );
+        assert_eq!(inv.io_timeout, Duration::from_millis(27_000));
+
+        let inst = parse_args([
+            "plugins".to_owned(),
+            "install".to_owned(),
+            "/tmp/my-plugin".to_owned(),
+        ])
+        .expect("plugins install");
+        assert_eq!(inst.method, methods::PLUGINS_INSTALL);
+        assert_eq!(inst.params, Some(json!({ "sourceDir": "/tmp/my-plugin" })));
     }
 }

@@ -14,8 +14,6 @@ use sideveil_protocol::uds::{UdsClientHello, UdsHandshakeAck};
 
 use crate::cli::{CliInvocation, OutputMode, parse_args};
 
-const IO_TIMEOUT: Duration = Duration::from_secs(4);
-
 fn main() -> ExitCode {
     let invocation = match parse_args(std::env::args().skip(1)) {
         Ok(inv) => inv,
@@ -38,7 +36,7 @@ fn main() -> ExitCode {
 }
 
 fn execute(inv: &CliInvocation) -> Result<String, String> {
-    let mut stream = connect_socket(&inv.socket_path)?;
+    let mut stream = connect_socket(&inv.socket_path, inv.io_timeout)?;
     let hello = serde_json::to_string(&UdsClientHello::Ctl)
         .map_err(|e| format!("Failed encoding handshake: {e}"))?;
     writeln!(stream, "{hello}").map_err(|e| format!("Failed writing handshake: {e}"))?;
@@ -96,11 +94,11 @@ fn execute(inv: &CliInvocation) -> Result<String, String> {
     }
 }
 
-fn connect_socket(path: &Path) -> Result<UnixStream, String> {
+fn connect_socket(path: &Path, timeout: Duration) -> Result<UnixStream, String> {
     let stream = UnixStream::connect(path)
         .map_err(|e| format!("Failed to connect to sideveild ({}): {e}", path.display()))?;
-    let _ = stream.set_read_timeout(Some(IO_TIMEOUT));
-    let _ = stream.set_write_timeout(Some(IO_TIMEOUT));
+    let _ = stream.set_read_timeout(Some(timeout));
+    let _ = stream.set_write_timeout(Some(timeout));
     Ok(stream)
 }
 
