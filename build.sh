@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# Sideveil KernelSU Module Builder
+# SideVeil KernelSU Module Builder
 # Builds Rust core hub (sideveild + sideveil-ctl), Control Plane & Panel WebUIs,
-# thin Kotlin sensor DEX, and SideveilHost APK, then packages out/sideveil.zip.
+# thin Kotlin sensor DEX, and SideVeilHost APK, then packages out/sideveil.zip.
 #
 
 set -euo pipefail
@@ -13,7 +13,7 @@ WEBUI_DIR="${SCRIPT_DIR}/webui"
 ANDROID_DIR="${SCRIPT_DIR}/android"
 HUB_TARGET_DIR="${HUB_DIR}/target/aarch64-linux-android/release"
 APK_SRC="${ANDROID_DIR}/host-app/build/outputs/apk/release/host-app-release.apk"
-APK_DST="${SCRIPT_DIR}/system/priv-app/SideveilHost/SideveilHost.apk"
+APK_DST="${SCRIPT_DIR}/system/priv-app/SideVeilHost/SideVeilHost.apk"
 HUB_DST="${SCRIPT_DIR}/bin/sideveild"
 CTL_DST="${SCRIPT_DIR}/bin/sideveil-ctl"
 HUD_JNI_DST="${ANDROID_DIR}/host-app/src/main/jniLibs/arm64-v8a/libsideveil_hud.so"

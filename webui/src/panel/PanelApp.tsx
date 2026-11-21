@@ -1,7 +1,7 @@
 import { type BridgeOptions, type ContainerAction, useContainerThemeSync } from '@pochita/bridge';
 import {
   BUILTIN_DIAG_PLUGIN_ID,
-  SideveilPluginProvider,
+  SideVeilPluginProvider,
   useDynamicThemeTokens,
 } from '@pochita/sideveil-sdk';
 import {
@@ -76,7 +76,7 @@ function PanelWorkbench({
     >
       <AppShell
         variant="drawer"
-        title="Sideveil"
+        title="SideVeil"
         className={
           isNativeHost
             ? 'h-full min-h-0 flex-1'
@@ -296,12 +296,12 @@ export function PanelApp() {
   const clearLogs = useCallback(() => setEventsLog([]), []);
 
   return (
-    <SideveilPluginProvider
+    <SideVeilPluginProvider
       pluginId={BUILTIN_DIAG_PLUGIN_ID}
       manifest={DIAGNOSTIC_PLUGIN_MANIFEST}
       bridgeOptions={bridgeOptions}
     >
       <PanelThemedContainer eventsLog={eventsLog} onAppendLog={appendLog} onClearLogs={clearLogs} />
-    </SideveilPluginProvider>
+    </SideVeilPluginProvider>
   );
 }

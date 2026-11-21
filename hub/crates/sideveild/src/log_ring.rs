@@ -45,7 +45,7 @@ impl LogRing {
 
     fn record(&self, level: char, message: &str) {
         let formatted = format!("{} [{}] {}", format_local_time(), level, message);
-        eprintln!("[SideveilHub] {formatted}");
+        eprintln!("[SideVeilHub] {formatted}");
         let mut guard = self.lines.lock().unwrap_or_else(PoisonError::into_inner);
         while guard.len() >= MAX_LOG_LINES {
             guard.pop_front();

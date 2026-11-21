@@ -13,14 +13,14 @@ import {
   useTheme,
 } from '@pochita/ui';
 import { Plus } from 'lucide-react';
-import type { ScopeMode, SideveilConfig } from '../../shared/types.ts';
+import type { ScopeMode, SideVeilConfig } from '../../shared/types.ts';
 import { PackageScopeList } from './PackageScopeList.tsx';
 
 export interface AppearanceScopeTabProps {
-  config: SideveilConfig;
+  config: SideVeilConfig;
   foregroundPackage: string;
   crossWindowBlurSupported: boolean | null;
-  onChange: (updater: (prev: SideveilConfig) => SideveilConfig) => void;
+  onChange: (updater: (prev: SideVeilConfig) => SideVeilConfig) => void;
 }
 
 export function AppearanceScopeTab({
@@ -31,9 +31,9 @@ export function AppearanceScopeTab({
 }: AppearanceScopeTabProps) {
   const { setThemeId, setColorMode } = useTheme();
 
-  const updatePanel = <K extends keyof SideveilConfig['panel']>(
+  const updatePanel = <K extends keyof SideVeilConfig['panel']>(
     key: K,
-    value: SideveilConfig['panel'][K],
+    value: SideVeilConfig['panel'][K],
   ) => {
     onChange((prev) => ({
       ...prev,

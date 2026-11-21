@@ -8,12 +8,12 @@ import pochita.sideveil.protocol.DisplayGeometry
 import pochita.sideveil.protocol.EdgeConfig
 import pochita.sideveil.protocol.EdgeSide
 import pochita.sideveil.protocol.PanelState
-import pochita.sideveil.protocol.SideveilConfig
+import pochita.sideveil.protocol.SideVeilConfig
 
 class EdgeGestureStateMachineTest {
     private val geometry = DisplayGeometry(widthPx = 1000, heightPx = 2000, density = 2.0f)
     private val rightConfig =
-        SideveilConfig(
+        SideVeilConfig(
             edge =
                 EdgeConfig(
                     side = EdgeSide.RIGHT,
@@ -25,7 +25,7 @@ class EdgeGestureStateMachineTest {
         )
 
     private fun env(
-        config: SideveilConfig = rightConfig,
+        config: SideVeilConfig = rightConfig,
         scopeActive: Boolean = true,
         panelState: PanelState = PanelState.CLOSED,
         fullscreenActive: Boolean = false,

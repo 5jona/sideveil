@@ -100,7 +100,7 @@ internal class RailIconLoader(
     }
 
     companion object {
-        private const val TAG = "SideveilRailIconLoader"
+        private const val TAG = "SideVeilRailIconLoader"
         private const val MAX_CACHE_ENTRIES = 32
         private const val CONNECT_TIMEOUT_MS = 1_500
         private const val READ_TIMEOUT_MS = 3_000

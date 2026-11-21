@@ -33,7 +33,7 @@ class PluginProtocolTest {
               "foregroundPackage": "com.example.game"
             }
             """.trimIndent()
-        val parsed = SideveilWireJson.decodeFromString<PluginsSnapshotPayload>(raw)
+        val parsed = SideVeilWireJson.decodeFromString<PluginsSnapshotPayload>(raw)
         assertEquals(1, parsed.plugins.size)
         val alpha = parsed.plugins.single()
         assertEquals("com.example.alpha", alpha.id)
@@ -47,8 +47,8 @@ class PluginProtocolTest {
 
     @Test
     fun `RpcRequest encodes server-stamped pluginId`() {
-        val req = RpcRequest(id = "r1", method = SideveilMethods.PLUGIN_INVOKE, pluginId = "com.example.alpha")
-        val encoded = SideveilWireJson.encodeToString(req)
+        val req = RpcRequest(id = "r1", method = SideVeilMethods.PLUGIN_INVOKE, pluginId = "com.example.alpha")
+        val encoded = SideVeilWireJson.encodeToString(req)
         assertTrue(encoded.contains("\"pluginId\":\"com.example.alpha\""))
     }
 }

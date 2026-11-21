@@ -8,7 +8,7 @@ import pochita.sideveil.protocol.EdgeSide
 import pochita.sideveil.protocol.PanelState
 
 /**
- * Android 16–17 predictive-back [OnBackAnimationCallback] controller for [SidebarPanelWindow].
+ * Android 16+ predictive-back [OnBackAnimationCallback] controller for [SidebarPanelWindow].
  * Drives live shrink, edge-shift, and progressive blur preview during back gestures when the
  * active plugin has not opted into back interception.
  */

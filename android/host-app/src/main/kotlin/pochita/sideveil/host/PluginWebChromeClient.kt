@@ -6,8 +6,8 @@ import android.webkit.PermissionRequest
 import android.webkit.WebChromeClient
 import kotlinx.serialization.json.encodeToJsonElement
 import pochita.sideveil.protocol.HostWebViewConsolePayload
-import pochita.sideveil.protocol.SideveilEvents
-import pochita.sideveil.protocol.SideveilWireJson
+import pochita.sideveil.protocol.SideVeilEvents
+import pochita.sideveil.protocol.SideVeilWireJson
 
 /**
  * Sandboxed [WebChromeClient] for plugin WebViews forwarding JS/WebGPU console diagnostics
@@ -28,8 +28,8 @@ internal class PluginWebChromeClient(
             Log.d(TAG, "[$pluginId][$level] $text")
         }
         daemonClient.sendEvent(
-            SideveilEvents.HOST_WEBVIEW_CONSOLE,
-            SideveilWireJson.encodeToJsonElement(
+            SideVeilEvents.HOST_WEBVIEW_CONSOLE,
+            SideVeilWireJson.encodeToJsonElement(
                 HostWebViewConsolePayload(
                     pluginId = pluginId,
                     level = level,
@@ -48,7 +48,7 @@ internal class PluginWebChromeClient(
     }
 
     companion object {
-        private const val TAG = "SideveilWebConsole"
+        private const val TAG = "SideVeilWebConsole"
         private const val MAX_MESSAGE_LEN = 320
     }
 }

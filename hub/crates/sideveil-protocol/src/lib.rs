@@ -1,4 +1,4 @@
-//! Shared wire protocol types for Sideveil Hub, System Sensor, Render Host, and Plugins.
+//! Shared wire protocol types for SideVeil Hub, System Sensor, Render Host, and Plugins.
 
 pub mod config;
 pub mod hud;
@@ -8,7 +8,7 @@ pub mod sensor;
 pub mod theme;
 pub mod uds;
 
-/// Current Sideveil protocol schema version.
+/// Current SideVeil protocol schema version.
 pub const PROTOCOL_VERSION: u32 = 1;
 
 /// Canonical Android package name for the headless render host `priv-app`.

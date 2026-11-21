@@ -6,7 +6,7 @@ import android.os.Process
 import pochita.sideveil.protocol.HubToSensor
 import pochita.sideveil.protocol.SensorToHub
 import pochita.sideveil.protocol.SensorUdsHello
-import pochita.sideveil.protocol.SideveilWireJson
+import pochita.sideveil.protocol.SideVeilWireJson
 import pochita.sideveil.protocol.UdsHandshakeAck
 import java.io.BufferedReader
 import java.io.BufferedWriter
@@ -52,7 +52,7 @@ class HubUdsClient(
     fun start() {
         if (!running.compareAndSet(false, true)) return
         workerThread =
-            Thread(::connectLoop, "SideveilSensorUds").apply {
+            Thread(::connectLoop, "SideVeilSensorUds").apply {
                 isDaemon = true
                 start()
             }
@@ -60,7 +60,7 @@ class HubUdsClient(
 
     fun send(message: SensorToHub) {
         if (!running.get() || activeWriter == null || writeExecutor.isShutdown) return
-        val wire = SideveilWireJson.encodeToString(SensorToHub.serializer(), message)
+        val wire = SideVeilWireJson.encodeToString(SensorToHub.serializer(), message)
         if (message is SensorToHub.GestureDragMove) {
             val wasEmpty = pendingDragMove.getAndSet(wire) == null
             if (wasEmpty) {
@@ -137,7 +137,7 @@ class HubUdsClient(
         writer: BufferedWriter,
     ) {
         val hello =
-            SideveilWireJson.encodeToString(
+            SideVeilWireJson.encodeToString(
                 SensorUdsHello(pid = Process.myPid(), version = version),
             )
         writer.write(hello)
@@ -145,7 +145,7 @@ class HubUdsClient(
         writer.flush()
 
         val ackLine = reader.readLine() ?: error("hub.sock closed before handshake ack")
-        val ack = SideveilWireJson.decodeFromString<UdsHandshakeAck>(ackLine)
+        val ack = SideVeilWireJson.decodeFromString<UdsHandshakeAck>(ackLine)
         check(ack.ok) { "hub.sock rejected sensor handshake: ${ack.error}" }
     }
 
@@ -155,7 +155,7 @@ class HubUdsClient(
             val trimmed = line.trim()
             if (trimmed.isNotEmpty()) {
                 runCatching {
-                    SideveilWireJson.decodeFromString(HubToSensor.serializer(), trimmed)
+                    SideVeilWireJson.decodeFromString(HubToSensor.serializer(), trimmed)
                 }.onSuccess(onMessage)
                     .onFailure { err -> SensorLog.warn("Malformed HubToSensor frame: ${err.message}") }
             }

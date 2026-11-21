@@ -4,16 +4,16 @@ import {
   DEFAULT_CONFIG,
   type PingResult,
   SIDEVEIL_METHODS,
-  type SideveilConfig,
+  type SideVeilConfig,
 } from '../shared/types.ts';
 
 /**
  * Creates a stateful mock RPC handler for the embedded panel preview environment.
  */
 export function createMockPanelRpcHandler(
-  initialConfig: SideveilConfig = DEFAULT_CONFIG,
+  initialConfig: SideVeilConfig = DEFAULT_CONFIG,
 ): MockRpcHandler {
-  let currentConfig: SideveilConfig = initialConfig;
+  let currentConfig: SideVeilConfig = initialConfig;
 
   return async (method: string, params?: unknown) => {
     if (method === SIDEVEIL_METHODS.DAEMON_PING) {
@@ -53,7 +53,7 @@ export function createMockPanelRpcHandler(
     }
 
     if (method === SIDEVEIL_METHODS.CONFIG_PATCH_APPEARANCE) {
-      const patch = (params ?? {}) as Partial<SideveilConfig['panel']>;
+      const patch = (params ?? {}) as Partial<SideVeilConfig['panel']>;
       currentConfig = {
         ...currentConfig,
         panel: {

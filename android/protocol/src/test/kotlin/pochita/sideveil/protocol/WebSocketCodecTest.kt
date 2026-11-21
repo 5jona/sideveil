@@ -78,7 +78,7 @@ class WebSocketCodecTest {
                             id = "1",
                             result = buildJsonObject { put("pong", JsonPrimitive(true)) },
                         )
-                    WebSocketCodec.writeText(output, SideveilWireJson.encodeToString(resp), mask = false)
+                    WebSocketCodec.writeText(output, SideVeilWireJson.encodeToString(resp), mask = false)
                 }
             }
 
@@ -92,8 +92,8 @@ class WebSocketCodecTest {
                 hostHeader = "127.0.0.1:${server.localPort}",
                 extraHeaders = mapOf("Authorization" to "Bearer test-token"),
             )
-            val req = RpcRequest(id = "1", method = SideveilMethods.DAEMON_PING)
-            WebSocketCodec.writeText(output, SideveilWireJson.encodeToString(req), mask = true)
+            val req = RpcRequest(id = "1", method = SideVeilMethods.DAEMON_PING)
+            WebSocketCodec.writeText(output, SideVeilWireJson.encodeToString(req), mask = true)
             val respFrame = WebSocketCodec.readFrame(input)!!
             clientReceived = respFrame.textOrNull()
             latch.countDown()
@@ -105,7 +105,7 @@ class WebSocketCodecTest {
 
         assertNotNull(serverReceived)
         assertNotNull(clientReceived)
-        val decodedResp = SideveilWireJson.decodeFromString<RpcResponse>(clientReceived!!)
+        val decodedResp = SideVeilWireJson.decodeFromString<RpcResponse>(clientReceived!!)
         assertEquals("1", decodedResp.id)
         assertEquals(null, decodedResp.error)
     }

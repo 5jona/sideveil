@@ -108,14 +108,14 @@ data class ScopeConfig(
 }
 
 @Serializable
-data class SideveilConfig(
+data class SideVeilConfig(
     val version: Int = 1,
     val enabled: Boolean = true,
     val edge: EdgeConfig = EdgeConfig(),
     val panel: PanelConfig = PanelConfig(),
     val scope: ScopeConfig = ScopeConfig(),
 ) {
-    fun sanitized(): SideveilConfig =
+    fun sanitized(): SideVeilConfig =
         copy(
             version = if (version < 1) 1 else version,
             edge = edge.sanitized(),
@@ -138,18 +138,18 @@ data class SideveilConfig(
     }
 
     companion object {
-        val DEFAULT = SideveilConfig()
+        val DEFAULT = SideVeilConfig()
     }
 }
 
-val SideveilPrettyJson: Json =
+val SideVeilPrettyJson: Json =
     Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
         prettyPrint = true
     }
 
-val SideveilWireJson: Json =
+val SideVeilWireJson: Json =
     Json {
         ignoreUnknownKeys = true
         encodeDefaults = true

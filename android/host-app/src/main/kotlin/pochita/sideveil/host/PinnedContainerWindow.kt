@@ -46,7 +46,7 @@ internal class PinnedContainerWindow(
         get() =
             context.resources.displayMetrics.density
                 .coerceAtLeast(1f)
-    private val themedContext = ContextThemeWrapper(context, R.style.Theme_Sideveil_OverlayDialog)
+    private val themedContext = ContextThemeWrapper(context, R.style.Theme_SideVeil_OverlayDialog)
     private val backdropDrawable = GlassBackdropDrawable(density)
 
     private val rootContainer =
@@ -69,7 +69,7 @@ internal class PinnedContainerWindow(
                 INTERACTIVE_FLAGS,
                 PixelFormat.TRANSLUCENT,
             ).apply {
-                title = "SideveilPinnedPlugin"
+                title = "SideVeilPinnedPlugin"
                 gravity = Gravity.TOP or Gravity.LEFT
                 x = dp(16f)
                 y = dp(96f)
@@ -85,7 +85,7 @@ internal class PinnedContainerWindow(
                 INTERACTIVE_FLAGS,
                 PixelFormat.TRANSLUCENT,
             ).apply {
-                title = "SideveilPinnedUnlockChip"
+                title = "SideVeilPinnedUnlockChip"
                 gravity = Gravity.TOP or Gravity.LEFT
                 OverlayWindowFlags.disableMoveAnimation(this)
             }
@@ -365,7 +365,7 @@ internal class PinnedContainerWindow(
     private fun dp(value: Float): Int = (value * density + 0.5f).toInt().coerceAtLeast(1)
 
     companion object {
-        private const val TAG = "SideveilPinnedWindow"
+        private const val TAG = "SideVeilPinnedWindow"
 
         private const val INTERACTIVE_FLAGS =
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or

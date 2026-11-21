@@ -3,20 +3,20 @@ import {
   useContainerAction,
   usePluginBackendState,
   usePluginStorage,
-  useSideveilPlugin,
+  useSideVeilPlugin,
 } from '@pochita/sideveil-sdk';
 import { type ColorMode, type LogEntry, type ThemeId, useTheme, useToast } from '@pochita/ui';
 import { useCallback, useEffect, useState } from 'react';
 import {
   type ConfigUpdatedEventPayload,
   type DaemonStatus,
-  normalizeConfig,
+  normalizeSideVeilConfig,
   type PanelVisibilityEventPayload,
   type PingResult,
   type ScopeChangedEventPayload,
   SIDEVEIL_EVENTS,
   SIDEVEIL_METHODS,
-  type SideveilConfig,
+  type SideVeilConfig,
 } from '../../shared/types.ts';
 
 export interface UseDiagnosticPanelOptions {
@@ -25,7 +25,7 @@ export interface UseDiagnosticPanelOptions {
 }
 
 export function useDiagnosticPanel({ onAppendLog, onHydrated }: UseDiagnosticPanelOptions) {
-  const { bridge, pluginId } = useSideveilPlugin();
+  const { bridge, pluginId } = useSideVeilPlugin();
   const backendState = usePluginBackendState();
   const { dismiss, requestImeFocus } = useContainerAction();
   const { pushToast } = useToast();
@@ -75,7 +75,7 @@ export function useDiagnosticPanel({ onAppendLog, onHydrated }: UseDiagnosticPan
     const loadDaemonConfig = async () => {
       try {
         const res = await bridge.invoke<unknown>(SIDEVEIL_METHODS.CONFIG_GET);
-        const cfg = normalizeConfig(res as Partial<SideveilConfig> | null);
+        const cfg = normalizeSideVeilConfig(res as Partial<SideVeilConfig> | null);
         setThemeId(cfg.panel.themeId);
         setColorMode(cfg.panel.colorMode);
         setNativeBlurEnabled(cfg.panel.nativeBlurEnabled);
@@ -110,7 +110,7 @@ export function useDiagnosticPanel({ onAppendLog, onHydrated }: UseDiagnosticPan
     const unsubConfig = bridge.onHostEvent(SIDEVEIL_EVENTS.CONFIG_UPDATED, (payload) => {
       const p = payload as ConfigUpdatedEventPayload | undefined;
       if (!p?.config) return;
-      const cfg = normalizeConfig(p.config);
+      const cfg = normalizeSideVeilConfig(p.config);
       setThemeId(cfg.panel.themeId);
       setColorMode(cfg.panel.colorMode);
       setNativeBlurEnabled(cfg.panel.nativeBlurEnabled);

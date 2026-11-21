@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::config::{EdgeSide, PanelState, SideveilConfig};
+use crate::config::{EdgeSide, PanelState, SideVeilConfig};
 
 pub mod events {
     pub const CONFIG_UPDATED: &str = "config.updated";
@@ -148,7 +148,7 @@ pub struct RpcRequest {
     pub method: String,
     #[serde(default)]
     pub params: Option<Value>,
-    /// Server-stamped plugin caller identity when forwarded from a `SideveilHost` WebView.
+    /// Server-stamped plugin caller identity when forwarded from a `SideVeilHost` WebView.
     #[serde(default, skip_serializing_if = "Option::is_none", rename = "pluginId")]
     pub plugin_id: Option<String>,
 }
@@ -212,7 +212,7 @@ pub struct HostEventEnvelope {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfigUpdatedPayload {
-    pub config: SideveilConfig,
+    pub config: SideVeilConfig,
     pub scope_active: bool,
     pub foreground_package: String,
 }

@@ -23,7 +23,7 @@ data class PanelSafeBounds(
 )
 
 /**
- * Coordinates Android 16–17 `WindowInsets` (status/navigation bars, display cutouts, IME keyboard)
+ * Coordinates Android 16+ `WindowInsets` (status/navigation bars, display cutouts, IME keyboard)
  * and tablet-landscape sizing rules for [PanelWindowLayout].
  */
 internal object PanelInsetsCoordinator {

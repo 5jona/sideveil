@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, PoisonError, RwLock};
 use std::time::Duration;
 
-use sideveil_protocol::config::SideveilConfig;
+use sideveil_protocol::config::SideVeilConfig;
 use sideveil_protocol::plugin::{
     PluginBackendKind, PluginCapability, PluginDescriptor, PluginManifest, PluginOverrideEntry,
     PluginOverridesFile, PluginsSnapshotPayload, validate_plugin_id,
@@ -209,7 +209,7 @@ impl PluginRegistry {
         &self,
         foreground_package: &str,
         foreground_activity: &str,
-        config: &SideveilConfig,
+        config: &SideVeilConfig,
         online_backends: &HashSet<String>,
     ) -> PluginsSnapshotPayload {
         let guard = self.inner.read().unwrap_or_else(PoisonError::into_inner);

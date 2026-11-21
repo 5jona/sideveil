@@ -1,4 +1,4 @@
-# Migrated research artifacts and reverse-engineering cache
+# Local scratch and live verification scripts
 tmp/
 
 # Build and packaging outputs
@@ -10,7 +10,7 @@ bin/sideveild
 bin/sideveil-ctl
 bin/sideveil-sensor.dex
 bin/sideveil-daemon.dex
-system/priv-app/SideveilHost/SideveilHost.apk
+system/priv-app/SideVeilHost/SideVeilHost.apk
 android/host-app/src/main/assets/panel/
 android/host-app/src/main/jniLibs/
 

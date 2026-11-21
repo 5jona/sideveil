@@ -15,8 +15,8 @@ import pochita.sideveil.protocol.GestureDragMovePayload
 import pochita.sideveil.protocol.GestureDragStartPayload
 import pochita.sideveil.protocol.GestureFullscreenHintPayload
 import pochita.sideveil.protocol.RpcRequest
-import pochita.sideveil.protocol.SideveilConfig
-import pochita.sideveil.protocol.SideveilMethods
+import pochita.sideveil.protocol.SideVeilConfig
+import pochita.sideveil.protocol.SideVeilMethods
 
 /**
  * Coordinates edge gesture haptics, threshold confirmation, one-stroke blind Rail scrubbing,
@@ -32,7 +32,7 @@ internal class HostGestureCoordinator(
     private val panelWindow: SidebarPanelWindow,
     private val daemonClient: DaemonClient,
     private val pluginManager: PluginWebViewManager,
-    private val configProvider: () -> SideveilConfig,
+    private val configProvider: () -> SideVeilConfig,
     private val onSelectPlugin: (String) -> Unit,
 ) : HostGestureEventCallbacks {
     private var thresholdHapticFired = false
@@ -118,7 +118,7 @@ internal class HostGestureCoordinator(
                     val nextPriority = (pluginManager.maxPluginPriority() + 10).coerceAtMost(1000)
                     RpcRequest(
                         id = "rail-pin-${System.nanoTime()}",
-                        method = SideveilMethods.PLUGINS_SET_PRIORITY,
+                        method = SideVeilMethods.PLUGINS_SET_PRIORITY,
                         params =
                             buildJsonObject {
                                 put("pluginId", JsonPrimitive(pluginId))
@@ -131,7 +131,7 @@ internal class HostGestureCoordinator(
                 RailQuickAction.DISABLE -> {
                     RpcRequest(
                         id = "rail-dis-${System.nanoTime()}",
-                        method = SideveilMethods.PLUGINS_SET_ENABLED,
+                        method = SideVeilMethods.PLUGINS_SET_ENABLED,
                         params =
                             buildJsonObject {
                                 put("pluginId", JsonPrimitive(pluginId))
@@ -144,7 +144,7 @@ internal class HostGestureCoordinator(
                 RailQuickAction.RELOAD -> {
                     RpcRequest(
                         id = "rail-rel-${System.nanoTime()}",
-                        method = SideveilMethods.PLUGINS_RELOAD,
+                        method = SideVeilMethods.PLUGINS_RELOAD,
                         pluginId = BUILTIN_DIAG_PLUGIN_ID,
                     )
                 }

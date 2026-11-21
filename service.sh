@@ -2,11 +2,11 @@
 #
 # Late-start service executed by KernelSU after boot completion.
 # Prepares runtime directories and supervises Rust `sideveild` with zero polling;
-# `sideveild` directly supervises UID 1000 `sideveil-sensor` and `SideveilHost` via pidfd.
+# `sideveild` directly supervises UID 1000 `sideveil-sensor` and `SideVeilHost` via pidfd.
 #
 
 MODDIR="${0%/*}"
-LOG_TAG="SideveilSvc"
+LOG_TAG="SideVeilSvc"
 STATE_DIR="/data/system/sideveil"
 RUN_DIR="${STATE_DIR}/run"
 PLUGINS_DIR="${STATE_DIR}/plugins"
@@ -64,7 +64,7 @@ until [ "$(getprop sys.boot_completed)" = "1" ]; do
     sleep 2
 done
 
-log_info "Boot completed. Initializing Sideveil Rust hub supervisor..."
+log_info "Boot completed. Initializing SideVeil Rust hub supervisor..."
 
 mkdir -p "$STATE_DIR" "$RUN_DIR" "$PLUGINS_DIR" "$DATA_DIR" "$ROOT_RUN_DIR"
 chown 0:1000 "$STATE_DIR" "$RUN_DIR" "$PLUGINS_DIR"

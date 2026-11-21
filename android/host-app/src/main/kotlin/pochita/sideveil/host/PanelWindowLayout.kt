@@ -53,7 +53,7 @@ internal class PanelWindowLayout(
         onCloseRequested: () -> Unit,
     ): Dialog {
         val dialog =
-            object : Dialog(themedContext, R.style.Theme_Sideveil_OverlayDialog) {
+            object : Dialog(themedContext, R.style.Theme_SideVeil_OverlayDialog) {
                 override fun cancel() = onCloseRequested()
 
                 override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -108,7 +108,7 @@ internal class PanelWindowLayout(
 
     fun configureInitialWindow(window: Window) {
         val lp = window.attributes
-        lp.title = "SideveilPanelHost"
+        lp.title = "SideVeilPanelHost"
         lp.gravity = Gravity.TOP or Gravity.LEFT
         lp.x = 0
         lp.y = 0

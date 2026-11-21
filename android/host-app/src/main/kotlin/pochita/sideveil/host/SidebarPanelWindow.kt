@@ -22,7 +22,7 @@ import pochita.sideveil.protocol.PluginSurfaceBackdrop
 /**
  * Warm-resident `TYPE_APPLICATION_OVERLAY` Dialog container hosting the active plugin WebView
  * with zero-reflow origin-anchored spring motion, progressive cross-window blur, dynamic AGSL
- * specular flow, `WindowInsets` (IME/cutout) avoidance, and Android 16–17 predictive back preview.
+ * specular flow, `WindowInsets` (IME/cutout) avoidance, and Android 16+ predictive back preview.
  */
 @SuppressLint("RtlHardcoded")
 class SidebarPanelWindow(
@@ -34,7 +34,7 @@ class SidebarPanelWindow(
     private val onRailMotionProgress: (Float) -> Unit = {},
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val themedContext = ContextThemeWrapper(context, R.style.Theme_Sideveil_OverlayDialog)
+    private val themedContext = ContextThemeWrapper(context, R.style.Theme_SideVeil_OverlayDialog)
     private val springController = PanelSpringController()
     private val windowLayout = PanelWindowLayout(context, windowManager)
 
@@ -393,7 +393,7 @@ class SidebarPanelWindow(
     }
 
     companion object {
-        private const val TAG = "SideveilPanelWindow"
+        private const val TAG = "SideVeilPanelWindow"
         private const val POST_DISMISS_WARM_RETAIN_MS = 150L
     }
 }

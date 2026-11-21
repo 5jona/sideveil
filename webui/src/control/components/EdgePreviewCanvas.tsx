@@ -1,9 +1,9 @@
 import { colorWithAlpha, readThemeToken, useTheme } from '@pochita/ui';
 import { useEffect, useRef } from 'react';
-import type { SideveilConfig } from '../../shared/types.ts';
+import type { SideVeilConfig } from '../../shared/types.ts';
 
 export interface EdgePreviewCanvasProps {
-  config: SideveilConfig;
+  config: SideVeilConfig;
   previewOpen?: boolean;
 }
 

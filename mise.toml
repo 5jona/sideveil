@@ -14,7 +14,7 @@ description = "Build Rust hub binaries, WebUI bundles, sensor DEX, host APK, and
 run = "bash build.sh"
 
 [tasks.reload]
-description = "Build and hot-reload Sideveil onto connected Android device via ADB"
+description = "Build and hot-reload SideVeil onto connected Android device via ADB"
 run = "bash reload.sh"
 
 [tasks."webui:check"]
@@ -63,4 +63,4 @@ run = "mise run hub:check && mise run webui:check && mise run android:check"
 
 [tasks.clean]
 description = "Clean Gradle, Rust, and WebUI build outputs"
-run = "rm -rf out webroot bin/sideveild bin/sideveil-ctl bin/sideveil-sensor.dex system/priv-app/SideveilHost/SideveilHost.apk android/host-app/src/main/assets/panel android/host-app/src/main/jniLibs hub/target && cd android && ./gradlew clean"
+run = "rm -rf out webroot bin/sideveild bin/sideveil-ctl bin/sideveil-sensor.dex system/priv-app/SideVeilHost/SideVeilHost.apk android/host-app/src/main/assets/panel android/host-app/src/main/jniLibs hub/target && cd android && ./gradlew clean"

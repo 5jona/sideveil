@@ -4,14 +4,14 @@ import pochita.sideveil.protocol.DisplayGeometry
 import pochita.sideveil.protocol.EdgeConfig
 import pochita.sideveil.protocol.EdgeSide
 import pochita.sideveil.protocol.PanelState
-import pochita.sideveil.protocol.SideveilConfig
+import pochita.sideveil.protocol.SideVeilConfig
 import kotlin.math.min
 
 /**
  * Snapshot of active environment inputs passed to [EdgeGestureStateMachine].
  */
 data class EdgeGestureEnv(
-    val config: SideveilConfig,
+    val config: SideVeilConfig,
     val geometry: DisplayGeometry,
     val scopeActive: Boolean = true,
     val panelState: PanelState = PanelState.CLOSED,

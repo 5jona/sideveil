@@ -6,10 +6,10 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-class SideveilConfigTest {
+class SideVeilConfigTest {
     @Test
     fun `default config allows KernelSU manager and denies SystemUI`() {
-        val cfg = SideveilConfig.DEFAULT
+        val cfg = SideVeilConfig.DEFAULT
         assertTrue(cfg.matchesPackage("me.weishu.kernelsu"))
         assertFalse(cfg.matchesPackage("com.android.systemui"))
         assertFalse(cfg.matchesPackage("com.example.unlisted"))
@@ -18,7 +18,7 @@ class SideveilConfigTest {
     @Test
     fun `global mode matches unlisted apps except denylist`() {
         val cfg =
-            SideveilConfig.DEFAULT.copy(
+            SideVeilConfig.DEFAULT.copy(
                 scope =
                     ScopeConfig(
                         mode = ScopeMode.GLOBAL,
@@ -33,14 +33,14 @@ class SideveilConfigTest {
 
     @Test
     fun `disabled config rejects all packages`() {
-        val cfg = SideveilConfig.DEFAULT.copy(enabled = false)
+        val cfg = SideVeilConfig.DEFAULT.copy(enabled = false)
         assertFalse(cfg.matchesPackage("me.weishu.kernelsu"))
     }
 
     @Test
     fun `sanitized clamps out of bounds values and normalizes themes`() {
         val dirty =
-            SideveilConfig(
+            SideVeilConfig(
                 version = 0,
                 edge =
                     EdgeConfig(
@@ -82,35 +82,35 @@ class SideveilConfigTest {
         assertEquals("system", dirty.panel.colorMode)
         assertEquals(300, dirty.panel.blurRadiusPx)
         assertEquals(0.75f, dirty.panel.scrimAlpha)
-        assertEquals(0.0f, SideveilConfig.DEFAULT.panel.scrimAlpha)
-        assertEquals(160, SideveilConfig.DEFAULT.panel.blurRadiusPx)
+        assertEquals(0.0f, SideVeilConfig.DEFAULT.panel.scrimAlpha)
+        assertEquals(160, SideVeilConfig.DEFAULT.panel.blurRadiusPx)
         assertEquals(listOf("a.b.c"), dirty.scope.allowlist)
         assertEquals(emptyList<String>(), dirty.scope.denylist)
     }
 
     @Test
     fun `json round-trip preserves structure and defaults`() {
-        val encoded = SideveilPrettyJson.encodeToString(SideveilConfig.DEFAULT)
-        val decoded = SideveilPrettyJson.decodeFromString<SideveilConfig>(encoded)
-        assertEquals(SideveilConfig.DEFAULT, decoded)
+        val encoded = SideVeilPrettyJson.encodeToString(SideVeilConfig.DEFAULT)
+        val decoded = SideVeilPrettyJson.decodeFromString<SideVeilConfig>(encoded)
+        assertEquals(SideVeilConfig.DEFAULT, decoded)
     }
 
     @Test
     fun `protocol DTOs serialize and deserialize panel commands, endpoints, and container actions`() {
-        val cmdWire = SideveilWireJson.encodeToString(PanelCommandPayload(PanelCommand.OPEN))
+        val cmdWire = SideVeilWireJson.encodeToString(PanelCommandPayload(PanelCommand.OPEN))
         assertTrue(cmdWire.contains("\"command\":\"open\""))
-        val cmdDecoded = SideveilWireJson.decodeFromString<PanelCommandPayload>(cmdWire)
+        val cmdDecoded = SideVeilWireJson.decodeFromString<PanelCommandPayload>(cmdWire)
         assertEquals(PanelCommand.OPEN, cmdDecoded.command)
 
         val endpoint = DaemonEndpoint(port = 54321, token = "a".repeat(64))
-        val endpointDecoded = SideveilWireJson.decodeFromString<DaemonEndpoint>(SideveilWireJson.encodeToString(endpoint))
+        val endpointDecoded = SideVeilWireJson.decodeFromString<DaemonEndpoint>(SideVeilWireJson.encodeToString(endpoint))
         assertEquals(endpoint, endpointDecoded)
 
         val minimalSyncJson =
             """
             {"type":"syncTheme","payload":{"themeId":"coloros-glass","colorScheme":"light"}}
             """.trimIndent()
-        val minimalActionDecoded = SideveilWireJson.decodeFromString<ContainerActionPayload>(minimalSyncJson)
+        val minimalActionDecoded = SideVeilWireJson.decodeFromString<ContainerActionPayload>(minimalSyncJson)
         assertEquals("syncTheme", minimalActionDecoded.type)
         assertEquals("coloros-glass", minimalActionDecoded.payload?.themeId)
         assertEquals("light", minimalActionDecoded.payload?.colorScheme)
@@ -121,7 +121,7 @@ class SideveilConfigTest {
             """
             {"type":"syncTheme","payload":{"themeId":"modern-saas-dark","colorScheme":"dark","wantsNativeBlur":false,"cornerRadiusPx":48}}
             """.trimIndent()
-        val fullActionDecoded = SideveilWireJson.decodeFromString<ContainerActionPayload>(fullSyncJson)
+        val fullActionDecoded = SideVeilWireJson.decodeFromString<ContainerActionPayload>(fullSyncJson)
         assertEquals("syncTheme", fullActionDecoded.type)
         assertEquals("modern-saas-dark", fullActionDecoded.payload?.themeId)
         assertEquals("dark", fullActionDecoded.payload?.colorScheme)

@@ -11,19 +11,19 @@ import {
   Switch,
 } from '@pochita/ui';
 import { Activity, Layers, ShieldCheck } from 'lucide-react';
-import type { DaemonStatus, EdgeSide, SideveilConfig } from '../../shared/types.ts';
+import type { DaemonStatus, EdgeSide, SideVeilConfig } from '../../shared/types.ts';
 import { EdgePreviewCanvas } from './EdgePreviewCanvas.tsx';
 
 export interface OverviewEdgeTabProps {
-  config: SideveilConfig;
+  config: SideVeilConfig;
   status: DaemonStatus | null;
-  onChange: (updater: (prev: SideveilConfig) => SideveilConfig) => void;
+  onChange: (updater: (prev: SideVeilConfig) => SideVeilConfig) => void;
 }
 
 export function OverviewEdgeTab({ config, status, onChange }: OverviewEdgeTabProps) {
-  const updateEdge = <K extends keyof SideveilConfig['edge']>(
+  const updateEdge = <K extends keyof SideVeilConfig['edge']>(
     key: K,
-    value: SideveilConfig['edge'][K],
+    value: SideVeilConfig['edge'][K],
   ) => {
     onChange((prev) => ({
       ...prev,
@@ -77,13 +77,13 @@ export function OverviewEdgeTab({ config, status, onChange }: OverviewEdgeTabPro
         <CardContent>
           <SettingRow
             variant="plain"
-            title="启用 Sideveil 侧边栏"
+            title="启用 SideVeil 侧边栏"
             description="在命中作用域的应用中启用边缘触发条与滑动呼出"
             control={
               <Switch
                 checked={config.enabled}
                 onCheckedChange={(checked) => onChange((prev) => ({ ...prev, enabled: checked }))}
-                aria-label="启用 Sideveil 侧边栏"
+                aria-label="启用 SideVeil 侧边栏"
               />
             }
           />

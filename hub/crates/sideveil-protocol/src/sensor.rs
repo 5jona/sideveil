@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::{EdgeSide, PanelState, SideveilConfig};
+use crate::config::{EdgeSide, PanelState, SideVeilConfig};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -94,7 +94,7 @@ pub enum SensorToHub {
 pub enum HubToSensor {
     #[serde(rename_all = "camelCase")]
     SyncState {
-        config: SideveilConfig,
+        config: SideVeilConfig,
         scope_active: bool,
         panel_state: PanelState,
         #[serde(default)]
@@ -124,7 +124,7 @@ mod tests {
         assert_eq!(decoded, msg);
 
         let sync = HubToSensor::SyncState {
-            config: SideveilConfig::default(),
+            config: SideVeilConfig::default(),
             scope_active: true,
             panel_state: PanelState::Closed,
             fullscreen_active: false,

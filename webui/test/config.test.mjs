@@ -5,8 +5,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   DEFAULT_CONFIG,
-  normalizeConfig,
-  normalizeSideveilConfig,
+  normalizeSideVeilConfig,
   SIDEVEIL_EVENTS,
   SIDEVEIL_METHODS,
 } from '../src/shared/types.ts';
@@ -58,22 +57,19 @@ test('DEFAULT_CONFIG conforms to expected structural and numerical bounds', () =
   );
 });
 
-test('normalizeSideveilConfig handles nullish inputs gracefully', () => {
-  const fromNull = normalizeSideveilConfig(null);
+test('normalizeSideVeilConfig handles nullish inputs gracefully', () => {
+  const fromNull = normalizeSideVeilConfig(null);
   assert.deepEqual(fromNull, DEFAULT_CONFIG);
 
-  const fromUndefined = normalizeSideveilConfig(undefined);
+  const fromUndefined = normalizeSideVeilConfig(undefined);
   assert.deepEqual(fromUndefined, DEFAULT_CONFIG);
 
-  const fromEmpty = normalizeSideveilConfig({});
+  const fromEmpty = normalizeSideVeilConfig({});
   assert.deepEqual(fromEmpty, DEFAULT_CONFIG);
-
-  // Alias equality
-  assert.equal(normalizeConfig, normalizeSideveilConfig);
 });
 
-test('normalizeSideveilConfig clamps numerical values to valid ranges', () => {
-  const clampedMin = normalizeSideveilConfig({
+test('normalizeSideVeilConfig clamps numerical values to valid ranges', () => {
+  const clampedMin = normalizeSideVeilConfig({
     version: 0,
     edge: {
       side: 'left',
@@ -120,7 +116,7 @@ test('normalizeSideveilConfig clamps numerical values to valid ranges', () => {
   assert.equal(clampedMin.panel.blurRadiusPx, 0);
   assert.equal(clampedMin.panel.scrimAlpha, 0);
 
-  const clampedMax = normalizeSideveilConfig({
+  const clampedMax = normalizeSideVeilConfig({
     version: 4,
     edge: {
       side: 'right',
@@ -165,8 +161,8 @@ test('normalizeSideveilConfig clamps numerical values to valid ranges', () => {
   assert.equal(clampedMax.panel.scrimAlpha, 0.75);
 });
 
-test('normalizeSideveilConfig sanitizes discrete enums and package lists', () => {
-  const sanitized = normalizeSideveilConfig({
+test('normalizeSideVeilConfig sanitizes discrete enums and package lists', () => {
+  const sanitized = normalizeSideVeilConfig({
     edge: {
       side: /** @type {any} */ ('invalid-side'),
     },
@@ -189,8 +185,8 @@ test('normalizeSideveilConfig sanitizes discrete enums and package lists', () =>
   assert.deepEqual(sanitized.scope.denylist, ['com.android.systemui']);
 });
 
-test('normalizeSideveilConfig handles NaN and non-number fallback values cleanly', () => {
-  const result = normalizeSideveilConfig({
+test('normalizeSideVeilConfig handles NaN and non-number fallback values cleanly', () => {
+  const result = normalizeSideVeilConfig({
     edge: {
       topPercent: NaN,
       heightDp: Infinity,
@@ -212,7 +208,7 @@ test('normalizeSideveilConfig handles NaN and non-number fallback values cleanly
 test('root config.json snapshot matches DEFAULT_CONFIG and wire contract constants are aligned', () => {
   const rootConfigPath = path.resolve(__dirname, '../../config.json');
   const raw = JSON.parse(fs.readFileSync(rootConfigPath, 'utf8'));
-  assert.deepEqual(normalizeSideveilConfig(raw), DEFAULT_CONFIG);
+  assert.deepEqual(normalizeSideVeilConfig(raw), DEFAULT_CONFIG);
   assert.deepEqual(raw, DEFAULT_CONFIG);
 
   assert.equal(SIDEVEIL_METHODS.DAEMON_PING, 'daemon.ping');

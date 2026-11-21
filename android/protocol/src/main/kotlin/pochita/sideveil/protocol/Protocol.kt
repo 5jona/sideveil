@@ -4,7 +4,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 
-object SideveilEvents {
+object SideVeilEvents {
     const val CONFIG_UPDATED = "config.updated"
     const val SCOPE_CHANGED = "scope.changed"
     const val GESTURE_DRAG_START = "gesture.dragStart"
@@ -32,7 +32,7 @@ object SideveilEvents {
     const val HUD_DISMISSED = "hud.dismissed"
 }
 
-object SideveilMethods {
+object SideVeilMethods {
     const val DAEMON_PING = "daemon.ping"
     const val DAEMON_STATUS = "daemon.status"
     const val DAEMON_LOGS = "daemon.logs"
@@ -138,7 +138,7 @@ data class HostEventEnvelope(
 
 @Serializable
 data class ConfigUpdatedPayload(
-    val config: SideveilConfig,
+    val config: SideVeilConfig,
     val scopeActive: Boolean,
     val foregroundPackage: String,
 )

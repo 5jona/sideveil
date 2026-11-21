@@ -1,4 +1,4 @@
-//! Authoritative Sideveil host configuration schema and sanitization rules.
+//! Authoritative SideVeil host configuration schema and sanitization rules.
 
 use std::collections::HashSet;
 
@@ -190,7 +190,7 @@ fn sanitize_pkg_list(items: &[String]) -> Vec<String> {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
-pub struct SideveilConfig {
+pub struct SideVeilConfig {
     pub version: i32,
     pub enabled: bool,
     pub edge: EdgeConfig,
@@ -198,7 +198,7 @@ pub struct SideveilConfig {
     pub scope: ScopeConfig,
 }
 
-impl Default for SideveilConfig {
+impl Default for SideVeilConfig {
     fn default() -> Self {
         Self {
             version: 1,
@@ -210,7 +210,7 @@ impl Default for SideveilConfig {
     }
 }
 
-impl SideveilConfig {
+impl SideVeilConfig {
     #[must_use]
     pub fn sanitized(&self) -> Self {
         Self {
@@ -295,9 +295,9 @@ mod tests {
 
     #[test]
     fn default_config_roundtrips_json_and_matches_bounds() {
-        let cfg = SideveilConfig::default();
+        let cfg = SideVeilConfig::default();
         let json = serde_json::to_string(&cfg).expect("serialize default config");
-        let parsed: SideveilConfig = serde_json::from_str(&json).expect("deserialize config");
+        let parsed: SideVeilConfig = serde_json::from_str(&json).expect("deserialize config");
         assert_eq!(parsed, cfg);
         assert_eq!(parsed.sanitized(), cfg);
         assert!(cfg.matches_package("me.weishu.kernelsu"));
@@ -307,7 +307,7 @@ mod tests {
 
     #[test]
     fn sanitized_clamps_out_of_bounds_values() {
-        let raw = SideveilConfig {
+        let raw = SideVeilConfig {
             version: -5,
             enabled: true,
             edge: EdgeConfig {
@@ -363,7 +363,7 @@ mod tests {
 
     #[test]
     fn partial_appearance_patch_preserves_unspecified_fields() {
-        let base = SideveilConfig::default();
+        let base = SideVeilConfig::default();
         let patched = base.apply_appearance_patch(&AppearancePatchParams {
             color_mode: Some("dark".to_owned()),
             corner_radius_dp: Some(36),

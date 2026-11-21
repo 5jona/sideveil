@@ -1,4 +1,4 @@
-# Sideveil Detekt configuration (Detekt 2.x, builds upon default config).
+# SideVeil Detekt configuration (Detekt 2.x, builds upon default config).
 # Formatting is enforced exclusively by Spotless + ktlint.
 config:
   validation: true

@@ -35,7 +35,7 @@ export interface ScopeConfig {
   denylist: string[];
 }
 
-export interface SideveilConfig {
+export interface SideVeilConfig {
   version: number;
   enabled: boolean;
   edge: EdgeConfig;
@@ -98,7 +98,7 @@ export interface ScopeChangedEventPayload {
 }
 
 export interface ConfigUpdatedEventPayload {
-  config?: Partial<SideveilConfig>;
+  config?: Partial<SideVeilConfig>;
   foregroundPackage?: string;
   scopeActive?: boolean;
 }
@@ -122,7 +122,7 @@ export type CtlCommand =
 export const CONFIG_PATH = '/data/system/sideveil/config.json';
 export const CTL_BIN = '/data/adb/modules/sideveil/bin/sideveil-ctl';
 
-export const DEFAULT_CONFIG: SideveilConfig = {
+export const DEFAULT_CONFIG: SideVeilConfig = {
   version: 1,
   enabled: true,
   edge: {
@@ -155,9 +155,9 @@ export const DEFAULT_CONFIG: SideveilConfig = {
   },
 };
 
-export function normalizeSideveilConfig(
-  raw: Partial<SideveilConfig> | null | undefined,
-): SideveilConfig {
+export function normalizeSideVeilConfig(
+  raw: Partial<SideVeilConfig> | null | undefined,
+): SideVeilConfig {
   const edge = raw?.edge;
   const panel = raw?.panel;
   const scope = raw?.scope;
@@ -202,8 +202,6 @@ export function normalizeSideveilConfig(
     },
   };
 }
-
-export const normalizeConfig = normalizeSideveilConfig;
 
 function clampInt(val: number | undefined, min: number, max: number, fallback: number): number {
   if (typeof val !== 'number' || !Number.isFinite(val)) return fallback;

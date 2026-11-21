@@ -1,4 +1,4 @@
-//! Sideveil core hub daemon entry point.
+//! SideVeil core hub daemon entry point.
 
 use std::fs;
 use std::io;
@@ -87,7 +87,7 @@ impl DaemonArgs {
 async fn main() -> ExitCode {
     let args = DaemonArgs::parse();
     if let Err(err) = run(args).await {
-        eprintln!("[SideveilHub] Fatal error: {err}");
+        eprintln!("[SideVeilHub] Fatal error: {err}");
         return ExitCode::FAILURE;
     }
     ExitCode::SUCCESS

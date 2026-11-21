@@ -16,7 +16,7 @@ import android.view.MotionEvent
 import pochita.sideveil.protocol.DisplayGeometry
 import pochita.sideveil.protocol.EdgeSide
 import pochita.sideveil.protocol.PanelState
-import pochita.sideveil.protocol.SideveilConfig
+import pochita.sideveil.protocol.SideVeilConfig
 
 interface EdgeGestureListener {
     fun onDragStart(
@@ -81,7 +81,7 @@ class EdgeGestureMonitor(
         get() = displayWatcher.geometry
 
     @Volatile
-    private var config: SideveilConfig = SideveilConfig.DEFAULT
+    private var config: SideVeilConfig = SideVeilConfig.DEFAULT
 
     @Volatile
     private var scopeActive: Boolean = false
@@ -160,11 +160,11 @@ class EdgeGestureMonitor(
             },
         )
 
-    fun start(initialConfig: SideveilConfig) {
+    fun start(initialConfig: SideVeilConfig) {
         config = initialConfig
         if (inputThread == null) {
             val thread =
-                HandlerThread("SideveilInputDispatcher", Process.THREAD_PRIORITY_URGENT_DISPLAY).apply {
+                HandlerThread("SideVeilInputDispatcher", Process.THREAD_PRIORITY_URGENT_DISPLAY).apply {
                     start()
                 }
             inputThread = thread
@@ -175,7 +175,7 @@ class EdgeGestureMonitor(
     }
 
     fun updateState(
-        nextConfig: SideveilConfig,
+        nextConfig: SideVeilConfig,
         nextScopeActive: Boolean,
         nextPanelState: PanelState,
         nextFullscreenActive: Boolean = fullscreenActive,

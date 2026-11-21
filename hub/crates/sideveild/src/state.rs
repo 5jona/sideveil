@@ -320,7 +320,7 @@ impl HubState {
     }
 
     pub fn request_host_restart(&self) {
-        self.logs.info("Requested SideveilHost restart");
+        self.logs.info("Requested SideVeilHost restart");
         self.send_host_wake(HostWakeSignal::ForceRestart);
     }
 

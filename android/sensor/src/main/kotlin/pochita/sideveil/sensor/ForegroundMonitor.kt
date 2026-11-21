@@ -10,7 +10,7 @@ import java.lang.reflect.Method
 import java.lang.reflect.Proxy
 
 /**
- * Monitors foreground Activity package changes via Android 16-17 ITaskStackListener
+ * Monitors foreground Activity package changes via Android 16+ ITaskStackListener
  * paired with a low-frequency reconciliation poll and optional ColorOS focus lookup.
  */
 class ForegroundMonitor(
@@ -124,7 +124,7 @@ class ForegroundMonitor(
                         "asBinder" -> binder
                         "hashCode" -> binder.hashCode()
                         "equals" -> false
-                        "toString" -> "SideveilTaskStackListenerProxy"
+                        "toString" -> "SideVeilTaskStackListenerProxy"
                         else -> null
                     }
                 }

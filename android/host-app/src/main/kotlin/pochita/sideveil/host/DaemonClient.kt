@@ -16,7 +16,7 @@ import pochita.sideveil.protocol.HostEventEnvelope
 import pochita.sideveil.protocol.RpcError
 import pochita.sideveil.protocol.RpcRequest
 import pochita.sideveil.protocol.RpcResponse
-import pochita.sideveil.protocol.SideveilWireJson
+import pochita.sideveil.protocol.SideVeilWireJson
 import pochita.sideveil.protocol.WebSocketCodec
 import pochita.sideveil.protocol.WsOpcode
 import java.io.OutputStream
@@ -31,7 +31,7 @@ import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.cancellation.CancellationException
 
 /**
- * Persistent full-duplex loopback WebSocket client connecting SideveilHost to the UID 1000 daemon.
+ * Persistent full-duplex loopback WebSocket client connecting SideVeilHost to the UID 1000 daemon.
  */
 class DaemonClient(
     private val scope: CoroutineScope,
@@ -95,7 +95,7 @@ class DaemonClient(
         event: String,
         payload: JsonElement? = null,
     ) {
-        val wire = SideveilWireJson.encodeToString(HostEventEnvelope(event = event, payload = payload))
+        val wire = SideVeilWireJson.encodeToString(HostEventEnvelope(event = event, payload = payload))
         sendTextFrame(wire)
     }
 
@@ -105,7 +105,7 @@ class DaemonClient(
         }
 
         val wireId = "h${rpcSeq.incrementAndGet()}_${req.id}"
-        val wireJson = SideveilWireJson.encodeToString(req.copy(id = wireId))
+        val wireJson = SideVeilWireJson.encodeToString(req.copy(id = wireId))
         val deferred = CompletableDeferred<RpcResponse>()
         pendingRpcs[wireId] = deferred
 
@@ -276,10 +276,10 @@ class DaemonClient(
     }
 
     private fun handleIncomingText(text: String) {
-        val obj = runCatching { SideveilWireJson.parseToJsonElement(text).jsonObject }.getOrNull() ?: return
+        val obj = runCatching { SideVeilWireJson.parseToJsonElement(text).jsonObject }.getOrNull() ?: return
 
         if (obj.containsKey("jsonrpc") && obj.containsKey("id")) {
-            val resp = runCatching { SideveilWireJson.decodeFromJsonElement<RpcResponse>(obj) }.getOrNull()
+            val resp = runCatching { SideVeilWireJson.decodeFromJsonElement<RpcResponse>(obj) }.getOrNull()
             if (resp != null) {
                 pendingRpcs.remove(resp.id)?.complete(resp)
                 return
@@ -287,7 +287,7 @@ class DaemonClient(
         }
 
         if (obj.containsKey("event")) {
-            val env = runCatching { SideveilWireJson.decodeFromJsonElement<HostEventEnvelope>(obj) }.getOrNull()
+            val env = runCatching { SideVeilWireJson.decodeFromJsonElement<HostEventEnvelope>(obj) }.getOrNull()
             if (env != null) {
                 onEvent(env)
             }
@@ -353,7 +353,7 @@ class DaemonClient(
     }
 
     companion object {
-        private const val TAG = "SideveilDaemonClient"
+        private const val TAG = "SideVeilDaemonClient"
         private val BACKOFF_MS = longArrayOf(1_000L, 2_000L, 5_000L, 10_000L)
     }
 }

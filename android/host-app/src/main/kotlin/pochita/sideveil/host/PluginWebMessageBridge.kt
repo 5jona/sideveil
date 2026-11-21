@@ -20,8 +20,8 @@ import pochita.sideveil.protocol.ContainerActionPayload
 import pochita.sideveil.protocol.PluginDescriptor
 import pochita.sideveil.protocol.RpcRequest
 import pochita.sideveil.protocol.RpcResponse
-import pochita.sideveil.protocol.SideveilMethods
-import pochita.sideveil.protocol.SideveilWireJson
+import pochita.sideveil.protocol.SideVeilMethods
+import pochita.sideveil.protocol.SideVeilWireJson
 
 /**
  * Manages the `WebMessagePort` / `window.__POCHITA_HOST__` channel, queued pre-ready
@@ -121,8 +121,8 @@ internal class PluginWebMessageBridge(
     }
 
     private fun handleMessageFromWebView(raw: String) {
-        val req = runCatching { SideveilWireJson.decodeFromString<RpcRequest>(raw) }.getOrNull() ?: return
-        if (req.method == SideveilMethods.CONTAINER_ACTION) {
+        val req = runCatching { SideVeilWireJson.decodeFromString<RpcRequest>(raw) }.getOrNull() ?: return
+        if (req.method == SideVeilMethods.CONTAINER_ACTION) {
             handleContainerAction(req)
             return
         }
@@ -137,7 +137,7 @@ internal class PluginWebMessageBridge(
         val stamped = req.copy(pluginId = descriptorProvider().id)
         scope.launch {
             val response = daemonClient.forwardRpc(stamped)
-            val encoded = SideveilWireJson.encodeToString(response)
+            val encoded = SideVeilWireJson.encodeToString(response)
             mainHandler.post { sendToWebView(encoded) }
         }
     }
@@ -145,12 +145,12 @@ internal class PluginWebMessageBridge(
     private fun handleContainerAction(req: RpcRequest) {
         val action =
             req.params?.let { params ->
-                runCatching { SideveilWireJson.decodeFromJsonElement<ContainerActionPayload>(params) }.getOrNull()
+                runCatching { SideVeilWireJson.decodeFromJsonElement<ContainerActionPayload>(params) }.getOrNull()
             }
         mainHandler.post {
             onContainerAction(action)
             val ok = RpcResponse(id = req.id, result = buildJsonObject { put("ok", JsonPrimitive(true)) })
-            sendToWebView(SideveilWireJson.encodeToString(ok))
+            sendToWebView(SideVeilWireJson.encodeToString(ok))
         }
     }
 
@@ -198,7 +198,7 @@ internal class PluginWebMessageBridge(
     }
 
     companion object {
-        private const val TAG = "SideveilPluginBridge"
+        private const val TAG = "SideVeilPluginBridge"
         private const val MAX_PENDING_EVENTS = 16
     }
 }

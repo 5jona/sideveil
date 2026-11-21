@@ -1,6 +1,6 @@
 #!/system/bin/sh
 #
-# Cleanup script executed when the Sideveil KernelSU module is removed.
+# Cleanup script executed when the SideVeil KernelSU module is removed.
 #
 
 terminate_pid() {

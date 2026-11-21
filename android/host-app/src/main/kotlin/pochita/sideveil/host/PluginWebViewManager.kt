@@ -21,8 +21,8 @@ import pochita.sideveil.protocol.PluginPresentationMode
 import pochita.sideveil.protocol.PluginScopedEventPayload
 import pochita.sideveil.protocol.PluginSurfaceBackdrop
 import pochita.sideveil.protocol.PluginsSnapshotPayload
-import pochita.sideveil.protocol.SideveilEvents
-import pochita.sideveil.protocol.SideveilWireJson
+import pochita.sideveil.protocol.SideVeilEvents
+import pochita.sideveil.protocol.SideVeilWireJson
 
 /**
  * Manages the LRU warm pool (max [MAX_WARM_INSTANCES] WebViews) of isolated plugin sandboxes,
@@ -103,10 +103,10 @@ internal class PluginWebViewManager(
             inst.setForegroundPriority(nextState != PanelState.CLOSED && id == activePluginId)
         }
         val payload =
-            SideveilWireJson.encodeToJsonElement(
+            SideVeilWireJson.encodeToJsonElement(
                 PanelVisibilityPayload(visible = nextState != PanelState.CLOSED, state = nextState),
             )
-        warmInstances[activePluginId]?.pushEvent(SideveilEvents.PANEL_VISIBILITY, payload)
+        warmInstances[activePluginId]?.pushEvent(SideVeilEvents.PANEL_VISIBILITY, payload)
         reportDiagnostics()
     }
 
@@ -118,7 +118,7 @@ internal class PluginWebViewManager(
                 hostNativeHeapKb = Debug.getNativeHeapAllocatedSize() / 1024L,
                 hostPssKb = runCatching { Debug.getPss() }.getOrNull(),
             )
-        daemonClient.sendEvent(SideveilEvents.HOST_DIAGNOSTICS, SideveilWireJson.encodeToJsonElement(diag))
+        daemonClient.sendEvent(SideVeilEvents.HOST_DIAGNOSTICS, SideVeilWireJson.encodeToJsonElement(diag))
     }
 
     fun isBackIntercepted(): Boolean = warmInstances[activePluginId]?.backInterceptEnabled == true
@@ -129,16 +129,16 @@ internal class PluginWebViewManager(
         val active = warmInstances[activePluginId] ?: return false
         if (!active.backInterceptEnabled) return false
         active.pushEvent(
-            SideveilEvents.PANEL_BACK_PRESSED,
+            SideVeilEvents.PANEL_BACK_PRESSED,
             buildJsonObject { put("timestampMs", JsonPrimitive(System.currentTimeMillis())) },
         )
         return true
     }
 
     fun broadcastGlobalEvent(envelope: HostEventEnvelope) {
-        if (envelope.event == SideveilEvents.CONFIG_UPDATED) {
+        if (envelope.event == SideVeilEvents.CONFIG_UPDATED) {
             lastConfigEnvelope = envelope
-        } else if (envelope.event == SideveilEvents.THEME_PALETTE_UPDATED) {
+        } else if (envelope.event == SideVeilEvents.THEME_PALETTE_UPDATED) {
             lastPaletteEnvelope = envelope
         }
         for (instance in warmInstances.values) {
@@ -155,15 +155,15 @@ internal class PluginWebViewManager(
             notifyRail()
         }
         warmInstances[payload.pluginId]?.pushEvent(
-            SideveilEvents.PLUGIN_BACKEND_STATE,
-            SideveilWireJson.encodeToJsonElement(payload),
+            SideVeilEvents.PLUGIN_BACKEND_STATE,
+            SideVeilWireJson.encodeToJsonElement(payload),
         )
     }
 
     fun routePluginScopedEvent(payload: PluginScopedEventPayload) {
         warmInstances[payload.pluginId]?.pushEvent(
-            SideveilEvents.PLUGIN_EVENT,
-            SideveilWireJson.encodeToJsonElement(payload),
+            SideVeilEvents.PLUGIN_EVENT,
+            SideVeilWireJson.encodeToJsonElement(payload),
         )
     }
 
@@ -190,8 +190,8 @@ internal class PluginWebViewManager(
         val switching = previousId != descriptor.id
         if (switching && panelState != PanelState.CLOSED) {
             warmInstances[previousId]?.pushEvent(
-                SideveilEvents.PANEL_VISIBILITY,
-                SideveilWireJson.encodeToJsonElement(
+                SideVeilEvents.PANEL_VISIBILITY,
+                SideVeilWireJson.encodeToJsonElement(
                     PanelVisibilityPayload(visible = false, state = PanelState.CLOSED),
                 ),
             )
@@ -213,8 +213,8 @@ internal class PluginWebViewManager(
         reportDiagnostics()
         if (switching && panelState != PanelState.CLOSED) {
             instance.pushEvent(
-                SideveilEvents.PANEL_VISIBILITY,
-                SideveilWireJson.encodeToJsonElement(
+                SideVeilEvents.PANEL_VISIBILITY,
+                SideVeilWireJson.encodeToJsonElement(
                     PanelVisibilityPayload(visible = true, state = panelState),
                 ),
             )
@@ -346,7 +346,7 @@ internal class PluginWebViewManager(
     }
 
     companion object {
-        private const val TAG = "SideveilPluginMgr"
+        private const val TAG = "SideVeilPluginMgr"
         private const val MAX_WARM_INSTANCES = 3
     }
 }

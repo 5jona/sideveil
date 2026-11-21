@@ -8,7 +8,7 @@ import android.util.Log
  * Rasterizes declarative `NativeHudScene` JSON directly into locked Android `ARGB_8888` Bitmaps.
  */
 internal object NativeHudRenderer {
-    private const val TAG = "SideveilNativeHudJni"
+    private const val TAG = "SideVeilNativeHudJni"
 
     val isAvailable: Boolean =
         runCatching {

@@ -21,10 +21,10 @@ import pochita.sideveil.protocol.HostEventEnvelope
 import pochita.sideveil.protocol.PluginDescriptor
 import pochita.sideveil.protocol.PluginPresentationMode
 import pochita.sideveil.protocol.PluginSurfaceBackdrop
-import pochita.sideveil.protocol.SideveilWireJson
+import pochita.sideveil.protocol.SideVeilWireJson
 
 /**
- * Isolated WebView sandbox instance for a single Sideveil plugin under
+ * Isolated WebView sandbox instance for a single SideVeil plugin under
  * `https://<pluginId>.plugins.sideveil.local/` with `onRenderProcessGone` crash recovery,
  * per-plugin container preferences, and [PluginWebMessageBridge] IPC routing.
  */
@@ -122,12 +122,12 @@ internal class PluginWebViewInstance(
         event: String,
         payload: JsonElement?,
     ) {
-        val raw = SideveilWireJson.encodeToString(HostEventEnvelope(event = event, payload = payload))
+        val raw = SideVeilWireJson.encodeToString(HostEventEnvelope(event = event, payload = payload))
         messageBridge.postRawAsync(raw)
     }
 
     fun pushEnvelope(envelope: HostEventEnvelope) {
-        messageBridge.postRawAsync(SideveilWireJson.encodeToString(envelope))
+        messageBridge.postRawAsync(SideVeilWireJson.encodeToString(envelope))
     }
 
     fun destroy() {
@@ -257,6 +257,6 @@ internal class PluginWebViewInstance(
         }
 
     companion object {
-        private const val TAG = "SideveilPluginWebView"
+        private const val TAG = "SideVeilPluginWebView"
     }
 }

@@ -9,7 +9,7 @@ import android.util.Log
 import pochita.sideveil.protocol.HostDynamicColorsPayload
 
 /**
- * Extracts Android 16–17 Material You dynamic accent seed (`system_accent1_500`) and
+ * Extracts Android 16+ Material You dynamic accent seed (`system_accent1_500`) and
  * wallpaper luminance hints (`WallpaperColors`), notifying [HostService] on changes so
  * `sideveild` synthesizes unified `Oklch` glass & WebView CSS tokens.
  */
@@ -110,7 +110,7 @@ internal class DynamicThemeExtractor(
     }
 
     companion object {
-        private const val TAG = "SideveilDynamicTheme"
+        private const val TAG = "SideVeilDynamicTheme"
         private const val DEFAULT_SEED_ARGB = 0xFF38BDF8.toInt()
     }
 }

@@ -1,7 +1,7 @@
 //! Zero-polling process supervisor using Linux `pidfd_open` + Tokio `AsyncFd` (`epoll`).
 //!
 //! Supervises the thin UID 1000 Kotlin `:sensor` child directly (no `su` wrapper) and
-//! keeps the AMS-managed `SideveilHost` foreground service synced and alive on demand.
+//! keeps the AMS-managed `SideVeilHost` foreground service synced and alive on demand.
 
 mod host_wake;
 
@@ -159,7 +159,7 @@ async fn run_host_supervisor(
                         retry_deadline = None;
                         watched_pidfd = PidFd::open(pid).ok();
                         if watched_pidfd.is_some() {
-                            state.logs().info(format!("Armed pidfd watcher on SideveilHost pid={pid}"));
+                            state.logs().info(format!("Armed pidfd watcher on SideVeilHost pid={pid}"));
                         }
                     }
                     HostWakeSignal::HostDisconnected => {
@@ -172,7 +172,7 @@ async fn run_host_supervisor(
             Ok(()) = wait_optional_pidfd(watched_pidfd.as_ref()) => {
                 let dead_pid = watched_pidfd.as_ref().map(PidFd::pid).unwrap_or(0);
                 watched_pidfd = None;
-                state.logs().warn(format!("SideveilHost pid={dead_pid} exited (pidfd wakeup); scheduling wake"));
+                state.logs().warn(format!("SideVeilHost pid={dead_pid} exited (pidfd wakeup); scheduling wake"));
                 state.request_sensor_permission_refresh();
                 retry_delay_secs = 2;
                 retry_deadline = Some(tokio::time::Instant::now() + Duration::from_secs(1));

@@ -5,10 +5,10 @@
 
 SKIPUNZIP=0
 
-ui_print "- Installing Sideveil..."
+ui_print "- Installing SideVeil..."
 
 if [ "$ARCH" != "arm64" ]; then
-    abort "! Unsupported architecture: $ARCH. Sideveil requires arm64."
+    abort "! Unsupported architecture: $ARCH. SideVeil requires arm64."
 fi
 
 ui_print "- Setting module file permissions..."
@@ -46,5 +46,5 @@ else
     ui_print "- Preserved existing ${STATE_DIR}/config.json"
 fi
 
-ui_print "- SideveilHost APK will mount under /system/priv-app after reboot."
+ui_print "- SideVeilHost APK will mount under /system/priv-app after reboot."
 ui_print "- Installation completed successfully."

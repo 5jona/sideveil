@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-/// Upstream dynamic color seed reported by `SideveilHost` from Android Material You / WallpaperColors.
+/// Upstream dynamic color seed reported by `SideVeilHost` from Android Material You / WallpaperColors.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HostDynamicColorsPayload {
@@ -28,7 +28,7 @@ pub struct GlassTintOverride {
     pub fallback_stroke_argb: u32,
 }
 
-/// Single-source synthesized palette broadcast from `sideveild` to `SideveilHost` and plugin WebViews.
+/// Single-source synthesized palette broadcast from `sideveild` to `SideVeilHost` and plugin WebViews.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DynamicThemePalette {

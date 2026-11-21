@@ -15,8 +15,8 @@ import pochita.sideveil.protocol.PluginDescriptor
 import pochita.sideveil.protocol.RpcError
 import pochita.sideveil.protocol.RpcRequest
 import pochita.sideveil.protocol.RpcResponse
-import pochita.sideveil.protocol.SideveilMethods
-import pochita.sideveil.protocol.SideveilWireJson
+import pochita.sideveil.protocol.SideVeilMethods
+import pochita.sideveil.protocol.SideVeilWireJson
 
 /**
  * Handles host-local ACL-gated plugin RPCs (`ui.toast`, `clipboard.get`, `clipboard.set`,
@@ -34,10 +34,10 @@ internal class PluginLocalRpcHandler(
         sendReply: (String) -> Unit,
     ): Boolean {
         when (req.method) {
-            SideveilMethods.UI_TOAST -> handleToast(req, descriptor, sendReply)
-            SideveilMethods.CLIPBOARD_GET -> handleClipboardGet(req, descriptor, sendReply)
-            SideveilMethods.CLIPBOARD_SET -> handleClipboardSet(req, descriptor, sendReply)
-            SideveilMethods.HAPTICS_TRIGGER -> handleHaptics(req, descriptor, sendReply)
+            SideVeilMethods.UI_TOAST -> handleToast(req, descriptor, sendReply)
+            SideVeilMethods.CLIPBOARD_GET -> handleClipboardGet(req, descriptor, sendReply)
+            SideVeilMethods.CLIPBOARD_SET -> handleClipboardSet(req, descriptor, sendReply)
+            SideVeilMethods.HAPTICS_TRIGGER -> handleHaptics(req, descriptor, sendReply)
             else -> return false
         }
         return true
@@ -89,7 +89,7 @@ internal class PluginLocalRpcHandler(
                     id = req.id,
                     result = buildJsonObject { put("text", JsonPrimitive(text.orEmpty())) },
                 )
-            sendReply(SideveilWireJson.encodeToString(resp))
+            sendReply(SideVeilWireJson.encodeToString(resp))
         }
     }
 
@@ -112,7 +112,7 @@ internal class PluginLocalRpcHandler(
         mainHandler.post {
             runCatching {
                 val cm = context.getSystemService(ClipboardManager::class.java)
-                cm?.setPrimaryClip(ClipData.newPlainText("Sideveil Plugin", text))
+                cm?.setPrimaryClip(ClipData.newPlainText("SideVeil Plugin", text))
             }
             sendOk(req.id, sendReply)
         }
@@ -155,7 +155,7 @@ internal class PluginLocalRpcHandler(
         sendReply: (String) -> Unit,
     ) {
         val ok = RpcResponse(id = id, result = buildJsonObject { put("ok", JsonPrimitive(true)) })
-        sendReply(SideveilWireJson.encodeToString(ok))
+        sendReply(SideVeilWireJson.encodeToString(ok))
     }
 
     private fun sendDenied(
@@ -165,6 +165,6 @@ internal class PluginLocalRpcHandler(
         sendReply: (String) -> Unit,
     ) {
         val denied = RpcResponse(id = id, error = RpcError(-32003, "Plugin '$pluginId' lacks '$capName' capability"))
-        mainHandler.post { sendReply(SideveilWireJson.encodeToString(denied)) }
+        mainHandler.post { sendReply(SideVeilWireJson.encodeToString(denied)) }
     }
 }

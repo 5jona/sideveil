@@ -6,7 +6,7 @@ use std::io::{self, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
-use sideveil_protocol::config::{ScopeMode, SideveilConfig};
+use sideveil_protocol::config::{ScopeMode, SideVeilConfig};
 use sideveil_protocol::plugin::{
     BUILTIN_DIAG_PLUGIN_ID, PluginBackendKind, PluginBackendState, PluginCapability,
     PluginDescriptor, PluginManifest, PluginOverrideEntry, PluginOverridesFile,
@@ -41,7 +41,7 @@ pub(super) fn builtin_diag_manifest() -> PluginManifest {
 pub(super) fn build_descriptor(
     loaded: &LoadedPlugin,
     ov: Option<&PluginOverrideEntry>,
-    config: &SideveilConfig,
+    config: &SideVeilConfig,
     backend_online: bool,
 ) -> PluginDescriptor {
     let clean_scope = config.scope.sanitized();

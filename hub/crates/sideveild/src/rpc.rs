@@ -1,4 +1,4 @@
-//! Async JSON-RPC 2.0 request dispatcher shared by `hub.sock` CLI and `SideveilHost` WS.
+//! Async JSON-RPC 2.0 request dispatcher shared by `hub.sock` CLI and `SideVeilHost` WS.
 
 mod control;
 mod plugins;
@@ -18,7 +18,7 @@ use crate::state::HubState;
 pub enum RpcCaller {
     /// Privileged root CLI (`sideveil-ctl`) connected over `hub.sock`.
     Ctl,
-    /// Sandboxed WebView panel forwarded by `SideveilHost` WS (carries trusted `pluginId`).
+    /// Sandboxed WebView panel forwarded by `SideVeilHost` WS (carries trusted `pluginId`).
     HostWebView,
 }
 

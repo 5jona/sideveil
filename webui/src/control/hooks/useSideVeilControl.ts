@@ -7,8 +7,8 @@ import {
   type CtlCommand,
   type DaemonStatus,
   DEFAULT_CONFIG,
-  normalizeSideveilConfig,
-  type SideveilConfig,
+  normalizeSideVeilConfig,
+  type SideVeilConfig,
 } from '../../shared/types.ts';
 import { usePluginsControl } from './usePluginsControl.ts';
 
@@ -26,12 +26,12 @@ function parseDaemonLogLines(lines: readonly string[]): LogEntry[] {
   });
 }
 
-export function useSideveilControl() {
+export function useSideVeilControl() {
   const bridge = useBridge();
   const { pushToast } = useToast();
   const { setThemeId, setColorMode } = useTheme();
 
-  const [config, setConfigState] = useState<SideveilConfig>(DEFAULT_CONFIG);
+  const [config, setConfigState] = useState<SideVeilConfig>(DEFAULT_CONFIG);
   const [status, setStatus] = useState<DaemonStatus | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [ctlBusyAction, setCtlBusyAction] = useState<CtlCommand | null>(null);
@@ -56,8 +56,8 @@ export function useSideveilControl() {
 
   const busyAction = ctlBusyAction ?? pluginBusyAction;
 
-  const latestConfigRef = useRef<SideveilConfig>(DEFAULT_CONFIG);
-  const pendingSaveConfigRef = useRef<SideveilConfig | null>(null);
+  const latestConfigRef = useRef<SideVeilConfig>(DEFAULT_CONFIG);
+  const pendingSaveConfigRef = useRef<SideVeilConfig | null>(null);
   const configLoadErrorRef = useRef<string | null>(null);
   configLoadErrorRef.current = configLoadError;
   const isLoadedRef = useRef(false);
@@ -118,8 +118,8 @@ export function useSideveilControl() {
         await bridge.writeFileAtomic(CONFIG_PATH, JSON.stringify(DEFAULT_CONFIG, null, 2));
       } else {
         try {
-          const parsed = JSON.parse(raw) as Partial<SideveilConfig>;
-          const normalized = normalizeSideveilConfig(parsed);
+          const parsed = JSON.parse(raw) as Partial<SideVeilConfig>;
+          const normalized = normalizeSideVeilConfig(parsed);
           latestConfigRef.current = normalized;
           setConfigState(normalized);
           setThemeId(normalized.panel.themeId);
@@ -141,7 +141,7 @@ export function useSideveilControl() {
   }, [bridge, setColorMode, setThemeId]);
 
   const persistConfig = useCallback(
-    async (nextConfig: SideveilConfig) => {
+    async (nextConfig: SideVeilConfig) => {
       if (configLoadErrorRef.current !== null) {
         setSaving(false);
         return;
@@ -176,11 +176,11 @@ export function useSideveilControl() {
   }, [persistConfig]);
 
   const updateConfig = useCallback(
-    (updater: (prev: SideveilConfig) => SideveilConfig) => {
+    (updater: (prev: SideVeilConfig) => SideVeilConfig) => {
       if (!isLoadedRef.current || configLoadErrorRef.current !== null) {
         return;
       }
-      const next = normalizeSideveilConfig(updater(latestConfigRef.current));
+      const next = normalizeSideVeilConfig(updater(latestConfigRef.current));
       latestConfigRef.current = next;
       pendingSaveConfigRef.current = next;
       setConfigState(next);

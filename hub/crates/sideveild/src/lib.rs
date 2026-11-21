@@ -1,4 +1,4 @@
-//! Sideveil core hub library modules.
+//! SideVeil core hub library modules.
 
 pub mod asset_server;
 pub mod audit_ring;

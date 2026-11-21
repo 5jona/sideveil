@@ -1,4 +1,4 @@
-//! Authenticated loopback WebSocket endpoint (`127.0.0.1:0/ws`) for `SideveilHost` (`priv-app`).
+//! Authenticated loopback WebSocket endpoint (`127.0.0.1:0/ws`) for `SideVeilHost` (`priv-app`).
 
 use std::io;
 use std::sync::Arc;

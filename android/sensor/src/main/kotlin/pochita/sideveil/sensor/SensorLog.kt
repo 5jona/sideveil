@@ -6,7 +6,7 @@ import android.util.Log
  * Minimal structured logger for the thin UID 1000 `:sensor` process.
  */
 object SensorLog {
-    private const val TAG = "SideveilSensor"
+    private const val TAG = "SideVeilSensor"
 
     fun info(message: String) {
         runCatching { Log.i(TAG, message) }

@@ -23,7 +23,7 @@ import { AppearanceScopeTab } from './components/AppearanceScopeTab.tsx';
 import { DiagnosticsTab } from './components/DiagnosticsTab.tsx';
 import { OverviewEdgeTab } from './components/OverviewEdgeTab.tsx';
 import { PluginsTab } from './components/PluginsTab.tsx';
-import { useSideveilControl } from './hooks/useSideveilControl.ts';
+import { useSideVeilControl } from './hooks/useSideVeilControl.ts';
 import { handleMockControlExec } from './mockControlBridge.ts';
 
 function ControlWorkbench() {
@@ -52,7 +52,7 @@ function ControlWorkbench() {
     selectPlugin,
     runCtl,
     clearLogs,
-  } = useSideveilControl();
+  } = useSideVeilControl();
 
   const isPanelOpen = status?.panelState === 'open';
   const envLabel =
@@ -65,7 +65,7 @@ function ControlWorkbench() {
   return (
     <AppShell
       variant="page"
-      title="Sideveil 控制台"
+      title="SideVeil 控制台"
       subtitle="全局边缘手势与悬浮窗宿主"
       headerLeading={
         <div className="flex size-9 items-center justify-center rounded-[var(--radius-control)] bg-[var(--accent-soft)] text-[var(--accent)]">
@@ -131,7 +131,7 @@ function ControlWorkbench() {
         <div className="mb-4 flex items-center justify-between gap-3 rounded-[var(--radius-control)] border border-[color-mix(in_oklab,var(--danger)_35%,transparent)] bg-[color-mix(in_oklab,var(--danger)_12%,transparent)] p-3 text-xs text-[var(--text-primary)]">
           <div className="flex items-center gap-2">
             <AlertCircle className="size-4 shrink-0 text-[var(--danger)]" />
-            <span>Sideveil 守护进程未运行：{daemonOfflineError}</span>
+            <span>SideVeil 守护进程未运行：{daemonOfflineError}</span>
           </div>
           <Button size="sm" variant="secondary" onClick={() => void refreshStatus()}>
             重试连接

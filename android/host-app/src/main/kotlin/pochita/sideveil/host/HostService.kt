@@ -28,12 +28,12 @@ import pochita.sideveil.protocol.PluginSelectEventPayload
 import pochita.sideveil.protocol.PluginSurfaceBackdrop
 import pochita.sideveil.protocol.PluginsSnapshotPayload
 import pochita.sideveil.protocol.ScopeChangedPayload
-import pochita.sideveil.protocol.SideveilConfig
-import pochita.sideveil.protocol.SideveilEvents
-import pochita.sideveil.protocol.SideveilWireJson
+import pochita.sideveil.protocol.SideVeilConfig
+import pochita.sideveil.protocol.SideVeilEvents
+import pochita.sideveil.protocol.SideVeilWireJson
 
 /**
- * Headless foreground service running inside the AMS-managed SideveilHost priv-app process.
+ * Headless foreground service running inside the AMS-managed SideVeilHost priv-app process.
  * Hosts warm overlay windows (edge handle, multi-plugin Rail, sidebar panel) and manages
  * isolated per-plugin WebView sandboxes bridged to `sideveild`.
  */
@@ -55,7 +55,7 @@ class HostService : LifecycleService() {
     private lateinit var overlayCoordinator: HostOverlayCoordinator
     private lateinit var eventDispatcher: HostEventDispatcher
 
-    private var latestConfig: SideveilConfig = SideveilConfig.DEFAULT
+    private var latestConfig: SideVeilConfig = SideVeilConfig.DEFAULT
     private var latestScopeActive: Boolean = false
     private var latestDarkSurface: Boolean = true
     private var latestThemeId: String = "coloros-glass"
@@ -210,8 +210,8 @@ class HostService : LifecycleService() {
         if (!pluginManager.selectPlugin(pluginId)) return
         haptics.onRailSwitch()
         daemonClient.sendEvent(
-            SideveilEvents.HOST_SELECT_PLUGIN,
-            SideveilWireJson.encodeToJsonElement(
+            SideVeilEvents.HOST_SELECT_PLUGIN,
+            SideVeilWireJson.encodeToJsonElement(
                 PluginSelectEventPayload(
                     pluginId = pluginId,
                     packageName = latestForegroundPackage.ifBlank { null },
@@ -222,8 +222,8 @@ class HostService : LifecycleService() {
 
     private fun handleFullscreenChanged(fullscreen: Boolean) {
         daemonClient.sendEvent(
-            SideveilEvents.HOST_FULLSCREEN_CHANGED,
-            SideveilWireJson.encodeToJsonElement(HostFullscreenChangedPayload(fullscreen)),
+            SideVeilEvents.HOST_FULLSCREEN_CHANGED,
+            SideVeilWireJson.encodeToJsonElement(HostFullscreenChangedPayload(fullscreen)),
         )
     }
 
@@ -243,8 +243,8 @@ class HostService : LifecycleService() {
 
     private fun sendHostConnectedState() {
         daemonClient.sendEvent(
-            SideveilEvents.HOST_HELLO,
-            SideveilWireJson.encodeToJsonElement(
+            SideVeilEvents.HOST_HELLO,
+            SideVeilWireJson.encodeToJsonElement(
                 HostHelloPayload(
                     pid = Process.myPid(),
                     version = BuildConfig.VERSION_NAME,
@@ -255,8 +255,8 @@ class HostService : LifecycleService() {
         val currentState = panelWindow.currentState
         if (currentState != PanelState.CLOSED) {
             daemonClient.sendEvent(
-                SideveilEvents.PANEL_STATE_CHANGED,
-                SideveilWireJson.encodeToJsonElement(PanelStateChangedPayload(currentState)),
+                SideVeilEvents.PANEL_STATE_CHANGED,
+                SideVeilWireJson.encodeToJsonElement(PanelStateChangedPayload(currentState)),
             )
         }
         handleFullscreenChanged(edgeIndicator.isFullscreenActive())
@@ -335,8 +335,8 @@ class HostService : LifecycleService() {
 
     private fun handlePanelStateChanged(state: PanelState) {
         daemonClient.sendEvent(
-            SideveilEvents.PANEL_STATE_CHANGED,
-            SideveilWireJson.encodeToJsonElement(PanelStateChangedPayload(state)),
+            SideVeilEvents.PANEL_STATE_CHANGED,
+            SideVeilWireJson.encodeToJsonElement(PanelStateChangedPayload(state)),
         )
         if (state == PanelState.CLOSED) {
             pluginRail.setPanelOpen(false)
@@ -361,6 +361,6 @@ class HostService : LifecycleService() {
     }
 
     companion object {
-        private const val TAG = "SideveilHostService"
+        private const val TAG = "SideVeilHostService"
     }
 }

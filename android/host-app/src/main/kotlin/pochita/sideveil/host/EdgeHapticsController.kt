@@ -6,7 +6,7 @@ import android.os.Vibrator
 import android.os.VibratorManager
 
 /**
- * Stepped tactile haptic feedback controller using Android 16–17 [VibrationEffect.Composition]
+ * Stepped tactile haptic feedback controller using Android 16+ [VibrationEffect.Composition]
  * primitives with graceful predefined-effect fallback on devices without rich actuators.
  */
 internal class EdgeHapticsController(

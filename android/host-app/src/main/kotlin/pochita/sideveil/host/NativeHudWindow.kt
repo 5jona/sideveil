@@ -33,7 +33,7 @@ internal class NativeHudWindow(
         get() =
             context.resources.displayMetrics.density
                 .coerceAtLeast(1f)
-    private val themedContext = ContextThemeWrapper(context, R.style.Theme_Sideveil_OverlayDialog)
+    private val themedContext = ContextThemeWrapper(context, R.style.Theme_SideVeil_OverlayDialog)
     private val backdropDrawable = GlassBackdropDrawable(density)
     private val hudView = NativeHudView(themedContext)
     private val container =
@@ -47,7 +47,7 @@ internal class NativeHudWindow(
             )
         }
 
-    private val dialog = Dialog(themedContext, R.style.Theme_Sideveil_OverlayDialog)
+    private val dialog = Dialog(themedContext, R.style.Theme_SideVeil_OverlayDialog)
 
     private var attached = false
     private var visible = false
@@ -86,7 +86,7 @@ internal class NativeHudWindow(
         lastCornerPx = cornerPx()
 
         val lp = window.attributes
-        lp.title = "SideveilNativeHud"
+        lp.title = "SideVeilNativeHud"
         lp.gravity = Gravity.TOP or Gravity.LEFT
         lp.width = 1
         lp.height = 1
@@ -290,7 +290,7 @@ internal class NativeHudWindow(
     private fun dp(value: Float): Int = (value * density + 0.5f).toInt().coerceAtLeast(1)
 
     companion object {
-        private const val TAG = "SideveilNativeHud"
+        private const val TAG = "SideVeilNativeHud"
 
         private const val INVISIBLE_FLAGS =
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or

@@ -132,7 +132,7 @@ sealed interface HubToSensor {
     @Serializable
     @SerialName("syncState")
     data class SyncState(
-        val config: SideveilConfig,
+        val config: SideVeilConfig,
         val scopeActive: Boolean,
         val panelState: PanelState,
         val fullscreenActive: Boolean = false,

@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, PoisonError, RwLock};
 use std::time::Duration;
 
-use sideveil_protocol::config::{AppearancePatchParams, EdgePatchParams, SideveilConfig};
+use sideveil_protocol::config::{AppearancePatchParams, EdgePatchParams, SideVeilConfig};
 use tokio::sync::broadcast;
 
 use crate::inotify::{DIR_CHANGE_MASK, InotifyDirWatcher};
@@ -18,8 +18,8 @@ use crate::log_ring::LogRing;
 #[derive(Debug)]
 pub struct ConfigStore {
     path: PathBuf,
-    current: RwLock<SideveilConfig>,
-    updates_tx: broadcast::Sender<SideveilConfig>,
+    current: RwLock<SideVeilConfig>,
+    updates_tx: broadcast::Sender<SideVeilConfig>,
     logs: Arc<LogRing>,
 }
 
@@ -44,7 +44,7 @@ impl ConfigStore {
     }
 
     #[must_use]
-    pub fn current(&self) -> SideveilConfig {
+    pub fn current(&self) -> SideVeilConfig {
         self.current
             .read()
             .unwrap_or_else(PoisonError::into_inner)
@@ -52,12 +52,12 @@ impl ConfigStore {
     }
 
     #[must_use]
-    pub fn subscribe(&self) -> broadcast::Receiver<SideveilConfig> {
+    pub fn subscribe(&self) -> broadcast::Receiver<SideVeilConfig> {
         self.updates_tx.subscribe()
     }
 
     /// Re-reads and validates `config.json` from disk; preserves last known good config on error.
-    pub fn reload(&self) -> SideveilConfig {
+    pub fn reload(&self) -> SideVeilConfig {
         let Some(next) = load_from_disk(&self.path, &self.logs) else {
             return self.current();
         };
@@ -81,7 +81,7 @@ impl ConfigStore {
     }
 
     /// Applies a partial appearance patch, atomically persists it, and notifies subscribers.
-    pub fn patch_appearance(&self, patch: &AppearancePatchParams) -> io::Result<SideveilConfig> {
+    pub fn patch_appearance(&self, patch: &AppearancePatchParams) -> io::Result<SideVeilConfig> {
         let next = {
             let mut guard = self.current.write().unwrap_or_else(PoisonError::into_inner);
             let updated = guard.apply_appearance_patch(patch);
@@ -94,7 +94,7 @@ impl ConfigStore {
     }
 
     /// Applies an edge handle position patch (side/topPercent), atomically persists it, and notifies subscribers.
-    pub fn patch_edge(&self, patch: &EdgePatchParams) -> io::Result<SideveilConfig> {
+    pub fn patch_edge(&self, patch: &EdgePatchParams) -> io::Result<SideVeilConfig> {
         let next = {
             let mut guard = self.current.write().unwrap_or_else(PoisonError::into_inner);
             let updated = guard.apply_edge_patch(patch);
@@ -139,7 +139,7 @@ impl ConfigStore {
         }))
     }
 
-    fn persist_config(&self, config: &SideveilConfig) -> io::Result<()> {
+    fn persist_config(&self, config: &SideVeilConfig) -> io::Result<()> {
         let parent = self
             .path
             .parent()
@@ -181,16 +181,16 @@ impl ConfigStore {
     }
 }
 
-fn load_from_disk(path: &Path, logs: &LogRing) -> Option<SideveilConfig> {
+fn load_from_disk(path: &Path, logs: &LogRing) -> Option<SideVeilConfig> {
     let raw = match fs::read_to_string(path) {
         Ok(content) => content,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Some(SideveilConfig::default()),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Some(SideVeilConfig::default()),
         Err(err) => {
             logs.warn(format!("Failed to read {}: {err}", path.display()));
             return None;
         }
     };
-    match serde_json::from_str::<SideveilConfig>(&raw) {
+    match serde_json::from_str::<SideVeilConfig>(&raw) {
         Ok(cfg) => Some(cfg.sanitized()),
         Err(err) => {
             logs.warn(format!(
@@ -238,7 +238,7 @@ mod tests {
         let watcher = store.spawn_watcher().expect("spawn inotify watcher");
 
         // Atomic write via rename (simulating KernelSU WebUI writeFileAtomic).
-        let mut modified = SideveilConfig::default();
+        let mut modified = SideVeilConfig::default();
         modified.panel.theme_id = "modern-saas-dark".to_owned();
         modified.panel.corner_radius_dp = 30;
         let tmp = dir.join("config.json.external");

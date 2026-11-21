@@ -43,7 +43,7 @@ internal class PluginRailWindow(
         get() =
             context.resources.displayMetrics.density
                 .coerceAtLeast(1f)
-    private val themedContext = ContextThemeWrapper(context, R.style.Theme_Sideveil_OverlayDialog)
+    private val themedContext = ContextThemeWrapper(context, R.style.Theme_SideVeil_OverlayDialog)
     private val backdropDrawable = GlassBackdropDrawable(density)
     private val slotFactory =
         RailSlotFactory(
@@ -75,7 +75,7 @@ internal class PluginRailWindow(
     private var scrubbedPluginId: String? = null
     private var lastDesiredHeightPx: Int = dp(120f)
 
-    private val dialog = Dialog(themedContext, R.style.Theme_Sideveil_OverlayDialog)
+    private val dialog = Dialog(themedContext, R.style.Theme_SideVeil_OverlayDialog)
 
     init {
         val scroll =
@@ -117,7 +117,7 @@ internal class PluginRailWindow(
         window.setBackgroundDrawable(BlurMaskDrawable(cornerPx()))
 
         val lp = window.attributes
-        lp.title = "SideveilPluginRail"
+        lp.title = "SideVeilPluginRail"
         lp.gravity = Gravity.TOP or Gravity.LEFT
         lp.width = 1
         lp.height = 1
@@ -325,7 +325,7 @@ internal class PluginRailWindow(
     private fun dp(value: Float): Int = (value * density + 0.5f).toInt().coerceAtLeast(1)
 
     companion object {
-        private const val TAG = "SideveilPluginRail"
+        private const val TAG = "SideVeilPluginRail"
         const val RAIL_WIDTH_DP = 46
         const val RAIL_GAP_DP = 6
         private const val EDGE_MARGIN_DP = 12

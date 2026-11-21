@@ -1,12 +1,12 @@
-# Sideveil
+# SideVeil
 
 Generic Android sidebar microkernel host packaged as a KernelSU module.
-Target baseline: Android 16–17 (API 36–37, arm64) on Linux GKI 6.12+. Built around a **Rust Core Hub (`sideveild`)**, a **thin `UID 1000` Kotlin System Sensor (`:sensor`)**, and an AMS-managed headless `priv-app` render host (`SideveilHost.apk`).
+Target baseline: Android 16+ (API 36+, arm64) on Linux GKI 6.12+. Built around a **Rust Core Hub (`sideveild`)**, a **thin `UID 1000` Kotlin System Sensor (`:sensor`)**, and an AMS-managed headless `priv-app` render host (`SideVeilHost.apk`).
 
 ## Architecture
 
 1. **Rust Core Hub (`hub/crates/sideveild`, `sideveil-gfx`, `sideveil-hud-jni`, `sideveil-ctl`)**
-   - Supervises `sideveil-sensor` directly (`UID 1000` drop via `pre_exec`) and `SideveilHost` via Linux `pidfd_open` + Tokio `AsyncFd` (`epoll`) with zero shell/curl polling.
+   - Supervises `sideveil-sensor` directly (`UID 1000` drop via `pre_exec`) and `SideVeilHost` via Linux `pidfd_open` + Tokio `AsyncFd` (`epoll`) with zero shell/curl polling.
    - Manages `/data/system/sideveil/config.json` with atomic persistence and `inotify` hot-reload.
    - Hosts the open **Plugin Registry** (`inotify`-watched `/data/system/sideveil/plugins/<plugin_id>/manifest.json`, persistent overrides & per-app MRU in `plugins.json`, package + Activity-level triggers, capability ACLs for `storage`/`toast`/`system-exec`/`native-hud`/`clipboard`/`haptics`/`telemetry`/`inter-plugin-bus`, structured audit ring, authenticated loopback static asset serving with on-demand COOP/COEP headers, per-plugin loopback Dev Mode URLs, and dynamic `uds-native` / `uds-app` backend RPC multiplexing).
    - Integrates **`sideveil-gfx`** (Linebender `color` `Oklch`, `kurbo`, `peniko`, `vello_cpu` NEON + `usvg`): powers on-disk cached SVG-to-PNG icon rasterization (`GET /plugins/<id>/__icon?size=&theme=`), WCAG-verified Material You `Oklch` palette synthesis (`theme.paletteUpdated`), and zero-WebView `NativeHudScene` rasterization via **`sideveil-hud-jni`** (`libsideveil_hud.so` + NDK `libjnigraphics.so`).
@@ -18,8 +18,8 @@ Target baseline: Android 16–17 (API 36–37, arm64) on Linux GKI 6.12+. Built 
    - Grants `OP_SYSTEM_ALERT_WINDOW` and Doze exemption to `pochita.sideveil.host` via `IAppOpsService` and `IDeviceIdleController`.
    - Connects persistently to `sideveild` via `hub.sock` NDJSON framing.
 3. **Headless Render Host APK (`android/host-app`, `pochita.sideveil.host`)**
-   - Packaged into `/system/priv-app/SideveilHost/SideveilHost.apk` (with `arm64-v8a/libsideveil_hud.so`) alongside `privapp-permissions` and `sysconfig` allowlists.
-   - Maintains a click-through `TYPE_APPLICATION_OVERLAY` edge indicator capsule (idle auto-dim/tuck, fullscreen double-swipe pulse, live reposition preview, live status badges), zero-reflow origin-anchored spring panel (`drawer`/`peek`/`wide` + `PinnedContainerWindow` with click-through unlock chip), hardware cross-window blur (`BlurMaskDrawable` + dynamic `Oklch`-tinted AGSL `GlassBackdropDrawable`), IME/cutout/tablet `WindowInsets` avoidance, stepped `VibrationEffect.Composition` haptics, Android 16–17 `OnBackAnimationCallback` predictive back preview, synchronized `46dp` frosted-glass **Plugin Rail** (`PluginRailWindow` with SVG icon loading, blind scrubbing, and quick menu), and zero-WebView **`NativeHudWindow`** (`vello_cpu` NEON Bitmap + HWUI `tnum` text).
+   - Packaged into `/system/priv-app/SideVeilHost/SideVeilHost.apk` (with `arm64-v8a/libsideveil_hud.so`) alongside `privapp-permissions` and `sysconfig` allowlists.
+   - Maintains a click-through `TYPE_APPLICATION_OVERLAY` edge indicator capsule (idle auto-dim/tuck, fullscreen double-swipe pulse, live reposition preview, live status badges), zero-reflow origin-anchored spring panel (`drawer`/`peek`/`wide` + `PinnedContainerWindow` with click-through unlock chip), hardware cross-window blur (`BlurMaskDrawable` + dynamic `Oklch`-tinted AGSL `GlassBackdropDrawable`), IME/cutout/tablet `WindowInsets` avoidance, stepped `VibrationEffect.Composition` haptics, Android 16+ `OnBackAnimationCallback` predictive back preview, synchronized `46dp` frosted-glass **Plugin Rail** (`PluginRailWindow` with SVG icon loading, blind scrubbing, and quick menu), and zero-WebView **`NativeHudWindow`** (`vello_cpu` NEON Bitmap + HWUI `tnum` text).
    - Isolates each plugin in its own warm LRU-cached WebView sandbox under `https://<pluginId>.plugins.sideveil.local/` with `WebMessagePort`, COOP/COEP WebGPU support, loopback Dev Mode proxying, `PluginWebChromeClient` console forwarding, WebGPU VRAM-aware LRU eviction, and `onRenderProcessGone` crash self-healing.
 4. **KernelSU WebUI Control Plane, Built-in Diagnostic Plugin (`webui/`), & Reference Examples (`examples/`)**
    - Built with `@pochita/ui`, `@pochita/bridge`, `@pochita/sideveil-sdk`, and `@pochita/config` from `pochita-webui-kit`.
@@ -49,10 +49,12 @@ sideveil/
 │       ├── sideveild/          # Rust core hub daemon -> bin/sideveild
 │       └── sideveil-ctl/       # Native Rust CLI -> bin/sideveil-ctl
 ├── android/
-│   ├── hidden-stubs/           # compileOnly Android 16–17 @hide stubs
+│   ├── hidden-stubs/           # compileOnly Android 16+ @hide stubs
 │   ├── protocol/               # Minimal Kotlin wire DTOs & RFC 6455 client codec
 │   ├── sensor/                 # Thin UID 1000 app_process sensor -> bin/sideveil-sensor.dex
-│   └── host-app/               # Headless priv-app overlay host -> SideveilHost.apk
+│   └── host-app/               # Headless priv-app overlay host -> SideVeilHost.apk
+├── docs/
+│   └── architecture-decisions.md # Android 16+ UID 1000 boundaries, rendering notes & ADRs
 ├── examples/                   # Official reference plugins (vello-vector-scope, native-perf-hud)
 ├── system/                     # KernelSU Magic Mount priv-app & sysconfig XMLs
 ├── webui/                      # React + Vite + Tailwind v4 Control Plane & Panel apps
@@ -84,4 +86,4 @@ bash reload.sh <device-serial>
 ## Runtime Notes
 
 - `/data/adb` is `0700 root:root` on Android/KernelSU; shared runtime state (`config.json`, `run/`, `plugins/`, `data/`, staged `sideveil-sensor.dex`) lives under `/data/system/sideveil/`.
-- `reload.sh` installs `SideveilHost.apk` via `pm install -r -d` for immediate zero-reboot testing; flashing `out/sideveil.zip` mounts the `priv-app` and whitelist XMLs systemlessly after a reboot.
+- `reload.sh` installs `SideVeilHost.apk` via `pm install -r -d` for immediate zero-reboot testing; flashing `out/sideveil.zip` mounts the `priv-app` and whitelist XMLs systemlessly after a reboot.

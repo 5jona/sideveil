@@ -64,7 +64,7 @@ class EdgeIndicatorWindow(
                     WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                 PixelFormat.TRANSLUCENT,
             ).apply {
-                title = "SideveilEdgeIndicator"
+                title = "SideVeilEdgeIndicator"
                 OverlayWindowFlags.disableMoveAnimation(this)
             }
 
@@ -387,7 +387,7 @@ class EdgeIndicatorWindow(
     private fun dpOrZero(value: Float): Int = (value * currentDensity + 0.5f).toInt().coerceAtLeast(0)
 
     companion object {
-        private const val TAG = "SideveilEdgeIndicator"
+        private const val TAG = "SideVeilEdgeIndicator"
         private const val IDLE_ALPHA_FACTOR = 0.38f
         private const val IDLE_ANIM_MS = 280L
         private const val FULLSCREEN_HINT_HOLD_MS = 1_500L

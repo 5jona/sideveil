@@ -11,7 +11,7 @@ import pochita.sideveil.protocol.DisplayGeometry
 import pochita.sideveil.protocol.EdgeSide
 import pochita.sideveil.protocol.HubToSensor
 import pochita.sideveil.protocol.SensorToHub
-import pochita.sideveil.protocol.SideveilConfig
+import pochita.sideveil.protocol.SideVeilConfig
 
 private data class SensorArgs(
     val socketPath: String,
@@ -37,13 +37,13 @@ object SensorMain {
 
         val parsed = parseArgs(args)
         SensorLog.info(
-            "Starting Sideveil sensor (uid=${Process.myUid()}, pid=${Process.myPid()}, " +
+            "Starting SideVeil sensor (uid=${Process.myUid()}, pid=${Process.myPid()}, " +
                 "socket=${parsed.socketPath}, hostPkg=${parsed.hostPackage})",
         )
 
         val systemContext: Context = ActivityThread.systemMain().systemUiContext
         val workerThread =
-            HandlerThread("SideveilSensorWorker", Process.THREAD_PRIORITY_DEFAULT).apply {
+            HandlerThread("SideVeilSensorWorker", Process.THREAD_PRIORITY_DEFAULT).apply {
                 start()
             }
         val workerHandler = Handler(workerThread.looper)
@@ -91,7 +91,7 @@ object SensorMain {
 
         Runtime.getRuntime().addShutdownHook(
             Thread {
-                SensorLog.info("Shutting down Sideveil sensor")
+                SensorLog.info("Shutting down SideVeil sensor")
                 hubClient.stop()
                 edgeMonitor.stop()
                 foregroundMonitor.stop()
@@ -101,7 +101,7 @@ object SensorMain {
 
         SensorLog.info("Initial host permissions: overlayGranted=${initialPerms.overlayGranted}")
         foregroundMonitor.start()
-        edgeMonitor.start(SideveilConfig.DEFAULT)
+        edgeMonitor.start(SideVeilConfig.DEFAULT)
         hubClient.start()
 
         Looper.loop()

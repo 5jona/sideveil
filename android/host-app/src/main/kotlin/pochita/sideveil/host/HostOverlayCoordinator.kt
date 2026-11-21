@@ -11,9 +11,9 @@ import pochita.sideveil.protocol.HudDismissPayload
 import pochita.sideveil.protocol.NativeHudSceneHeader
 import pochita.sideveil.protocol.PluginPresentationMode
 import pochita.sideveil.protocol.PluginSurfaceBackdrop
-import pochita.sideveil.protocol.SideveilConfig
-import pochita.sideveil.protocol.SideveilEvents
-import pochita.sideveil.protocol.SideveilWireJson
+import pochita.sideveil.protocol.SideVeilConfig
+import pochita.sideveil.protocol.SideVeilEvents
+import pochita.sideveil.protocol.SideVeilWireJson
 
 /**
  * Coordinates [PinnedContainerWindow], [NativeHudWindow], [DynamicThemeExtractor], and
@@ -27,7 +27,7 @@ internal class HostOverlayCoordinator(
     private val pinnedWindow: PinnedContainerWindow,
     private val nativeHudWindow: NativeHudWindow,
     private val pluginManagerProvider: () -> PluginWebViewManager,
-    private val configProvider: () -> SideveilConfig,
+    private val configProvider: () -> SideVeilConfig,
     private val themeIdProvider: () -> String,
     private val darkSurfaceProvider: () -> Boolean,
 ) : HostOverlayEventCallbacks {
@@ -36,8 +36,8 @@ internal class HostOverlayCoordinator(
 
     fun onDynamicColorsExtracted(payload: HostDynamicColorsPayload) {
         daemonClient.sendEvent(
-            SideveilEvents.HOST_DYNAMIC_COLORS,
-            SideveilWireJson.encodeToJsonElement(payload),
+            SideVeilEvents.HOST_DYNAMIC_COLORS,
+            SideVeilWireJson.encodeToJsonElement(payload),
         )
     }
 

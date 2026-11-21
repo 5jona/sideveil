@@ -10,15 +10,15 @@ import android.content.res.Configuration
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import pochita.sideveil.protocol.DaemonEndpoint
-import pochita.sideveil.protocol.SideveilConfig
-import pochita.sideveil.protocol.SideveilWireJson
+import pochita.sideveil.protocol.SideVeilConfig
+import pochita.sideveil.protocol.SideVeilWireJson
 import java.io.File
 
 /**
  * Foreground notification, daemon endpoint bootstrap, and color-mode helpers for [HostService].
  */
 internal object HostServiceSupport {
-    private const val TAG = "SideveilHostService"
+    private const val TAG = "SideVeilHostService"
     private const val CHANNEL_ID = "sideveil_host_channel"
     private const val NOTIF_ID = 1001
     private const val ENDPOINT_FILE_NAME = "daemon_endpoint.json"
@@ -57,7 +57,7 @@ internal object HostServiceSupport {
         val endpointFile = File(context.noBackupFilesDir, ENDPOINT_FILE_NAME)
         if (!endpointFile.isFile || !endpointFile.canRead()) return null
         return runCatching {
-            val endpoint = SideveilWireJson.decodeFromString<DaemonEndpoint>(endpointFile.readText(Charsets.UTF_8))
+            val endpoint = SideVeilWireJson.decodeFromString<DaemonEndpoint>(endpointFile.readText(Charsets.UTF_8))
             if (endpoint.port in 1..65535 && TOKEN_REGEX.matches(endpoint.token)) {
                 endpoint
             } else {
@@ -70,7 +70,7 @@ internal object HostServiceSupport {
     }
 
     fun resolveDarkSurface(
-        config: SideveilConfig,
+        config: SideVeilConfig,
         sysConfig: Configuration,
     ): Boolean =
         when (config.panel.colorMode) {

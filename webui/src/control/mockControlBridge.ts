@@ -4,7 +4,7 @@ import {
   CONFIG_PATH,
   type DaemonStatus,
   DEFAULT_CONFIG,
-  type SideveilConfig,
+  type SideVeilConfig,
 } from '../shared/types.ts';
 
 interface MockControlState {
@@ -82,7 +82,7 @@ const mockState: MockControlState = {
   panelState: 'closed',
   pingCount: 0,
   logs: [
-    '09:00:00.112 [I] Starting Sideveil daemon (uid=1000, pid=14820)',
+    '09:00:00.112 [I] Starting SideVeil daemon (uid=1000, pid=14820)',
     '09:00:00.245 [I] ControlServer listening on 127.0.0.1:41928',
     '09:00:00.268 [I] Registered ATM ITaskStackListener',
     '09:00:00.291 [I] Opened [Gesture Monitor] input channel: [Gesture Monitor] sideveil-edge',
@@ -106,11 +106,11 @@ function getMockSnapshot(fgPkg = 'me.weishu.kernelsu'): PluginsSnapshotPayload {
   };
 }
 
-function readMockStoredConfig(): SideveilConfig {
+function readMockStoredConfig(): SideVeilConfig {
   try {
     const raw = window.localStorage.getItem(`pochita:mockfs:sideveil-control:${CONFIG_PATH}`);
     if (raw) {
-      return JSON.parse(raw) as SideveilConfig;
+      return JSON.parse(raw) as SideVeilConfig;
     }
   } catch {
     // Ignore storage read issues.

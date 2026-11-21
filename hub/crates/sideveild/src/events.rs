@@ -7,7 +7,7 @@ use std::sync::PoisonError;
 use serde::Serialize;
 use serde_json::Value;
 use sideveil_gfx::palette::synthesize_glass_palette;
-use sideveil_protocol::config::SideveilConfig;
+use sideveil_protocol::config::SideVeilConfig;
 use sideveil_protocol::hud::{HudDismissPayload, NativeHudScene};
 use sideveil_protocol::plugin::{
     HostPluginDiagnosticsPayload, PluginActiveChangedPayload, PluginBackendState,
@@ -23,7 +23,7 @@ use sideveil_protocol::theme::HostDynamicColorsPayload;
 use crate::state::{HostWakeSignal, HubState};
 
 impl HubState {
-    pub fn on_config_changed(&self, _next: &SideveilConfig) {
+    pub fn on_config_changed(&self, _next: &SideVeilConfig) {
         self.sync_sensor_state();
         self.push_config_snapshot_to_host();
         self.push_plugins_snapshot_to_host();
