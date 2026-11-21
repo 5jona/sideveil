@@ -1,9 +1,5 @@
 import { type BridgeOptions, type ContainerAction, useContainerThemeSync } from '@pochita/bridge';
-import {
-  BUILTIN_DIAG_PLUGIN_ID,
-  SideVeilPluginProvider,
-  useDynamicThemeTokens,
-} from '@pochita/sideveil-sdk';
+import { BUILTIN_DIAG_PLUGIN_ID, SideVeilPluginProvider } from '@pochita/sideveil-sdk';
 import {
   AppShell,
   Badge,
@@ -43,7 +39,6 @@ function PanelWorkbench({
   onHydrated: () => void;
 }) {
   const {
-    pluginId,
     isNativeHost,
     backendState,
     status,
@@ -61,8 +56,6 @@ function PanelWorkbench({
     handleToggleBlur,
     handleImeFocus,
   } = useDiagnosticPanel({ onAppendLog, onHydrated });
-
-  useDynamicThemeTokens(isNativeHost);
 
   const fgPkg = status?.foregroundPackage || 'me.weishu.kernelsu';
   const shortPkg = fgPkg.split('.').slice(-1)[0] || fgPkg;
@@ -105,16 +98,6 @@ function PanelWorkbench({
             >
               <X className="size-4" />
             </Button>
-          </div>
-        }
-        footer={
-          <div className="flex items-center justify-between gap-2 text-[11px]">
-            <span className="tabular-nums">
-              {pluginId} · UID {status?.uid ?? 1000}
-            </span>
-            <span>
-              {nativeBlurEnabled && status?.crossWindowBlurSupported ? '实时毛玻璃' : '磨砂底板'}
-            </span>
           </div>
         }
       >

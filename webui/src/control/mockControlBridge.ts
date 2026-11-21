@@ -82,8 +82,9 @@ const mockState: MockControlState = {
   panelState: 'closed',
   pingCount: 0,
   logs: [
-    '09:00:00.112 [I] Starting SideVeil daemon (uid=1000, pid=14820)',
-    '09:00:00.245 [I] ControlServer listening on 127.0.0.1:41928',
+    '09:00:00.112 [I] Starting SideVeil hub daemon (uid=0, pid=14820)',
+    '09:00:00.180 [I] Spawned UID 1000 sideveil-sensor (pid=14842)',
+    '09:00:00.245 [I] Host WebSocket server listening on 127.0.0.1:41928',
     '09:00:00.268 [I] Registered ATM ITaskStackListener',
     '09:00:00.291 [I] Opened [Gesture Monitor] input channel: [Gesture Monitor] sideveil-edge',
     '09:00:00.610 [I] Host WebSocket connected',
@@ -141,7 +142,7 @@ export async function handleMockControlExec(cmd: string): Promise<ExecResult> {
 
     const status: DaemonStatus = {
       pid: 14820,
-      uid: 1000,
+      uid: 0,
       uptimeMs: 184_200,
       configVersion: cfg.version,
       enabled: cfg.enabled,
@@ -159,6 +160,8 @@ export async function handleMockControlExec(cmd: string): Promise<ExecResult> {
       screenHeightPx: 2400,
       density: 2.625,
       wsPort: 41928,
+      sensorConnected: true,
+      sensorPid: 14842,
     };
     return { errno: 0, stdout: JSON.stringify(status), stderr: '' };
   }

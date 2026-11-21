@@ -1,4 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+  <title>Vello 矢量示波</title>
   <defs>
     <linearGradient id="scope-wave" x1="2" y1="6" x2="22" y2="18" gradientUnits="userSpaceOnUse">
       <stop offset="0%" stop-color="#38bdf8" />

@@ -11,9 +11,12 @@
   },
   "entry": "web/index.html",
   "backend": "none",
-  "capabilities": ["telemetry", "haptics"],
+  "capabilities": [
+    "telemetry",
+    "haptics"
+  ],
   "surface": {
-    "backdrop": "transparent",
+    "backdrop": "native-glass",
     "presentation": "drawer",
     "crossOriginIsolated": true,
     "widthDp": 356,

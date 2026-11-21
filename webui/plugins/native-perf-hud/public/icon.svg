@@ -1,4 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+  <title>性能监控</title>
   <defs>
     <linearGradient id="hud-grad" x1="2" y1="4" x2="22" y2="20" gradientUnits="userSpaceOnUse">
       <stop offset="0%" stop-color="#34d399" />

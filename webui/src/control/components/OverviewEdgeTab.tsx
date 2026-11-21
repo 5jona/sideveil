@@ -43,10 +43,10 @@ export function OverviewEdgeTab({ config, status, onChange }: OverviewEdgeTabPro
           label="Daemon 守护进程"
           value={status ? `PID ${status.pid}` : '未连接'}
           statusLabel={status ? `UID ${status.uid}` : '离线'}
-          statusVariant={status?.uid === 1000 ? 'success' : 'warning'}
+          statusVariant={status?.uid === 0 || status?.uid === 1000 ? 'success' : 'warning'}
           hint={
             status
-              ? `运行 ${Math.round(status.uptimeMs / 1000)}s · WS :${status.wsPort}`
+              ? `运行 ${Math.round(status.uptimeMs / 1000)}s · Sensor ${status.sensorPid ?? '-'} · WS :${status.wsPort}`
               : '等待服务启动'
           }
           icon={<Activity className="size-4" />}

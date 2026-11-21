@@ -27,7 +27,7 @@ export function createMockPanelRpcHandler(
     if (method === SIDEVEIL_METHODS.DAEMON_STATUS) {
       return {
         pid: 14820,
-        uid: 1000,
+        uid: 0,
         uptimeMs: 184_200,
         configVersion: currentConfig.version,
         enabled: true,
@@ -45,6 +45,8 @@ export function createMockPanelRpcHandler(
         screenHeightPx: 2400,
         density: 2.625,
         wsPort: 41928,
+        sensorConnected: true,
+        sensorPid: 14842,
       } satisfies DaemonStatus;
     }
 

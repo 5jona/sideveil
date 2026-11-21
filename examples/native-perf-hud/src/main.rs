@@ -1,8 +1,9 @@
 //! Reference `uds-native` plugin backend pushing zero-WebView `NativeHudScene` telemetry
 //! frames to `sideveild` -> `libsideveil_hud.so` (`vello_cpu` NEON + HWUI text).
 
+mod sampler;
+
 use std::collections::VecDeque;
-use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::sync::Arc;
@@ -10,6 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
+use sampler::{read_cpu, sample_cpu, sample_mem_mb, sample_temp_c};
 use serde_json::{Value, json};
 use sideveil_protocol::hud::{
     HudBackdropKind, HudPrimitive, HudTextAlign, HudTextOverlay, NativeHudScene,
@@ -21,21 +23,16 @@ use sideveil_protocol::uds::{UdsClientHello, UdsHandshakeAck};
 const PLUGIN_ID: &str = "example.native-perf-hud";
 const HISTORY_LEN: usize = 24;
 
-#[derive(Default)]
-struct CpuPrev {
-    idle: u64,
-    total: u64,
-}
-
 fn main() {
     let socket = std::env::args()
         .nth(1)
         .unwrap_or_else(|| paths::HUB_SOCKET.to_owned());
-    let enabled = Arc::new(AtomicBool::new(true));
+    let enabled = Arc::new(AtomicBool::new(false));
     let click_through = Arc::new(AtomicBool::new(false));
+    let dark_surface = Arc::new(AtomicBool::new(true));
 
     loop {
-        if let Err(err) = run_session(&socket, &enabled, &click_through) {
+        if let Err(err) = run_session(&socket, &enabled, &click_through, &dark_surface) {
             eprintln!("[{PLUGIN_ID}] session ended: {err}");
         }
         thread::sleep(Duration::from_secs(2));
@@ -46,6 +43,7 @@ fn run_session(
     socket_path: &str,
     enabled: &Arc<AtomicBool>,
     click_through: &Arc<AtomicBool>,
+    dark_surface: &Arc<AtomicBool>,
 ) -> std::io::Result<()> {
     let mut write_stream = UnixStream::connect(socket_path)?;
     let read_stream = write_stream.try_clone()?;
@@ -69,13 +67,16 @@ fn run_session(
 
     let enabled_rx = Arc::clone(enabled);
     let click_rx = Arc::clone(click_through);
+    let dark_rx = Arc::clone(dark_surface);
+    let sampler_thread = thread::current();
     let mut reply_stream = write_stream.try_clone()?;
     thread::spawn(move || {
         let mut line = String::new();
         while reader.read_line(&mut line).unwrap_or(0) > 0 {
             if let Ok(req) = serde_json::from_str::<RpcRequest>(line.trim()) {
-                let resp = handle_rpc(req, &enabled_rx, &click_rx);
+                let resp = handle_rpc(req, &enabled_rx, &click_rx, &dark_rx);
                 let _ = send_json_line(&mut reply_stream, &resp);
+                sampler_thread.unpark();
             }
             line.clear();
         }
@@ -95,7 +96,7 @@ fn run_session(
                 };
                 send_json_line(&mut write_stream, &dismiss)?;
             }
-            thread::sleep(Duration::from_millis(300));
+            thread::park_timeout(Duration::from_millis(300));
             continue;
         }
         was_enabled = true;
@@ -114,6 +115,7 @@ fn run_session(
             mem_total,
             temp_c,
             click_through.load(Ordering::Relaxed),
+            dark_surface.load(Ordering::Relaxed),
         );
 
         let frame = HostEventEnvelope {
@@ -121,11 +123,16 @@ fn run_session(
             payload: serde_json::to_value(scene).ok(),
         };
         send_json_line(&mut write_stream, &frame)?;
-        thread::sleep(Duration::from_millis(500));
+        thread::park_timeout(Duration::from_millis(500));
     }
 }
 
-fn handle_rpc(req: RpcRequest, enabled: &AtomicBool, click_through: &AtomicBool) -> RpcResponse {
+fn handle_rpc(
+    req: RpcRequest,
+    enabled: &AtomicBool,
+    click_through: &AtomicBool,
+    dark_surface: &AtomicBool,
+) -> RpcResponse {
     match req.method.as_str() {
         "setEnabled" => {
             if let Some(flag) = req
@@ -136,10 +143,6 @@ fn handle_rpc(req: RpcRequest, enabled: &AtomicBool, click_through: &AtomicBool)
             {
                 enabled.store(flag, Ordering::Relaxed);
             }
-            RpcResponse::ok(
-                req.id,
-                json!({ "enabled": enabled.load(Ordering::Relaxed) }),
-            )
         }
         "setClickThrough" => {
             if let Some(flag) = req
@@ -150,19 +153,27 @@ fn handle_rpc(req: RpcRequest, enabled: &AtomicBool, click_through: &AtomicBool)
             {
                 click_through.store(flag, Ordering::Relaxed);
             }
-            RpcResponse::ok(
-                req.id,
-                json!({ "clickThrough": click_through.load(Ordering::Relaxed) }),
-            )
         }
-        _ => RpcResponse::ok(
-            req.id,
-            json!({
-                "enabled": enabled.load(Ordering::Relaxed),
-                "clickThrough": click_through.load(Ordering::Relaxed),
-            }),
-        ),
+        "setAppearance" => {
+            if let Some(flag) = req
+                .params
+                .as_ref()
+                .and_then(|v| v.get("isDark"))
+                .and_then(Value::as_bool)
+            {
+                dark_surface.store(flag, Ordering::Relaxed);
+            }
+        }
+        _ => {}
     }
+    RpcResponse::ok(
+        req.id,
+        json!({
+            "enabled": enabled.load(Ordering::Relaxed),
+            "clickThrough": click_through.load(Ordering::Relaxed),
+            "isDark": dark_surface.load(Ordering::Relaxed),
+        }),
+    )
 }
 
 fn build_scene(
@@ -172,6 +183,7 @@ fn build_scene(
     mem_total: u64,
     temp_c: f32,
     click_through: bool,
+    is_dark: bool,
 ) -> NativeHudScene {
     let mem_ratio = if mem_total > 0 {
         (mem_used as f32 / mem_total as f32).clamp(0.0, 1.0)
@@ -179,6 +191,38 @@ fn build_scene(
         0.0
     };
     let temp_ratio = ((temp_c - 20.0) / 65.0).clamp(0.0, 1.0);
+    let (
+        primary_text,
+        gauge_text,
+        track_argb,
+        wave_stroke,
+        wave_fill_top,
+        bar_start,
+        bar_end,
+        gauge_end,
+    ) = if is_dark {
+        (
+            0xFFF1_F5F9,
+            0xFFF8_FAFC,
+            0x33FF_FFFF,
+            0xFF38_BDF8,
+            0x5538_BDF8,
+            0xFF34_D399,
+            0xFF38_BDF8,
+            0xFFEF_4444,
+        )
+    } else {
+        (
+            0xFF0F_172A,
+            0xFF0F_172A,
+            0x280F_172A,
+            0xFF02_84C7,
+            0x4402_84C7,
+            0xFF05_9669,
+            0xFF02_84C7,
+            0xFFDC_2626,
+        )
+    };
     NativeHudScene {
         plugin_id: PLUGIN_ID.to_owned(),
         width_dp: 216.0,
@@ -197,10 +241,10 @@ fn build_scene(
                 values: history.iter().copied().collect(),
                 min: Some(0.0),
                 max: Some(100.0),
-                stroke_argb: 0xFF38_BDF8,
+                stroke_argb: wave_stroke,
                 stroke_width: 2.0,
-                fill_top_argb: Some(0x5538_BDF8),
-                fill_bottom_argb: Some(0x0038_BDF8),
+                fill_top_argb: Some(wave_fill_top),
+                fill_bottom_argb: Some(wave_stroke & 0x00FF_FFFF),
                 smooth: true,
             },
             HudPrimitive::ProgressBar {
@@ -210,9 +254,9 @@ fn build_scene(
                 h: 6.0,
                 radius: 3.0,
                 value: mem_ratio,
-                track_argb: 0x33FF_FFFF,
-                fill_start_argb: 0xFF34_D399,
-                fill_end_argb: Some(0xFF38_BDF8),
+                track_argb,
+                fill_start_argb: bar_start,
+                fill_end_argb: Some(bar_end),
             },
             HudPrimitive::RadialGauge {
                 cx: 174.0,
@@ -222,9 +266,9 @@ fn build_scene(
                 value: temp_ratio,
                 start_angle_deg: 135.0,
                 sweep_angle_deg: 270.0,
-                track_argb: 0x33FF_FFFF,
-                fill_start_argb: 0xFF34_D399,
-                fill_end_argb: Some(0xFFEF_4444),
+                track_argb,
+                fill_start_argb: bar_start,
+                fill_end_argb: Some(gauge_end),
             },
         ],
         texts: vec![
@@ -233,7 +277,7 @@ fn build_scene(
                 y: 20.0,
                 text: format!("CPU {cpu_pct:4.1}%  RAM {:.1}G", mem_used as f32 / 1024.0),
                 size_sp: 11.0,
-                color_argb: 0xFFF1_F5F9,
+                color_argb: primary_text,
                 align: HudTextAlign::Start,
                 bold: true,
                 tabular_nums: true,
@@ -244,7 +288,7 @@ fn build_scene(
                 y: 52.0,
                 text: format!("{temp_c:.0}°C"),
                 size_sp: 11.0,
-                color_argb: 0xFFF8_FAFC,
+                color_argb: gauge_text,
                 align: HudTextAlign::Center,
                 bold: true,
                 tabular_nums: true,
@@ -260,79 +304,4 @@ fn send_json_line<T: serde::Serialize>(stream: &mut UnixStream, value: &T) -> st
     bytes.push(b'\n');
     stream.write_all(&bytes)?;
     stream.flush()
-}
-
-fn read_cpu() -> Option<CpuPrev> {
-    let text = fs::read_to_string("/proc/stat").ok()?;
-    let nums: Vec<u64> = text
-        .lines()
-        .next()?
-        .split_whitespace()
-        .skip(1)
-        .filter_map(|s| s.parse().ok())
-        .collect();
-    if nums.len() < 4 {
-        return None;
-    }
-    let idle = nums[3] + nums.get(4).copied().unwrap_or(0);
-    let total: u64 = nums.iter().copied().sum();
-    Some(CpuPrev { idle, total })
-}
-
-fn sample_cpu(prev: &mut CpuPrev) -> f32 {
-    let Some(cur) = read_cpu() else {
-        return 0.0;
-    };
-    let d_tot = cur.total.saturating_sub(prev.total);
-    let d_idle = cur.idle.saturating_sub(prev.idle);
-    *prev = cur;
-    if d_tot == 0 {
-        0.0
-    } else {
-        ((d_tot.saturating_sub(d_idle)) as f32 / d_tot as f32 * 100.0).clamp(0.0, 100.0)
-    }
-}
-
-fn sample_mem_mb() -> (u64, u64) {
-    let Ok(raw) = fs::read_to_string("/proc/meminfo") else {
-        return (0, 0);
-    };
-    let mut total = 0_u64;
-    let mut avail = 0_u64;
-    for line in raw.lines() {
-        if let Some(rest) = line.strip_prefix("MemTotal:") {
-            total = rest
-                .split_whitespace()
-                .next()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0);
-        } else if let Some(rest) = line.strip_prefix("MemAvailable:") {
-            avail = rest
-                .split_whitespace()
-                .next()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0);
-        }
-    }
-    (total.saturating_sub(avail) / 1024, total / 1024)
-}
-
-fn sample_temp_c() -> Option<f32> {
-    for entry in fs::read_dir("/sys/class/thermal").ok()?.flatten().take(32) {
-        if !entry
-            .file_name()
-            .to_string_lossy()
-            .starts_with("thermal_zone")
-        {
-            continue;
-        }
-        let raw = fs::read_to_string(entry.path().join("temp"))
-            .ok()
-            .and_then(|s| s.trim().parse::<f32>().ok())?;
-        let c = if raw > 200.0 { raw / 1000.0 } else { raw };
-        if (15.0..=110.0).contains(&c) {
-            return Some(c);
-        }
-    }
-    None
 }

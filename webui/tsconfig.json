@@ -16,5 +16,5 @@
     "resolveJsonModule": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["src", "control", "panel"]
+  "include": ["src", "control", "panel", "plugins"]
 }
