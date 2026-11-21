@@ -57,7 +57,8 @@ Analysis of system sidebar implementations (`com.coloros.smartsidebar` v17.9.8 a
    - **Resolution**: Bind an immutable, zero-draw `BlurMaskDrawable` (which only provides the rounded-rect `Outline` for `BackgroundBlurDrawable`) to `window.setBackgroundDrawable()`, and bind the stateful `GlassBackdropDrawable` to `contentContainer.background`.
 2. **Avoiding `WindowManager.LayoutParams` resizing during spring animations**
    - Updating `LayoutParams.width` or `LayoutParams.height` via `updateViewLayout()` on every animation frame reallocates window buffers in SurfaceFlinger and triggers repeated CSS viewport reflows inside embedded WebViews.
-   - **Resolution**: Keep `LayoutParams` fixed to the target container geometry while the panel is visible, and drive open/close motion through GPU `RenderNode` properties (`translationX`, `translationY`, clip bounds, and alpha) from a single normalized spring `progress` in `[0, 1]`.
+   - **Resolution**: Keep `LayoutParams.width` and `LayoutParams.height` strictly locked to the target container geometry while the panel is visible (translating the fixed-size window with `PRIVATE_FLAG_NO_MOVE_ANIMATION` and driving content/backdrop alpha, quantized blur, and AGSL specular shift from a single normalized spring `progress` in `[0, 1]`).
+   - **Uncapped adaptive refresh rate**: While any overlay window is visible, dynamically apply the highest supported `Display.Mode` refresh rate matching the active physical resolution (`preferredRefreshRate` / `preferredDisplayModeId` and `View.setRequestedFrameRate`) without imposing hardcoded FPS ceilings, and clear votes when windows collapse to `1x1 INVISIBLE` or hide.
 
 ---
 

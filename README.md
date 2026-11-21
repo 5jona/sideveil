@@ -10,7 +10,7 @@ Target baseline: Android 16+ (API 36+, arm64) on Linux GKI 6.12+. Built around a
    - Manages `/data/system/sideveil/config.json` with atomic persistence and `inotify` hot-reload.
    - Hosts the open **Plugin Registry** (`inotify`-watched `/data/system/sideveil/plugins/<plugin_id>/manifest.json`, persistent overrides & per-app MRU in `plugins.json`, package + Activity-level triggers, capability ACLs for `storage`/`toast`/`system-exec`/`native-hud`/`clipboard`/`haptics`/`telemetry`/`inter-plugin-bus`, structured audit ring, authenticated loopback static asset serving with on-demand COOP/COEP headers, per-plugin loopback Dev Mode URLs, and dynamic `uds-native` / `uds-app` backend RPC multiplexing).
    - Integrates **`sideveil-gfx`** (Linebender `color` `Oklch`, `kurbo`, `peniko`, `vello_cpu` NEON + `usvg`): powers on-disk cached SVG-to-PNG icon rasterization (`GET /plugins/<id>/__icon?size=&theme=`), WCAG-verified Material You `Oklch` palette synthesis (`theme.paletteUpdated`), and zero-WebView `NativeHudScene` rasterization via **`sideveil-hud-jni`** (`libsideveil_hud.so` + NDK `libjnigraphics.so`).
-   - Exposes a dual-channel Unix Domain Socket gateway (`hub.sock` & `app.sock`) gated by kernel `SO_PEERCRED`, paired with an authenticated loopback WebSocket (`127.0.0.1:0/ws`) and dual-priority outbound queues (coalescing ephemeral gesture moves and 60Hz HUD frames while preserving critical control/RPC frames).
+   - Exposes a dual-channel Unix Domain Socket gateway (`hub.sock` & `app.sock`) gated by kernel `SO_PEERCRED`, paired with an authenticated loopback WebSocket (`127.0.0.1:0/ws`) and dual-priority outbound queues (coalescing ephemeral gesture moves and high-rate HUD frames while preserving critical control/RPC frames).
    - Provides the native Rust CLI `bin/sideveil-ctl` communicating directly over `hub.sock` (including `plugins list|reload|enable|disable|priority|scope|dev|audit|select` and `hud demo|dismiss`).
 2. **Thin System Sensor (`android/sensor`, `UID 1000` `app_process64`)**
    - Initializes `ApplicationSharedMemory` and monitors foreground packages and Activities via `ITaskStackListener` + 4-argument `ActivityTaskManager.getTasks`.
@@ -25,7 +25,7 @@ Target baseline: Android 16+ (API 36+, arm64) on Linux GKI 6.12+. Built around a
    - Built with `@pochita/ui`, `@pochita/bridge`, `@pochita/sideveil-sdk`, and `@pochita/config` from `pochita-webui-kit`.
    - Control Plane (`webui/control` -> `webroot/`) edits `/data/system/sideveil/config.json` atomically (`inotify` hot-reload), manages registered plugins (enable/disable, priority, scope overrides, loopback Dev Mode, Host memory & ACL audit drawer, quick switch), and controls the live sidebar via `/data/adb/modules/sideveil/bin/sideveil-ctl`.
    - Built-in Diagnostic Plugin (`sideveil.diagnostic`, `webui/panel` -> `assets/panel/`) adheres to the standard `@pochita/sideveil-sdk` plugin contract with live dynamic `Oklch` CSS token sync.
-   - Dual reference example plugins live in `examples/` (`vello-vector-scope` for transparent COOP/COEP WebGPU rendering and `native-perf-hud` for zero-WebView `uds-native` + `vello_cpu` NEON HUD rendering).
+   - Dual reference example plugins live in `examples/` (`vello-vector-scope` for COOP/COEP WebGPU rendering with live glass/transparent toggling and `native-perf-hud` for zero-WebView `uds-native` + `vello_cpu` NEON HUD rendering), with frontends compiled from `webui/src/plugins/`.
 
 ## Security & Runtime Separation
 
