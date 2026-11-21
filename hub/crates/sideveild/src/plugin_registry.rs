@@ -1,11 +1,12 @@
 //! Open plugin registry with `inotify` discovery, atomic overrides/MRU persistence, and scope routing.
 
+mod installer;
 mod store;
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, PoisonError, RwLock};
 use std::time::Duration;
 
@@ -96,15 +97,30 @@ impl PluginRegistry {
         count
     }
 
+    /// Validates and atomically installs a plugin package directory, then rescans immediately.
+    pub fn install_from_dir(&self, source_dir: &Path) -> Result<PluginManifest, String> {
+        let manifest = installer::install_plugin_dir(&self.plugins_dir, source_dir)?;
+        let _ = self.rescan();
+        Ok(manifest)
+    }
+
     pub fn spawn_watcher(self: &Arc<Self>) -> io::Result<tokio::task::JoinHandle<()>> {
         fs::create_dir_all(&self.plugins_dir)?;
         let watcher = InotifyDirWatcher::new(&self.plugins_dir, DIR_CHANGE_MASK)?;
+        let mut child_watches: HashMap<PathBuf, libc::c_int> = HashMap::new();
+        watcher.sync_subdirectories(&self.plugins_dir, DIR_CHANGE_MASK, &mut child_watches);
         let registry = Arc::clone(self);
         Ok(tokio::spawn(async move {
             loop {
                 match watcher.wait_any().await {
                     Ok(()) => {
-                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        tokio::time::sleep(Duration::from_millis(150)).await;
+                        watcher.drain_pending();
+                        watcher.sync_subdirectories(
+                            &registry.plugins_dir,
+                            DIR_CHANGE_MASK,
+                            &mut child_watches,
+                        );
                         let _ = registry.rescan();
                     }
                     Err(err) => {

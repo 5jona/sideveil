@@ -1,10 +1,13 @@
 //! Plugin-scoped sandboxed RPC handlers (`plugin.invoke`, `fs.*`, `system.exec`).
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde_json::{Value, json};
 use sideveil_protocol::hud::{HudDismissPayload, NativeHudScene};
-use sideveil_protocol::plugin::{PluginBusPublishParams, PluginCapability, PluginInvokeParams};
+use sideveil_protocol::plugin::{
+    PluginBusPublishParams, PluginCapability, PluginInvokeParams, validate_plugin_id,
+};
 use sideveil_protocol::rpc::error_codes;
 
 use super::{decode_params, require_plugin_id, serialize_result};
@@ -14,20 +17,40 @@ use crate::telemetry;
 
 pub(super) async fn handle_plugin_invoke(
     state: &Arc<HubState>,
+    allow_explicit_target: bool,
     caller_plugin_id: Option<&str>,
     params: Option<Value>,
 ) -> Result<Value, (i32, String)> {
-    let plugin_id = require_plugin_id(caller_plugin_id)?;
     let parsed: PluginInvokeParams = decode_params(params)?;
+    let target_plugin_id = if allow_explicit_target {
+        if let Some(explicit) = parsed
+            .plugin_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            validate_plugin_id(explicit)
+                .map_err(|err| (error_codes::INVALID_PARAMS, err.to_string()))?;
+            explicit.to_owned()
+        } else {
+            require_plugin_id(caller_plugin_id)?.to_owned()
+        }
+    } else {
+        // WebView callers are strictly bound to their server-stamped pluginId.
+        require_plugin_id(caller_plugin_id)?.to_owned()
+    };
+
     if parsed.method.trim().is_empty() {
         return Err((
             error_codes::INVALID_PARAMS,
             "plugin.invoke method must not be blank".to_owned(),
         ));
     }
+
+    let timeout = Duration::from_millis(parsed.effective_timeout_ms());
     state
         .plugin_backends()
-        .invoke(plugin_id, parsed.method, parsed.params)
+        .invoke(&target_plugin_id, parsed.method, parsed.params, timeout)
         .await
 }
 

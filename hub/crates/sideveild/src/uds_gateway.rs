@@ -1,5 +1,7 @@
 //! Dual-channel Unix Domain Socket gateway (`hub.sock` & `app.sock`) with `SO_PEERCRED` auth.
 
+mod backend_session;
+
 use std::ffi::CString;
 use std::fs;
 use std::io;
@@ -9,17 +11,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use serde_json::Value;
-use sideveil_protocol::hud::NativeHudScene;
-use sideveil_protocol::plugin::{PluginBackendState, PluginCapability};
-use sideveil_protocol::rpc::{HostEventEnvelope, RpcResponse, methods};
 use sideveil_protocol::sensor::{HubToSensor, SensorToHub};
 use sideveil_protocol::uds::{UdsClientHello, UdsHandshakeAck};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc;
 
-use crate::peercred::{PeerAuthConfig, PeerCred, SocketChannel, authorize_peer, read_peer_cred};
+use crate::peercred::{PeerAuthConfig, SocketChannel, authorize_peer, read_peer_cred};
 use crate::rpc::{self, RpcCaller};
 use crate::state::HubState;
 
@@ -176,8 +174,15 @@ async fn handle_peer(
             plugin_id,
             package_name,
         } => {
-            handle_plugin_backend_session(reader, write_half, cred, plugin_id, package_name, state)
-                .await;
+            backend_session::handle_plugin_backend_session(
+                reader,
+                write_half,
+                cred,
+                plugin_id,
+                package_name,
+                state,
+            )
+            .await;
         }
     }
 }
@@ -234,80 +239,7 @@ async fn handle_sensor_session<R: AsyncRead + Unpin>(
     state.clear_sensor_session(session_id);
 }
 
-async fn handle_plugin_backend_session<R: AsyncRead + Unpin>(
-    mut reader: BufReader<R>,
-    mut write_half: tokio::net::unix::OwnedWriteHalf,
-    cred: PeerCred,
-    plugin_id: String,
-    package_name: Option<String>,
-    state: Arc<HubState>,
-) {
-    let (session_id, mut out_rx) = state.plugin_backends().register(&plugin_id);
-    state.logs().info(format!(
-        "Plugin backend connected: id={plugin_id} session=#{session_id} uid={} pid={:?} pkg={:?}",
-        cred.uid, cred.pid, package_name
-    ));
-    state.emit_plugin_backend_state(&plugin_id, PluginBackendState::Online);
-
-    let writer_task = tokio::spawn(async move {
-        while let Some(req) = out_rx.recv().await {
-            if write_json_line(&mut write_half, &req).await.is_err() {
-                break;
-            }
-        }
-    });
-
-    while let Ok(Some(line)) = read_bounded_line(&mut reader).await {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let Ok(val) = serde_json::from_str::<Value>(trimmed) else {
-            continue;
-        };
-        let Some(obj) = val.as_object() else {
-            continue;
-        };
-        if obj.contains_key("id")
-            && let Ok(resp) = serde_json::from_value::<RpcResponse>(val.clone())
-        {
-            state
-                .plugin_backends()
-                .complete_response(&plugin_id, session_id, resp);
-            continue;
-        }
-        if obj.contains_key("event")
-            && let Ok(env) = serde_json::from_value::<HostEventEnvelope>(val)
-        {
-            match env.event.as_str() {
-                methods::HUD_UPDATE_SCENE => {
-                    if state
-                        .plugin_registry()
-                        .has_capability(&plugin_id, PluginCapability::NativeHud)
-                        && let Some(payload) = env.payload
-                        && let Ok(mut scene) = serde_json::from_value::<NativeHudScene>(payload)
-                    {
-                        scene.plugin_id = plugin_id.clone();
-                        state.push_hud_scene(scene);
-                    }
-                }
-                methods::HUD_DISMISS => state.dismiss_hud(Some(plugin_id.clone())),
-                _ => state.emit_plugin_scoped_event(&plugin_id, env.event, env.payload),
-            }
-        }
-    }
-
-    writer_task.abort();
-    if state.plugin_backends().unregister(&plugin_id, session_id) {
-        state
-            .logs()
-            .info(format!("Plugin backend disconnected: id={plugin_id}"));
-        state.dismiss_hud(Some(plugin_id.clone()));
-        state.emit_plugin_backend_state(&plugin_id, PluginBackendState::Offline);
-    }
-}
-
-async fn read_bounded_line<R: AsyncRead + Unpin>(
+pub(super) async fn read_bounded_line<R: AsyncRead + Unpin>(
     reader: &mut BufReader<R>,
 ) -> io::Result<Option<String>> {
     let mut buf = Vec::with_capacity(256);
@@ -345,7 +277,7 @@ async fn read_bounded_line<R: AsyncRead + Unpin>(
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
 }
 
-async fn write_json_line<T: serde::Serialize>(
+pub(super) async fn write_json_line<T: serde::Serialize>(
     writer: &mut tokio::net::unix::OwnedWriteHalf,
     value: &T,
 ) -> io::Result<()> {

@@ -1,16 +1,42 @@
 //! Plugin registry administration JSON-RPC handlers (`plugins.*`).
 
+use std::path::Path;
 use std::sync::Arc;
 
 use serde_json::{Value, json};
 use sideveil_protocol::plugin::{
-    PluginSelectParams, PluginSetDevUrlParams, PluginSetEnabledParams, PluginSetPriorityParams,
-    PluginSetScopeOverrideParams,
+    PluginInstallParams, PluginSelectParams, PluginSetDevUrlParams, PluginSetEnabledParams,
+    PluginSetPriorityParams, PluginSetScopeOverrideParams,
 };
 use sideveil_protocol::rpc::error_codes;
 
 use super::{decode_params, serialize_result};
 use crate::state::HubState;
+
+pub(super) fn handle_install_plugin(
+    state: &Arc<HubState>,
+    params: Option<Value>,
+) -> Result<Value, (i32, String)> {
+    let parsed: PluginInstallParams = decode_params(params)?;
+    let src = Path::new(parsed.source_dir.trim());
+    let manifest = state
+        .plugin_registry()
+        .install_from_dir(src)
+        .map_err(|msg| (error_codes::INVALID_PARAMS, msg))?;
+    state.audit().record(
+        manifest.id.clone(),
+        "plugins.install",
+        true,
+        format!("v{} from {}", manifest.version, src.display()),
+    );
+    state.on_plugins_changed();
+    Ok(json!({
+        "ok": true,
+        "pluginId": manifest.id,
+        "version": manifest.version,
+        "snapshot": state.plugins_snapshot(),
+    }))
+}
 
 pub(super) fn handle_set_enabled(
     state: &Arc<HubState>,

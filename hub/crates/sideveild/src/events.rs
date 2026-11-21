@@ -62,6 +62,22 @@ impl HubState {
         );
     }
 
+    pub fn emit_plugin_scoped_event_ephemeral(
+        &self,
+        plugin_id: &str,
+        event: String,
+        payload: Option<Value>,
+    ) {
+        self.emit_host_event_ephemeral(
+            events::PLUGIN_EVENT,
+            &PluginScopedEventPayload {
+                plugin_id: plugin_id.to_owned(),
+                event,
+                payload,
+            },
+        );
+    }
+
     pub fn emit_plugin_bus_message(
         &self,
         from_plugin_id: &str,

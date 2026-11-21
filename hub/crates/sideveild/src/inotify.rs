@@ -1,10 +1,12 @@
 //! Async Linux `inotify` directory watcher shared by `ConfigStore` and `PluginRegistry`.
 
+use std::collections::{HashMap, HashSet};
 use std::ffi::CString;
+use std::fs;
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use tokio::io::unix::AsyncFd;
 
@@ -68,7 +70,7 @@ impl InotifyDirWatcher {
         }
     }
 
-    /// Waits until any event fires inside the watched directory.
+    /// Waits until any event fires inside the watched directory (or synced subdirectories).
     pub async fn wait_any(&self) -> io::Result<()> {
         let mut buf = [0u8; 4096];
         loop {
@@ -83,6 +85,76 @@ impl InotifyDirWatcher {
                 Err(_would_block) => continue,
             }
         }
+    }
+
+    /// Drains any queued inotify events non-blockingly (used after debounce sleeps).
+    pub fn drain_pending(&self) {
+        let mut buf = [0u8; 4096];
+        while read_inotify(self.async_fd.get_ref().as_raw_fd(), &mut buf).is_ok() {}
+    }
+
+    /// Synchronizes watch descriptors for all immediate non-dot subdirectories under `root`,
+    /// ensuring in-place edits inside `<root>/<plugin_id>/manifest.json` trigger `wait_any()`.
+    pub fn sync_subdirectories(
+        &self,
+        root: &Path,
+        mask: u32,
+        watched_children: &mut HashMap<PathBuf, libc::c_int>,
+    ) {
+        let mut live_dirs = HashSet::new();
+        if let Ok(entries) = fs::read_dir(root) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_dir() {
+                    continue;
+                }
+                if entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| name.starts_with('.'))
+                {
+                    continue;
+                }
+                live_dirs.insert(path);
+            }
+        }
+
+        let raw_fd = self.async_fd.get_ref().as_raw_fd();
+        watched_children.retain(|path, wd| {
+            if live_dirs.contains(path) {
+                true
+            } else {
+                remove_watch(raw_fd, *wd);
+                false
+            }
+        });
+
+        for dir in live_dirs {
+            if watched_children.contains_key(&dir) {
+                continue;
+            }
+            let Ok(c_dir) = CString::new(dir.as_os_str().as_bytes()) else {
+                continue;
+            };
+            // SAFETY: `raw_fd` is a valid inotify fd and `c_dir` is NUL-terminated.
+            let wd = unsafe { libc::inotify_add_watch(raw_fd, c_dir.as_ptr(), mask) };
+            if wd >= 0 {
+                watched_children.insert(dir, wd);
+            }
+        }
+    }
+}
+
+fn remove_watch(raw_fd: RawFd, wd: libc::c_int) {
+    #[cfg(target_os = "android")]
+    if let Ok(wd_u32) = u32::try_from(wd) {
+        // SAFETY: `raw_fd` is a valid open inotify descriptor and `wd_u32` was registered on it.
+        let _ = unsafe { libc::inotify_rm_watch(raw_fd, wd_u32) };
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        // SAFETY: `raw_fd` is a valid open inotify descriptor and `wd` was registered on it.
+        let _ = unsafe { libc::inotify_rm_watch(raw_fd, wd) };
     }
 }
 

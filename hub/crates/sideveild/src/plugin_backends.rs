@@ -9,8 +9,6 @@ use serde_json::Value;
 use sideveil_protocol::rpc::{RpcRequest, RpcResponse, error_codes};
 use tokio::sync::{mpsc, oneshot};
 
-const BACKEND_RPC_TIMEOUT: Duration = Duration::from_secs(8);
-
 #[derive(Debug)]
 struct BackendSession {
     session_id: u64,
@@ -116,12 +114,13 @@ impl PluginBackends {
             .collect()
     }
 
-    /// Invokes a method on the plugin's active UDS backend with timeout protection.
+    /// Invokes a method on the plugin's active UDS backend with caller-bounded timeout protection.
     pub async fn invoke(
         &self,
         plugin_id: &str,
         method: String,
         params: Option<Value>,
+        timeout: Duration,
     ) -> Result<Value, (i32, String)> {
         let session = {
             let guard = self.sessions.read().unwrap_or_else(PoisonError::into_inner);
@@ -157,7 +156,7 @@ impl PluginBackends {
             ));
         }
 
-        match tokio::time::timeout(BACKEND_RPC_TIMEOUT, resp_rx).await {
+        match tokio::time::timeout(timeout, resp_rx).await {
             Ok(Ok(resp)) => {
                 if let Some(err) = resp.error {
                     Err((err.code, err.message))
@@ -177,7 +176,10 @@ impl PluginBackends {
                 pending.remove(&req_id);
                 Err((
                     error_codes::BACKEND_TIMEOUT,
-                    format!("Plugin backend '{plugin_id}' RPC timed out"),
+                    format!(
+                        "Plugin backend '{plugin_id}' RPC timed out after {}ms",
+                        timeout.as_millis()
+                    ),
                 ))
             }
         }
@@ -191,5 +193,58 @@ fn fail_pending(session: &BackendSession, reason: &str) {
         .unwrap_or_else(PoisonError::into_inner);
     for (id, tx) in pending.drain() {
         let _ = tx.send(RpcResponse::err(id, error_codes::BACKEND_OFFLINE, reason));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn invoke_honors_custom_timeout_and_resolves_responses() {
+        let backends = Arc::new(PluginBackends::new());
+        let (session_id, mut rx) = backends.register("demo.backend");
+
+        let b_clone = Arc::clone(&backends);
+        let responder = tokio::spawn(async move {
+            if let Some(req) = rx.recv().await {
+                assert_eq!(req.method, "fast.ping");
+                b_clone.complete_response(
+                    "demo.backend",
+                    session_id,
+                    RpcResponse::ok(req.id, json!({ "pong": true })),
+                );
+            }
+            // Second request intentionally left unanswered to verify custom timeout.
+            let _slow = rx.recv().await;
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        });
+
+        let ok = backends
+            .invoke(
+                "demo.backend",
+                "fast.ping".to_owned(),
+                None,
+                Duration::from_secs(2),
+            )
+            .await
+            .expect("fast rpc succeeds");
+        assert_eq!(ok["pong"], true);
+
+        let timed_out = backends
+            .invoke(
+                "demo.backend",
+                "slow.op".to_owned(),
+                None,
+                Duration::from_millis(40),
+            )
+            .await
+            .expect_err("slow rpc should time out");
+        assert_eq!(timed_out.0, error_codes::BACKEND_TIMEOUT);
+        assert!(timed_out.1.contains("40ms"));
+
+        responder.abort();
     }
 }

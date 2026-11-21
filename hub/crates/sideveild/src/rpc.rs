@@ -107,6 +107,10 @@ async fn dispatch_inner(
             state.on_plugins_changed();
             Ok(json!({ "ok": true, "count": count, "snapshot": state.plugins_snapshot() }))
         }
+        methods::PLUGINS_INSTALL => {
+            require_privileged(caller == RpcCaller::Ctl, &req.method)?;
+            plugins::handle_install_plugin(state, req.params)
+        }
         methods::PLUGINS_SET_ENABLED => {
             require_privileged(is_privileged, &req.method)?;
             plugins::handle_set_enabled(state, req.params)
@@ -132,7 +136,13 @@ async fn dispatch_inner(
             plugins::handle_select_plugin(state, req.params)
         }
         methods::PLUGIN_INVOKE => {
-            sandbox::handle_plugin_invoke(state, req.plugin_id.as_deref(), req.params).await
+            sandbox::handle_plugin_invoke(
+                state,
+                caller == RpcCaller::Ctl,
+                req.plugin_id.as_deref(),
+                req.params,
+            )
+            .await
         }
         methods::PLUGIN_BUS_PUBLISH => {
             sandbox::handle_bus_publish(state, req.plugin_id.as_deref(), req.params)
