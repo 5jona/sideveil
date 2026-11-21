@@ -26,7 +26,7 @@ pub(super) fn builtin_diag_manifest() -> PluginManifest {
             packages: Vec::new(),
             activities: Vec::new(),
             global: false,
-            priority: 0,
+            priority: 20,
         },
         entry: "index.html".to_owned(),
         backend: PluginBackendKind::None,

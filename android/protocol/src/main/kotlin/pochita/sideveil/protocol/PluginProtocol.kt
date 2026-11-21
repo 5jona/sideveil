@@ -125,7 +125,7 @@ data class PluginDescriptor(
                 entry = "index.html",
                 builtin = true,
                 enabled = true,
-                priority = 0,
+                priority = 20,
                 capabilities = listOf(PluginCapability.TOAST),
             )
     }

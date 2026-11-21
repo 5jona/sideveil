@@ -28,10 +28,12 @@ for pidfile in \
 done
 
 pkill -l TERM -x "sideveild" 2>/dev/null || true
+pkill -l TERM -x "sideveil-example-perf-hud" 2>/dev/null || true
 pkill -l TERM -U 1000 -f "sideveil-sensor|pochita\.sideveil\.sensor\.SensorMain" 2>/dev/null || true
 pkill -l TERM -U 1000 -f "sideveil-daemon|pochita\.sideveil\.daemon\.DaemonMain" 2>/dev/null || true
 sleep 0.5
 pkill -l KILL -x "sideveild" 2>/dev/null || true
+pkill -l KILL -x "sideveil-example-perf-hud" 2>/dev/null || true
 pkill -l KILL -U 1000 -f "sideveil-sensor|pochita\.sideveil\.sensor\.SensorMain" 2>/dev/null || true
 pkill -l KILL -U 1000 -f "sideveil-daemon|pochita\.sideveil\.daemon\.DaemonMain" 2>/dev/null || true
 pm uninstall pochita.sideveil.host >/dev/null 2>&1 || pm uninstall-system-updates pochita.sideveil.host >/dev/null 2>&1 || true

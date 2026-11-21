@@ -4,6 +4,7 @@
 //! keeps the AMS-managed `SideVeilHost` foreground service synced and alive on demand.
 
 mod host_wake;
+mod plugin_daemons;
 
 use std::fs;
 use std::io;
@@ -17,6 +18,7 @@ use tokio::process::Command;
 use tokio::sync::{mpsc, watch};
 
 use self::host_wake::{chown_path, force_stop_host, wake_host_service};
+use self::plugin_daemons::run_perf_hud_supervisor;
 use crate::pidfd::PidFd;
 use crate::state::{HostWakeSignal, HubState};
 
@@ -43,8 +45,13 @@ pub fn spawn_supervisors(
         Arc::clone(&state),
         shutdown_rx.clone(),
     ));
+    let perf_hud_handle = tokio::spawn(run_perf_hud_supervisor(
+        cfg.clone(),
+        Arc::clone(&state),
+        shutdown_rx.clone(),
+    ));
     let host_handle = tokio::spawn(run_host_supervisor(cfg, state, host_wake_rx, shutdown_rx));
-    vec![sensor_handle, host_handle]
+    vec![sensor_handle, perf_hud_handle, host_handle]
 }
 
 async fn run_sensor_supervisor(
@@ -196,7 +203,7 @@ async fn run_host_supervisor(
     }
 }
 
-async fn wait_pid_or_child(pidfd: Option<&PidFd>, child: &mut tokio::process::Child) {
+pub(super) async fn wait_pid_or_child(pidfd: Option<&PidFd>, child: &mut tokio::process::Child) {
     if let Some(pfd) = pidfd {
         let _ = pfd.wait_exit().await;
     } else {
@@ -218,7 +225,7 @@ async fn sleep_until_optional(deadline: Option<tokio::time::Instant>) {
     }
 }
 
-async fn terminate_child(pid: u32, child: &mut tokio::process::Child) {
+pub(super) async fn terminate_child(pid: u32, child: &mut tokio::process::Child) {
     if let Ok(pid_t) = libc::pid_t::try_from(pid) {
         unsafe {
             // SAFETY: Sending SIGTERM to our own active child PID.

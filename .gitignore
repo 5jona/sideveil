@@ -8,11 +8,14 @@ out/
 webroot/
 bin/sideveild
 bin/sideveil-ctl
+bin/sideveil-example-perf-hud
 bin/sideveil-sensor.dex
 bin/sideveil-daemon.dex
 system/priv-app/SideVeilHost/SideVeilHost.apk
 android/host-app/src/main/assets/panel/
 android/host-app/src/main/jniLibs/
+examples/vello-vector-scope/web/
+examples/native-perf-hud/web/
 
 # Gradle and Android build artifacts
 android/.gradle/

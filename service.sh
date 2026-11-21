@@ -46,10 +46,12 @@ stop_existing_processes() {
         fi
     done
     pkill -l TERM -x "sideveild" 2>/dev/null || true
+    pkill -l TERM -x "sideveil-example-perf-hud" 2>/dev/null || true
     pkill -l TERM -U 1000 -f "sideveil-sensor|pochita\.sideveil\.sensor\.SensorMain" 2>/dev/null || true
     pkill -l TERM -U 1000 -f "sideveil-daemon|pochita\.sideveil\.daemon\.DaemonMain" 2>/dev/null || true
     sleep 0.4
     pkill -l KILL -x "sideveild" 2>/dev/null || true
+    pkill -l KILL -x "sideveil-example-perf-hud" 2>/dev/null || true
     pkill -l KILL -U 1000 -f "sideveil-sensor|pochita\.sideveil\.sensor\.SensorMain" 2>/dev/null || true
     pkill -l KILL -U 1000 -f "sideveil-daemon|pochita\.sideveil\.daemon\.DaemonMain" 2>/dev/null || true
 }
@@ -82,6 +84,19 @@ if [ ! -f "$LIVE_CONFIG" ] && [ -f "$MODULE_CONFIG" ]; then
     cp "$MODULE_CONFIG" "$LIVE_CONFIG"
     chown 0:1000 "$LIVE_CONFIG"
     chmod 0644 "$LIVE_CONFIG"
+fi
+
+if [ -d "${MODDIR}/plugins" ]; then
+    for pdir in "${MODDIR}/plugins"/*; do
+        [ -d "$pdir" ] || continue
+        pname="${pdir##*/}"
+        if [ ! -f "${PLUGINS_DIR}/${pname}/manifest.json" ]; then
+            cp -r "$pdir" "${PLUGINS_DIR}/${pname}"
+            chown -R 0:1000 "${PLUGINS_DIR}/${pname}"
+            find "${PLUGINS_DIR}/${pname}" -type d -exec chmod 0755 {} +
+            find "${PLUGINS_DIR}/${pname}" -type f -exec chmod 0644 {} +
+        fi
+    done
 fi
 
 if [ ! -x "$HUB_BIN" ]; then

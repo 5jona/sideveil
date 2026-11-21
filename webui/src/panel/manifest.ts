@@ -14,7 +14,7 @@ export const DIAGNOSTIC_PLUGIN_MANIFEST: PluginManifest = definePluginManifest({
   triggers: {
     packages: [],
     global: true,
-    priority: 0,
+    priority: 20,
   },
   surface: {
     backdrop: 'native-glass',

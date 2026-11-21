@@ -16,6 +16,7 @@ APK_SRC="${ANDROID_DIR}/host-app/build/outputs/apk/release/host-app-release.apk"
 APK_DST="${SCRIPT_DIR}/system/priv-app/SideVeilHost/SideVeilHost.apk"
 HUB_DST="${SCRIPT_DIR}/bin/sideveild"
 CTL_DST="${SCRIPT_DIR}/bin/sideveil-ctl"
+PERF_HUD_DST="${SCRIPT_DIR}/bin/sideveil-example-perf-hud"
 HUD_JNI_DST="${ANDROID_DIR}/host-app/src/main/jniLibs/arm64-v8a/libsideveil_hud.so"
 DEX_DST="${SCRIPT_DIR}/bin/sideveil-sensor.dex"
 OUTPUT_DIR="${SCRIPT_DIR}/out"
@@ -45,7 +46,17 @@ cp "${HUB_TARGET_DIR}/libsideveil_hud.so" "${HUD_JNI_DST}"
 chmod 0755 "${HUB_DST}" "${CTL_DST}"
 chmod 0644 "${HUD_JNI_DST}"
 
-echo "[*] Building WebUI bundles (Control Plane + Built-in Panel)..."
+echo "[*] Cross-compiling bundled example plugin daemon (sideveil-example-perf-hud for aarch64-linux-android)..."
+(
+    cd "${SCRIPT_DIR}/examples/native-perf-hud"
+    run_in_env cargo fmt --check
+    run_in_env cargo clippy --all-targets -- -D warnings
+    run_in_env cargo build --release --target aarch64-linux-android
+)
+cp "${SCRIPT_DIR}/examples/native-perf-hud/target/aarch64-linux-android/release/sideveil-example-perf-hud" "${PERF_HUD_DST}"
+chmod 0755 "${PERF_HUD_DST}"
+
+echo "[*] Building WebUI bundles (Control Plane + Built-in Panel + Bundled Plugins)..."
 (
     cd "${WEBUI_DIR}"
     run_in_env pnpm install --frozen-lockfile
@@ -58,7 +69,7 @@ echo "[*] Compiling Android modules (spotlessCheck, detekt, lintDebug, unit test
     run_in_env ./gradlew spotlessCheck detekt :host-app:lintDebug :protocol:test :sensor:test :host-app:testDebugUnitTest :sensor:buildDex :host-app:assembleRelease
 )
 
-for required in "${HUB_DST}" "${CTL_DST}" "${DEX_DST}" "${APK_SRC}"; do
+for required in "${HUB_DST}" "${CTL_DST}" "${PERF_HUD_DST}" "${DEX_DST}" "${APK_SRC}"; do
     if [ ! -f "${required}" ]; then
         echo "[!] Error: Required artifact not found at ${required}" >&2
         exit 1
@@ -89,7 +100,13 @@ explicit_files = [
     ("uninstall.sh", 0o755),
     ("bin/sideveild", 0o755),
     ("bin/sideveil-ctl", 0o755),
+    ("bin/sideveil-example-perf-hud", 0o755),
     ("bin/sideveil-sensor.dex", 0o644),
+]
+
+bundled_plugins = [
+    ("examples/vello-vector-scope", "plugins/example.vello-scope"),
+    ("examples/native-perf-hud", "plugins/example.native-perf-hud"),
 ]
 
 def write_file(zf, src_path, arcname, mode):
@@ -119,6 +136,23 @@ with zipfile.ZipFile(output_zip, "w", zipfile.ZIP_DEFLATED) as zf:
                 full_path = os.path.join(root, fname)
                 arcname = os.path.relpath(full_path, script_dir).replace(os.sep, "/")
                 write_file(zf, full_path, arcname, 0o644)
+
+    for src_rel, dst_prefix in bundled_plugins:
+        src_base = os.path.join(script_dir, src_rel)
+        manifest_src = os.path.join(src_base, "manifest.json")
+        if not os.path.isfile(manifest_src):
+            raise FileNotFoundError(f"Bundled plugin manifest missing: {manifest_src}")
+        write_file(zf, manifest_src, f"{dst_prefix}/manifest.json", 0o644)
+        web_dir = os.path.join(src_base, "web")
+        if os.path.isdir(web_dir):
+            for root, dirs, files in os.walk(web_dir):
+                dirs[:] = sorted(d for d in dirs if not d.startswith("."))
+                for fname in sorted(files):
+                    if fname.startswith(".") or fname.endswith((".tmp", ".swp", "~")):
+                        continue
+                    full_path = os.path.join(root, fname)
+                    rel_web = os.path.relpath(full_path, src_base).replace(os.sep, "/")
+                    write_file(zf, full_path, f"{dst_prefix}/{rel_web}", 0o644)
 
 print("[+] Packaged module archive:", output_zip)
 EOF
