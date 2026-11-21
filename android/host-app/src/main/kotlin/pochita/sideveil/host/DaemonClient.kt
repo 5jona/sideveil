@@ -16,6 +16,7 @@ import pochita.sideveil.protocol.HostEventEnvelope
 import pochita.sideveil.protocol.RpcError
 import pochita.sideveil.protocol.RpcRequest
 import pochita.sideveil.protocol.RpcResponse
+import pochita.sideveil.protocol.SideVeilTimeouts
 import pochita.sideveil.protocol.SideVeilWireJson
 import pochita.sideveil.protocol.WebSocketCodec
 import pochita.sideveil.protocol.WsOpcode
@@ -109,11 +110,12 @@ class DaemonClient(
         val deferred = CompletableDeferred<RpcResponse>()
         pendingRpcs[wireId] = deferred
 
+        val forwardTimeoutMs = SideVeilTimeouts.resolveForwardTimeoutMs(req)
         return try {
             if (!sendTextFrame(wireJson)) {
                 RpcResponse(id = req.id, error = RpcError(-32001, "Failed to transmit RPC to daemon"))
             } else {
-                withTimeout(8_000L) { deferred.await() }.copy(id = req.id)
+                withTimeout(forwardTimeoutMs) { deferred.await() }.copy(id = req.id)
             }
         } catch (t: Throwable) {
             if (t is CancellationException) throw t

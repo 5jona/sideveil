@@ -3,6 +3,9 @@ package pochita.sideveil.protocol
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 
 object SideVeilEvents {
     const val CONFIG_UPDATED = "config.updated"
@@ -49,6 +52,7 @@ object SideVeilMethods {
     const val CONTAINER_ACTION = "container.action"
     const val PLUGINS_LIST = "plugins.list"
     const val PLUGINS_RELOAD = "plugins.reload"
+    const val PLUGINS_INSTALL = "plugins.install"
     const val PLUGINS_SET_ENABLED = "plugins.setEnabled"
     const val PLUGINS_SET_PRIORITY = "plugins.setPriority"
     const val PLUGINS_SET_DEV_URL = "plugins.setDevUrl"
@@ -62,6 +66,31 @@ object SideVeilMethods {
     const val UI_TOAST = "ui.toast"
     const val HUD_UPDATE_SCENE = "hud.updateScene"
     const val HUD_DISMISS = "hud.dismiss"
+}
+
+object SideVeilTimeouts {
+    const val MIN_PLUGIN_INVOKE_MS = 1_000L
+    const val DEFAULT_RPC_MS = 8_000L
+    const val MAX_PLUGIN_INVOKE_MS = 60_000L
+    const val FORWARD_WIRE_MARGIN_MS = 1_000L
+
+    /**
+     * Resolves the bounded WebSocket forwarding timeout for [req], giving `sideveild` a small
+     * wire margin so backend timeout diagnostics return cleanly before host cancellation.
+     */
+    fun resolveForwardTimeoutMs(req: RpcRequest): Long {
+        if (req.method != SideVeilMethods.PLUGIN_INVOKE) {
+            return DEFAULT_RPC_MS
+        }
+        val requested =
+            (req.params as? JsonObject)
+                ?.get("timeoutMs")
+                ?.jsonPrimitive
+                ?.longOrNull
+                ?: return DEFAULT_RPC_MS
+        val bounded = requested.coerceIn(MIN_PLUGIN_INVOKE_MS, MAX_PLUGIN_INVOKE_MS)
+        return bounded + FORWARD_WIRE_MARGIN_MS
+    }
 }
 
 @Serializable
