@@ -43,7 +43,7 @@ data class HudTextOverlay(
 /**
  * Lightweight host-side envelope for a declarative [NativeHudScene].
  * Vector primitives are passed straight as raw JSON to Rust `libsideveil_hud.so` (`vello_cpu` NEON)
- * so Kotlin never allocates intermediate primitive AST objects at 60Hz.
+ * so Kotlin never allocates intermediate primitive AST objects on high-frequency updates.
  */
 @Serializable
 data class NativeHudSceneHeader(

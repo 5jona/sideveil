@@ -21,13 +21,14 @@ import kotlin.math.roundToInt
 /**
  * Zero-WebView `TYPE_APPLICATION_OVERLAY` Dialog window hosting [NativeHudView] on top of
  * optional SurfaceFlinger cross-window blur + [GlassBackdropDrawable].
- * Supports 60Hz `vello_cpu` NEON vector updates, direct dragging, and `clickThrough` mode
- * without spawning any Chromium renderer process.
+ * Supports native display refresh-rate `vello_cpu` NEON vector updates, direct dragging, and
+ * `clickThrough` mode without spawning any Chromium renderer process.
  */
 @SuppressLint("RtlHardcoded", "ClickableViewAccessibility")
 internal class NativeHudWindow(
     private val context: Context,
     private val windowManager: WindowManager,
+    private val onActivePluginChanged: (String?) -> Unit = {},
 ) {
     private val density: Float
         get() =
@@ -51,7 +52,8 @@ internal class NativeHudWindow(
 
     private var attached = false
     private var visible = false
-    private var activePluginId: String? = null
+    var activePluginId: String? = null
+        private set
     private var currentHeader = NativeHudSceneHeader()
     private var panelConfig = PanelConfig()
     private var themeId = "coloros-glass"
@@ -115,6 +117,7 @@ internal class NativeHudWindow(
         if (activePluginId != header.pluginId) {
             activePluginId = header.pluginId
             userDragged = false
+            onActivePluginChanged(activePluginId)
         }
         currentHeader = header
         visible = true
@@ -126,11 +129,15 @@ internal class NativeHudWindow(
         if (pluginId != null && activePluginId != null && pluginId != activePluginId) {
             return
         }
+        val prevActive = activePluginId
         visible = false
         activePluginId = null
         userDragged = false
         collapseHidden()
         hudView.release()
+        if (prevActive != null) {
+            onActivePluginChanged(null)
+        }
     }
 
     fun updateStyle(
@@ -213,19 +220,21 @@ internal class NativeHudWindow(
                 (safe.safeTopPx + (maxY - safe.safeTopPx) * (currentHeader.anchorYPercent.coerceIn(0f, 100f) / 100f)).roundToInt()
             }
 
-        val sizeChanged = lp.width != widthPx || lp.height != heightPx
-        val posChanged = lp.x != targetX || lp.y != targetY
-        if (sizeChanged || posChanged || lp.flags != nextFlags) {
+        val geometryChanged = lp.width != widthPx || lp.height != heightPx || lp.x != targetX || lp.y != targetY
+        val flagsOrRateChanged = lp.flags != nextFlags || lp.preferredRefreshRate <= 0f
+        if (geometryChanged || flagsOrRateChanged) {
             lp.gravity = Gravity.TOP or Gravity.LEFT
             lp.width = widthPx
             lp.height = heightPx
             lp.x = targetX
             lp.y = targetY
             lp.flags = nextFlags
+            OverlayWindowFlags.applyPreferredMaxRefreshRate(context, lp, window.decorView.display)
             OverlayWindowFlags.disableMoveAnimation(lp)
             window.attributes = lp
         }
         window.decorView.visibility = View.VISIBLE
+        OverlayWindowFlags.applyHighFrameRate(hudView, context, window.decorView.display)
 
         if (currentHeader.backdrop == HudBackdropKind.TRANSPARENT) {
             container.background = null
@@ -264,6 +273,7 @@ internal class NativeHudWindow(
     private fun collapseHidden() {
         val window = dialog.window ?: return
         applyBlur(window, 0)
+        OverlayWindowFlags.clearHighFrameRate(hudView)
         window.decorView.visibility = View.INVISIBLE
         val lp = window.attributes
         lp.gravity = Gravity.TOP or Gravity.LEFT
@@ -272,6 +282,7 @@ internal class NativeHudWindow(
         lp.x = 0
         lp.y = 0
         lp.flags = INVISIBLE_FLAGS
+        OverlayWindowFlags.clearPreferredRefreshRate(lp)
         window.attributes = lp
     }
 
@@ -287,7 +298,7 @@ internal class NativeHudWindow(
 
     private fun cornerPx(): Float = dp(currentHeader.cornerRadiusDp.coerceIn(0f, 40f)).toFloat()
 
-    private fun dp(value: Float): Int = (value * density + 0.5f).toInt().coerceAtLeast(1)
+    private fun dp(value: Float): Int = OverlayWindowFlags.dp(density, value)
 
     companion object {
         private const val TAG = "SideVeilNativeHud"

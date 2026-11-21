@@ -15,12 +15,18 @@ import android.webkit.WebViewClient
 import androidx.core.net.toUri
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.encodeToJsonElement
 import pochita.sideveil.protocol.ContainerActionPayload
 import pochita.sideveil.protocol.EdgeStatusPayload
 import pochita.sideveil.protocol.HostEventEnvelope
+import pochita.sideveil.protocol.PluginBackendKind
+import pochita.sideveil.protocol.PluginBackendStatePayload
 import pochita.sideveil.protocol.PluginDescriptor
 import pochita.sideveil.protocol.PluginPresentationMode
 import pochita.sideveil.protocol.PluginSurfaceBackdrop
+import pochita.sideveil.protocol.SideVeilEvents
 import pochita.sideveil.protocol.SideVeilWireJson
 
 /**
@@ -91,9 +97,25 @@ internal class PluginWebViewInstance(
             allowContentAccess = false
             cacheMode = WebSettings.LOAD_DEFAULT
             mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-            useWideViewPort = true
+            useWideViewPort = false
             loadWithOverviewMode = false
+            textZoom = 100
+            setSupportZoom(false)
+            builtInZoomControls = false
+            displayZoomControls = false
         }
+        webView.setInitialScale(0)
+
+        val dm = context.resources.displayMetrics
+        val initW = ((initialDescriptor.surface.widthDp ?: 340) * dm.density).toInt().coerceAtLeast(320)
+        val initH = (dm.heightPixels * ((initialDescriptor.surface.heightPercent ?: 68) / 100f)).toInt().coerceAtLeast(360)
+        webView.measure(
+            android.view.View.MeasureSpec
+                .makeMeasureSpec(initW, android.view.View.MeasureSpec.EXACTLY),
+            android.view.View.MeasureSpec
+                .makeMeasureSpec(initH, android.view.View.MeasureSpec.EXACTLY),
+        )
+        webView.layout(0, 0, initW, initH)
 
         webView.addJavascriptInterface(messageBridge.createJsHostObject(), "__POCHITA_HOST__")
         webView.webViewClient = createWebViewClient()
@@ -102,10 +124,24 @@ internal class PluginWebViewInstance(
 
     fun updateDescriptor(next: PluginDescriptor) {
         val devUrlChanged = descriptor.devServerUrl != next.devServerUrl
+        val backendStateChanged = descriptor.backendState != next.backendState
         descriptor = next
         if (devUrlChanged) {
             loadEntry()
         }
+        if (backendStateChanged || devUrlChanged) {
+            pushBackendState()
+        }
+    }
+
+    fun pushBackendState() {
+        if (descriptor.backend == PluginBackendKind.NONE) return
+        pushEvent(
+            SideVeilEvents.PLUGIN_BACKEND_STATE,
+            SideVeilWireJson.encodeToJsonElement(
+                PluginBackendStatePayload(pluginId = descriptor.id, state = descriptor.backendState),
+            ),
+        )
     }
 
     fun setForegroundPriority(foreground: Boolean) {
@@ -128,6 +164,22 @@ internal class PluginWebViewInstance(
 
     fun pushEnvelope(envelope: HostEventEnvelope) {
         messageBridge.postRawAsync(SideVeilWireJson.encodeToString(envelope))
+    }
+
+    fun resetPresentationToDrawer() {
+        presentationMode = PluginPresentationMode.DRAWER
+        pushEvent(
+            SideVeilEvents.CONTAINER_PRESENTATION_CHANGED,
+            buildJsonObject { put("mode", JsonPrimitive("drawer")) },
+        )
+        notifyClickThroughChanged(false)
+    }
+
+    fun notifyClickThroughChanged(clickThrough: Boolean) {
+        pushEvent(
+            SideVeilEvents.CONTAINER_CLICK_THROUGH_CHANGED,
+            buildJsonObject { put("clickThrough", JsonPrimitive(clickThrough)) },
+        )
     }
 
     fun destroy() {

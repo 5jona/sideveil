@@ -76,9 +76,11 @@ interface PluginHostSurfaceDelegate {
     fun onPluginBackdropChanged(backdrop: PluginSurfaceBackdrop)
 
     fun onPluginPresentationChanged(
+        pluginId: String,
         webView: WebView,
         backdrop: PluginSurfaceBackdrop,
         mode: PluginPresentationMode,
+        sizeOverride: PluginSizeOverride,
     )
 
     fun onPinnedBoundsChanged(bounds: PinnedBoundsSpec)

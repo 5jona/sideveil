@@ -166,5 +166,5 @@ internal object PanelInsetsCoordinator {
     private fun dp(
         density: Float,
         value: Float,
-    ): Int = (value * density + 0.5f).toInt().coerceAtLeast(1)
+    ): Int = OverlayWindowFlags.dp(density, value)
 }

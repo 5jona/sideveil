@@ -72,11 +72,12 @@ internal class NativeHudView(
         if (currentTexts.isEmpty()) return
 
         val density = currentDensity
-        val scaledDensity = resources.displayMetrics.density.coerceAtLeast(1f)
+        val fontScale = resources.configuration.fontScale.coerceIn(0.85f, 1.25f)
+        val spToPx = density * fontScale
         for (overlay in currentTexts) {
             if (overlay.text.isEmpty()) continue
             textPaint.color = overlay.colorArgb.toInt()
-            textPaint.textSize = overlay.sizeSp.coerceIn(6f, 48f) * scaledDensity
+            textPaint.textSize = overlay.sizeSp.coerceIn(6f, 48f) * spToPx
             textPaint.typeface = if (overlay.bold) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
             textPaint.fontFeatureSettings = if (overlay.tabularNums) "tnum" else null
             textPaint.textAlign =

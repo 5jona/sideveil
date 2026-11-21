@@ -14,6 +14,7 @@ import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.webkit.WebView
+import android.widget.FrameLayout
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
 import pochita.sideveil.protocol.EdgeSide
@@ -45,12 +46,35 @@ internal class PanelWindowLayout(
     var safeCenterOffsetY: Int = 0
         private set
 
+    fun createContentContainer(themedContext: Context): FrameLayout =
+        object : FrameLayout(themedContext) {
+            override fun onMeasure(
+                widthMeasureSpec: Int,
+                heightMeasureSpec: Int,
+            ) {
+                val wSpec =
+                    if (MeasureSpec.getSize(widthMeasureSpec) <= 2 && cachedWidthPx > 2) {
+                        MeasureSpec.makeMeasureSpec(cachedWidthPx, MeasureSpec.EXACTLY)
+                    } else {
+                        widthMeasureSpec
+                    }
+                val hSpec =
+                    if (MeasureSpec.getSize(heightMeasureSpec) <= 2 && cachedHeightPx > 2) {
+                        MeasureSpec.makeMeasureSpec(cachedHeightPx, MeasureSpec.EXACTLY)
+                    } else {
+                        heightMeasureSpec
+                    }
+                super.onMeasure(wSpec, hSpec)
+            }
+        }
+
     fun createOverlayDialog(
         themedContext: Context,
         contentView: View,
         stateProvider: () -> PanelState,
         onBackPressedIntercept: () -> Boolean,
         onCloseRequested: () -> Unit,
+        onOutsideTouchRequested: (Float, Float) -> Unit = { _, _ -> onCloseRequested() },
     ): Dialog {
         val dialog =
             object : Dialog(themedContext, R.style.Theme_SideVeil_OverlayDialog) {
@@ -66,14 +90,14 @@ internal class PanelWindowLayout(
                 }
 
                 override fun onTouchEvent(event: MotionEvent): Boolean {
-                    if (event.action == MotionEvent.ACTION_OUTSIDE && stateProvider() == PanelState.OPEN) {
-                        onCloseRequested()
+                    if (event.actionMasked == MotionEvent.ACTION_OUTSIDE && stateProvider() == PanelState.OPEN) {
+                        onOutsideTouchRequested(event.rawX, event.rawY)
                         return true
                     }
                     return super.onTouchEvent(event)
                 }
             }
-        dialog.setCanceledOnTouchOutside(true)
+        dialog.setCanceledOnTouchOutside(false)
         dialog.setCancelable(true)
         dialog.setContentView(
             contentView,
@@ -116,8 +140,31 @@ internal class PanelWindowLayout(
         lp.height = 1
         lp.flags = BASE_INVISIBLE_FLAGS
         lp.dimAmount = 0f
+        OverlayWindowFlags.clearPreferredRefreshRate(lp)
         OverlayWindowFlags.disableMoveAnimation(lp)
         window.attributes = lp
+    }
+
+    fun mountWebView(
+        container: FrameLayout,
+        webView: WebView,
+        initialAlpha: Float,
+    ) {
+        (webView.parent as? ViewGroup)?.removeView(webView)
+        container.removeAllViews()
+        container.addView(
+            webView,
+            FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT),
+        )
+        container.requestLayout()
+        if (webView.width <= 2 || webView.height <= 2) {
+            val wSpec = View.MeasureSpec.makeMeasureSpec(cachedWidthPx, View.MeasureSpec.EXACTLY)
+            val hSpec = View.MeasureSpec.makeMeasureSpec(cachedHeightPx, View.MeasureSpec.EXACTLY)
+            webView.measure(wSpec, hSpec)
+            webView.layout(0, 0, cachedWidthPx, cachedHeightPx)
+        }
+        webView.alpha = initialAlpha
+        OverlayWindowFlags.applyHighFrameRate(webView, context, container.display)
     }
 
     fun recomputeDimensions(
@@ -163,8 +210,7 @@ internal class PanelWindowLayout(
         window: Window,
         edgeSide: EdgeSide,
         panelConfig: PanelConfig,
-        xPx: Int,
-        yPx: Int,
+        frame: PanelMotionFrame,
         focusable: Boolean,
         allowOffscreen: Boolean,
     ) {
@@ -173,24 +219,27 @@ internal class PanelWindowLayout(
         lp.gravity = Gravity.CENTER_VERTICAL or horiz
         lp.width = cachedWidthPx
         lp.height = cachedHeightPx
-        lp.x = xPx
-        lp.y = yPx
+        lp.x = frame.windowX
+        lp.y = frame.windowY + safeCenterOffsetY
         lp.flags = computeInteractiveFlags(panelConfig, focusable, allowOffscreen)
         lp.dimAmount = panelConfig.scrimAlpha.coerceIn(0f, 0.75f)
+        OverlayWindowFlags.applyPreferredMaxRefreshRate(context, lp, window.decorView.display)
         OverlayWindowFlags.disableMoveAnimation(lp)
         window.attributes = lp
         window.decorView.visibility = View.VISIBLE
+        OverlayWindowFlags.applyHighFrameRate(window.decorView, context, window.decorView.display)
     }
 
     fun updatePosition(
         window: Window,
         panelConfig: PanelConfig,
-        xPx: Int,
-        yPx: Int,
+        frame: PanelMotionFrame,
         focusable: Boolean,
         allowOffscreen: Boolean,
     ) {
         val lp = window.attributes
+        val xPx = frame.windowX
+        val yPx = frame.windowY + safeCenterOffsetY
         val nextFlags = computeInteractiveFlags(panelConfig, focusable, allowOffscreen)
         val geometryChanged =
             lp.x != xPx || lp.y != yPx || lp.width != cachedWidthPx || lp.height != cachedHeightPx
@@ -220,6 +269,7 @@ internal class PanelWindowLayout(
     }
 
     fun collapseToWarmInvisible(window: Window) {
+        OverlayWindowFlags.clearHighFrameRate(window.decorView)
         window.decorView.visibility = View.INVISIBLE
         val lp = window.attributes
         lp.gravity = Gravity.TOP or Gravity.LEFT
@@ -229,6 +279,7 @@ internal class PanelWindowLayout(
         lp.y = 0
         lp.dimAmount = 0f
         lp.flags = BASE_INVISIBLE_FLAGS
+        OverlayWindowFlags.clearPreferredRefreshRate(lp)
         OverlayWindowFlags.disableMoveAnimation(lp)
         window.attributes = lp
     }
@@ -285,7 +336,7 @@ internal class PanelWindowLayout(
         return flags
     }
 
-    private fun dp(value: Float): Int = (value * currentDensity + 0.5f).toInt().coerceAtLeast(1)
+    private fun dp(value: Float): Int = OverlayWindowFlags.dp(currentDensity, value)
 
     companion object {
         private const val BASE_INVISIBLE_FLAGS =

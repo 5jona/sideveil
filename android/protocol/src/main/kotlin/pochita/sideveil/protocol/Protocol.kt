@@ -22,6 +22,8 @@ object SideVeilEvents {
     const val PANEL_STATE_CHANGED = "panel.stateChanged"
     const val PANEL_VISIBILITY = "panel.visibility"
     const val PANEL_BACK_PRESSED = "panel.backPressed"
+    const val CONTAINER_PRESENTATION_CHANGED = "container.presentationChanged"
+    const val CONTAINER_CLICK_THROUGH_CHANGED = "container.clickThroughChanged"
     const val PLUGINS_UPDATED = "plugins.updated"
     const val PLUGINS_ACTIVE_CHANGED = "plugins.activeChanged"
     const val PLUGIN_BACKEND_STATE = "plugin.backendState"

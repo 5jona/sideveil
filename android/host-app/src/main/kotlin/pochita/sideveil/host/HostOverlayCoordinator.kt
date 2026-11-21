@@ -33,6 +33,7 @@ internal class HostOverlayCoordinator(
 ) : HostOverlayEventCallbacks {
     var latestDynamicTint: GlassTintOverride? = null
         private set
+    private var pendingPinnedBounds: PinnedBoundsSpec? = null
 
     fun onDynamicColorsExtracted(payload: HostDynamicColorsPayload) {
         daemonClient.sendEvent(
@@ -64,34 +65,67 @@ internal class HostOverlayCoordinator(
     }
 
     fun handlePresentationChanged(
+        pluginId: String,
         webView: WebView,
         backdrop: PluginSurfaceBackdrop,
         mode: PluginPresentationMode,
         sizeOverride: PluginSizeOverride,
     ) {
         if (mode == PluginPresentationMode.PINNED) {
+            val initialBounds = pendingPinnedBounds
+            pendingPinnedBounds = null
+            pluginManagerProvider().setPinnedPlugin(pluginId)
+            panelWindow.setContentWebView(null)
             panelWindow.close()
-            pinnedWindow.show(webView, backdrop)
+            pinnedWindow.show(webView, backdrop, initialBounds)
         } else {
-            if (pinnedWindow.isVisible) {
+            pendingPinnedBounds = null
+            val wasPinned = pinnedWindow.isVisible
+            if (wasPinned) {
                 pinnedWindow.hide()
-                panelWindow.setContentWebView(webView)
             }
+            pluginManagerProvider().setPinnedPlugin(null)
             panelWindow.setPluginBackdrop(backdrop)
             panelWindow.setPluginSizeOverride(sizeOverride, mode)
+            panelWindow.setContentWebView(webView)
+            if (wasPinned && panelWindow.currentState == pochita.sideveil.protocol.PanelState.CLOSED) {
+                panelWindow.open()
+            }
         }
     }
 
-    fun handleUnpinToDrawer() {
+    fun handlePinnedClickThroughChanged(clickThrough: Boolean) {
+        pluginManagerProvider().notifyActiveClickThroughChanged(clickThrough)
+    }
+
+    fun handleDismissPinned() {
+        pendingPinnedBounds = null
         pinnedWindow.hide()
-        pluginManagerProvider().activeWebView()?.let { webView ->
-            panelWindow.setContentWebView(webView)
+        pluginManagerProvider().resetActiveToDrawer()
+    }
+
+    fun ensureDrawerMountedBeforeOpen() {
+        if (pinnedWindow.isVisible) {
+            pendingPinnedBounds = null
+            pinnedWindow.hide()
+            pluginManagerProvider().resetActiveToDrawer()
         }
-        panelWindow.open()
     }
 
     fun handlePinnedBoundsChanged(bounds: PinnedBoundsSpec) {
-        pinnedWindow.updateBounds(bounds)
+        if (pinnedWindow.isVisible) {
+            pinnedWindow.updateBounds(bounds)
+        } else {
+            val prev = pendingPinnedBounds
+            pendingPinnedBounds =
+                PinnedBoundsSpec(
+                    widthDp = bounds.widthDp ?: prev?.widthDp,
+                    heightDp = bounds.heightDp ?: prev?.heightDp,
+                    xPercent = bounds.xPercent ?: prev?.xPercent,
+                    yPercent = bounds.yPercent ?: prev?.yPercent,
+                    clickThrough = bounds.clickThrough ?: prev?.clickThrough,
+                )
+        }
     }
 
     fun handleEdgeStatusChanged(status: EdgeStatusPayload?) {
@@ -109,7 +143,13 @@ internal class HostOverlayCoordinator(
     }
 
     fun hideTransientOverlays() {
-        pinnedWindow.hide()
+        pendingPinnedBounds = null
+        if (pinnedWindow.isVisible) {
+            pinnedWindow.hide()
+            pluginManagerProvider().resetActiveToDrawer()
+        } else {
+            pinnedWindow.hide()
+        }
         nativeHudWindow.dismiss(null)
         edgeIndicator.setEdgeStatus(null)
     }
@@ -123,13 +163,15 @@ internal class HostOverlayCoordinator(
                 sizeOverride: PluginSizeOverride,
             ) {
                 pinnedWindow.hide()
-                panelWindow.setContentWebView(webView)
                 panelWindow.setPluginBackdrop(backdrop)
                 panelWindow.setPluginSizeOverride(sizeOverride, presentationMode)
+                panelWindow.setContentWebView(webView)
             }
 
             override fun onDismissPanel() {
-                if (pinnedWindow.isVisible) pinnedWindow.hide()
+                if (pinnedWindow.isVisible) {
+                    handleDismissPinned()
+                }
                 panelWindow.close()
             }
 
@@ -142,13 +184,20 @@ internal class HostOverlayCoordinator(
 
             override fun onPluginSizeChanged(sizeOverride: PluginSizeOverride) = panelWindow.setPluginSizeOverride(sizeOverride)
 
-            override fun onPluginBackdropChanged(backdrop: PluginSurfaceBackdrop) = panelWindow.setPluginBackdrop(backdrop)
+            override fun onPluginBackdropChanged(backdrop: PluginSurfaceBackdrop) {
+                if (pinnedWindow.isVisible) {
+                    pinnedWindow.updateBackdrop(backdrop)
+                }
+                panelWindow.setPluginBackdrop(backdrop)
+            }
 
             override fun onPluginPresentationChanged(
+                pluginId: String,
                 webView: WebView,
                 backdrop: PluginSurfaceBackdrop,
                 mode: PluginPresentationMode,
-            ) = handlePresentationChanged(webView, backdrop, mode, PluginSizeOverride())
+                sizeOverride: PluginSizeOverride,
+            ) = handlePresentationChanged(pluginId, webView, backdrop, mode, sizeOverride)
 
             override fun onPinnedBoundsChanged(bounds: PinnedBoundsSpec) = handlePinnedBoundsChanged(bounds)
 

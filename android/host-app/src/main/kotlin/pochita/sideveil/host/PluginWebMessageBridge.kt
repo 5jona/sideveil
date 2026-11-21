@@ -63,6 +63,7 @@ internal class PluginWebMessageBridge(
         }
 
         runCatching {
+            // Android Lint's RequiresFeature detector requires an enclosing single-feature guard per call.
             val channel =
                 if (WebViewFeature.isFeatureSupported(WebViewFeature.CREATE_WEB_MESSAGE_CHANNEL)) {
                     WebViewCompat.createWebMessageChannel(webView)

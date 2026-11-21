@@ -134,6 +134,11 @@ internal class PanelBackdropController(
      */
     fun applyMotionFrame(
         window: Window,
+        frame: PanelMotionFrame,
+    ) = applyMotionFrame(window, frame.blurRadiusPx, frame.backdropAlpha, frame.shaderMotionProgress, frame.shaderVelocityShift)
+
+    fun applyMotionFrame(
+        window: Window,
         blurRadiusPx: Int,
         backdropAlpha: Float,
         motionProgress: Float,

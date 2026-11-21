@@ -3,9 +3,7 @@ package pochita.sideveil.host
 import android.content.Context
 import android.os.Debug
 import android.util.Log
-import android.webkit.WebView
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
@@ -40,10 +38,11 @@ internal class PluginWebViewManager(
     private val localRpcHandler = PluginLocalRpcHandler(context, haptics)
     private val descriptors = LinkedHashMap<String, PluginDescriptor>()
     private val warmInstances = LinkedHashMap<String, PluginWebViewInstance>(4, 0.75f, true)
-    private var devToolsEnabled = false
 
     private var matchedPluginIds: List<String> = emptyList()
     private var activePluginId: String = BUILTIN_DIAG_PLUGIN_ID
+    private var pinnedPluginId: String? = null
+    private var activeHudPluginId: String? = null
     private var panelState: PanelState = PanelState.CLOSED
     private var lastConfigEnvelope: HostEventEnvelope? = null
     private var lastPaletteEnvelope: HostEventEnvelope? = null
@@ -56,9 +55,41 @@ internal class PluginWebViewManager(
         activatePlugin(BUILTIN_DIAG_PLUGIN_ID, forceMount = true)
     }
 
-    fun activePluginId(): String = activePluginId
+    fun setPinnedPlugin(pluginId: String?) {
+        if (pinnedPluginId == pluginId) return
+        pinnedPluginId = pluginId
+        updateAllRendererPriorities()
+    }
 
-    fun activeWebView(): WebView? = warmInstances[activePluginId]?.webView
+    fun setActiveHudPlugin(pluginId: String?) {
+        if (activeHudPluginId == pluginId) return
+        activeHudPluginId = pluginId
+        reportDiagnostics()
+    }
+
+    fun notifyActiveClickThroughChanged(clickThrough: Boolean) {
+        val targetId = pinnedPluginId ?: activePluginId
+        warmInstances[targetId]?.notifyClickThroughChanged(clickThrough)
+    }
+
+    fun resetActiveToDrawer() {
+        val targetId = pinnedPluginId ?: activePluginId
+        pinnedPluginId = null
+        val instance = warmInstances[targetId]
+        if (instance != null && instance.presentationMode == PluginPresentationMode.PINNED) {
+            instance.resetPresentationToDrawer()
+        }
+        val activeInstance = warmInstances[activePluginId]
+        if (activeInstance != null) {
+            surfaceDelegate.mountPluginWebView(
+                webView = activeInstance.webView,
+                backdrop = activeInstance.surfaceBackdrop,
+                presentationMode = activeInstance.presentationMode,
+                sizeOverride = activeInstance.sizeOverride,
+            )
+        }
+        updateAllRendererPriorities()
+    }
 
     fun onPluginsSnapshot(snapshot: PluginsSnapshotPayload) {
         descriptors.clear()
@@ -99,8 +130,10 @@ internal class PluginWebViewManager(
 
     fun onPanelStateChanged(nextState: PanelState) {
         panelState = nextState
-        warmInstances.forEach { (id, inst) ->
-            inst.setForegroundPriority(nextState != PanelState.CLOSED && id == activePluginId)
+        updateAllRendererPriorities()
+        if (nextState == PanelState.CLOSED && activePluginId == pinnedPluginId) {
+            reportDiagnostics()
+            return
         }
         val payload =
             SideVeilWireJson.encodeToJsonElement(
@@ -110,7 +143,7 @@ internal class PluginWebViewManager(
         reportDiagnostics()
     }
 
-    fun reportDiagnostics(activeHudPluginId: String? = null) {
+    fun reportDiagnostics() {
         val diag =
             HostPluginDiagnosticsPayload(
                 warmPluginIds = warmInstances.keys.toList(),
@@ -167,14 +200,9 @@ internal class PluginWebViewManager(
         )
     }
 
-    fun pushEventToActive(
-        event: String,
-        payload: JsonElement?,
-    ) {
-        warmInstances[activePluginId]?.pushEvent(event, payload)
-    }
-
     fun destroyAll() {
+        pinnedPluginId = null
+        activeHudPluginId = null
         for (instance in warmInstances.values) {
             instance.destroy()
         }
@@ -188,21 +216,29 @@ internal class PluginWebViewManager(
         val descriptor = descriptors[pluginId] ?: descriptors[BUILTIN_DIAG_PLUGIN_ID] ?: return
         val previousId = activePluginId
         val switching = previousId != descriptor.id
-        if (switching && panelState != PanelState.CLOSED) {
-            warmInstances[previousId]?.pushEvent(
-                SideVeilEvents.PANEL_VISIBILITY,
-                SideVeilWireJson.encodeToJsonElement(
-                    PanelVisibilityPayload(visible = false, state = PanelState.CLOSED),
-                ),
-            )
+        if (switching) {
+            if (previousId == pinnedPluginId) {
+                warmInstances[previousId]?.resetPresentationToDrawer()
+                pinnedPluginId = null
+            }
+            if (panelState != PanelState.CLOSED) {
+                warmInstances[previousId]?.pushEvent(
+                    SideVeilEvents.PANEL_VISIBILITY,
+                    SideVeilWireJson.encodeToJsonElement(
+                        PanelVisibilityPayload(visible = false, state = PanelState.CLOSED),
+                    ),
+                )
+            }
         }
 
         activePluginId = descriptor.id
         val instance = getOrCreateInstance(descriptor)
-        warmInstances.forEach { (id, inst) ->
-            inst.setForegroundPriority(panelState != PanelState.CLOSED && id == activePluginId)
+        if (instance.presentationMode == PluginPresentationMode.PINNED) {
+            instance.resetPresentationToDrawer()
+            if (pinnedPluginId == descriptor.id) pinnedPluginId = null
         }
-        if (switching || forceMount) {
+        updateAllRendererPriorities()
+        if (switching || forceMount || instance.webView.parent == null) {
             surfaceDelegate.mountPluginWebView(
                 webView = instance.webView,
                 backdrop = instance.surfaceBackdrop,
@@ -218,6 +254,13 @@ internal class PluginWebViewManager(
                     PanelVisibilityPayload(visible = true, state = panelState),
                 ),
             )
+        }
+    }
+
+    private fun updateAllRendererPriorities() {
+        warmInstances.forEach { (id, inst) ->
+            val foreground = (panelState != PanelState.CLOSED && id == activePluginId) || id == pinnedPluginId
+            inst.setForegroundPriority(foreground)
         }
     }
 
@@ -282,9 +325,11 @@ internal class PluginWebViewManager(
                             if (pluginId == activePluginId) {
                                 warmInstances[pluginId]?.let { activeInst ->
                                     surfaceDelegate.onPluginPresentationChanged(
+                                        pluginId = pluginId,
                                         webView = activeInst.webView,
                                         backdrop = activeInst.surfaceBackdrop,
                                         mode = mode,
+                                        sizeOverride = activeInst.sizeOverride,
                                     )
                                 }
                             }
@@ -313,6 +358,7 @@ internal class PluginWebViewManager(
         instance.loadEntry()
         lastConfigEnvelope?.let { instance.pushEnvelope(it) }
         lastPaletteEnvelope?.let { instance.pushEnvelope(it) }
+        instance.pushBackendState()
         return instance
     }
 

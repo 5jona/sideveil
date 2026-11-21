@@ -6,12 +6,10 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.ContextThemeWrapper
-import android.view.ViewGroup
 import android.view.Window
 import android.view.WindowInsets
 import android.view.WindowManager
 import android.webkit.WebView
-import android.widget.FrameLayout
 import pochita.sideveil.protocol.EdgeSide
 import pochita.sideveil.protocol.GlassTintOverride
 import pochita.sideveil.protocol.PanelConfig
@@ -32,6 +30,7 @@ class SidebarPanelWindow(
     private val onBackPressedIntercept: () -> Boolean = { false },
     private val isBackIntercepted: () -> Boolean = { false },
     private val onRailMotionProgress: (Float) -> Unit = {},
+    private val shouldIgnoreOutsideTouch: (Float, Float) -> Boolean = { _, _ -> false },
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val themedContext = ContextThemeWrapper(context, R.style.Theme_SideVeil_OverlayDialog)
@@ -52,8 +51,9 @@ class SidebarPanelWindow(
     private var gestureStartYFraction = 0.5f
     private var lastLiveInsets: WindowInsets? = null
     private var pendingCollapse: Runnable? = null
+    private var pendingOutsideClose: Runnable? = null
 
-    private val contentContainer = FrameLayout(themedContext)
+    private val contentContainer = windowLayout.createContentContainer(themedContext)
 
     private val dialog =
         windowLayout.createOverlayDialog(
@@ -62,6 +62,7 @@ class SidebarPanelWindow(
             stateProvider = { currentState },
             onBackPressedIntercept = onBackPressedIntercept,
             onCloseRequested = ::close,
+            onOutsideTouchRequested = ::handleOutsideTouch,
         )
 
     private val backdropController =
@@ -109,19 +110,18 @@ class SidebarPanelWindow(
     val isSystemBlurSupported: Boolean
         get() = backdropController.systemBlurSupported
 
-    fun setContentWebView(webView: WebView) {
-        if (activeWebView === webView && webView.parent === contentContainer) return
-        (webView.parent as? ViewGroup)?.removeView(webView)
-        contentContainer.removeAllViews()
-        contentContainer.addView(
-            webView,
-            FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT),
-        )
-        webView.alpha = if (currentState == PanelState.OPEN) 1f else springController.currentProgress
-        activeWebView = webView
-        if (currentState == PanelState.OPEN && attached) {
-            webView.requestFocus()
+    fun setContentWebView(webView: WebView?) {
+        if (webView == null) {
+            activeWebView = null
+            contentContainer.removeAllViews()
+            return
         }
+        windowLayout.recomputeDimensions(edgeSide, panelConfig, railInsetDp, pluginSizeOverride, lastLiveInsets, presentationMode)
+        if (activeWebView === webView && webView.parent === contentContainer) return
+        val initialAlpha = if (currentState == PanelState.OPEN) 1f else springController.currentProgress
+        windowLayout.mountWebView(contentContainer, webView, initialAlpha)
+        activeWebView = webView
+        if (currentState == PanelState.OPEN && attached) webView.requestFocus()
     }
 
     fun setRailInsetDp(insetDp: Int) {
@@ -213,7 +213,6 @@ class SidebarPanelWindow(
         val startProgress = if (fromClosed) 0f else springController.currentProgress
         prepareAndShow(resetOrigin = fromClosed, startYFraction = 0.5f, startProgress = startProgress, focusable = true)
         setState(PanelState.OPEN)
-
         val velocityNorm = (initialVelocityPx / windowLayout.cachedWidthPx.coerceAtLeast(1).toFloat()).coerceIn(-12f, 12f)
         springController.animateTo(
             startProgress = startProgress,
@@ -221,25 +220,21 @@ class SidebarPanelWindow(
             startVelocityPerSec = velocityNorm,
             opening = true,
             onUpdate = { progress, velocity ->
-                val frame = computeMotionFrame(progress, velocity)
-                dialog.window?.let { win -> applyMotionVisuals(win, frame, focusable = true, allowOffscreen = true) }
+                dialog.window?.let { applyMotionVisuals(it, computeMotionFrame(progress, velocity), true, true) }
             },
-            onSettled = {
-                if (currentState == PanelState.OPEN && !closingInProgress) applyOpenLayout(settled = true)
-            },
+            onSettled = { if (currentState == PanelState.OPEN && !closingInProgress) refreshOpenGeometry() },
         )
         activeWebView?.requestFocus()
     }
 
     fun close(initialVelocityPx: Float = 0f) {
         if (!attached || currentState == PanelState.CLOSED || closingInProgress) return
-        cancelPendingCollapse()
+        cancelPendingTimers()
         springController.cancel()
         backAnimator.resetVisuals(animated = false)
         closingInProgress = true
         setImeFocused(false)
         windowLayout.recomputeDimensions(edgeSide, panelConfig, railInsetDp, pluginSizeOverride, lastLiveInsets, presentationMode)
-
         val outwardPx = if (initialVelocityPx <= 0f) initialVelocityPx else -initialVelocityPx
         val velocityNorm = (outwardPx / windowLayout.cachedWidthPx.coerceAtLeast(1).toFloat()).coerceIn(-12f, 0f)
         springController.animateTo(
@@ -248,8 +243,7 @@ class SidebarPanelWindow(
             startVelocityPerSec = velocityNorm,
             opening = false,
             onUpdate = { progress, velocity ->
-                val frame = computeMotionFrame(progress, velocity)
-                dialog.window?.let { win -> applyMotionVisuals(win, frame, focusable = false, allowOffscreen = true) }
+                dialog.window?.let { applyMotionVisuals(it, computeMotionFrame(progress, velocity), false, true) }
             },
             onSettled = { scheduleWarmCollapse() },
         )
@@ -262,7 +256,7 @@ class SidebarPanelWindow(
         focusable: Boolean,
     ) {
         if (!attached) attachWarm()
-        cancelPendingCollapse()
+        cancelPendingTimers()
         springController.cancel()
         backAnimator.resetVisuals(animated = false)
         closingInProgress = false
@@ -271,15 +265,7 @@ class SidebarPanelWindow(
         springController.snapTo(startProgress)
         val frame = computeMotionFrame(startProgress, 0f)
         dialog.window?.let { win ->
-            windowLayout.showInteractive(
-                win,
-                edgeSide,
-                panelConfig,
-                frame.windowX,
-                frame.windowY + windowLayout.safeCenterOffsetY,
-                focusable,
-                true,
-            )
+            windowLayout.showInteractive(win, edgeSide, panelConfig, frame, focusable, allowOffscreen = true)
             backdropController.apply()
             applyMotionVisuals(win, frame, focusable = focusable, allowOffscreen = true)
         }
@@ -292,8 +278,32 @@ class SidebarPanelWindow(
         activeWebView?.let { windowLayout.applyImeFocus(dialog.window, it, panelConfig, focused) }
     }
 
+    fun cancelPendingTimers(includeCollapse: Boolean = true) {
+        pendingOutsideClose?.let(mainHandler::removeCallbacks)
+        pendingOutsideClose = null
+        if (includeCollapse) {
+            pendingCollapse?.let(mainHandler::removeCallbacks)
+            pendingCollapse = null
+        }
+    }
+
+    private fun handleOutsideTouch(
+        rawX: Float,
+        rawY: Float,
+    ) {
+        if (currentState != PanelState.OPEN || closingInProgress || shouldIgnoreOutsideTouch(rawX, rawY)) return
+        cancelPendingTimers(includeCollapse = false)
+        val task =
+            Runnable {
+                pendingOutsideClose = null
+                if (currentState == PanelState.OPEN && !closingInProgress && !shouldIgnoreOutsideTouch(rawX, rawY)) close()
+            }
+        pendingOutsideClose = task
+        mainHandler.postDelayed(task, OUTSIDE_CLOSE_DEBOUNCE_MS)
+    }
+
     fun detach() {
-        cancelPendingCollapse()
+        cancelPendingTimers()
         springController.cancel()
         backdropController.unregisterBlurListener()
         if (backCallbackRegistered) {
@@ -323,41 +333,23 @@ class SidebarPanelWindow(
         focusable: Boolean,
         allowOffscreen: Boolean,
     ) {
-        windowLayout.updatePosition(
-            window,
-            panelConfig,
-            frame.windowX,
-            frame.windowY + windowLayout.safeCenterOffsetY,
-            focusable,
-            allowOffscreen,
-        )
+        windowLayout.updatePosition(window, panelConfig, frame, focusable, allowOffscreen)
         activeWebView?.alpha = frame.contentAlpha
-        backdropController.applyMotionFrame(
-            window,
-            frame.blurRadiusPx,
-            frame.backdropAlpha,
-            frame.shaderMotionProgress,
-            frame.shaderVelocityShift,
-        )
+        backdropController.applyMotionFrame(window, frame)
         onRailMotionProgress(frame.railProgress)
     }
 
     private fun refreshOpenGeometry(reapplyBackdrop: Boolean = true) {
         windowLayout.recomputeDimensions(edgeSide, panelConfig, railInsetDp, pluginSizeOverride, lastLiveInsets, presentationMode)
-        if (currentState == PanelState.OPEN && attached) applyOpenLayout(settled = true, reapplyBackdrop = reapplyBackdrop)
-    }
-
-    private fun applyOpenLayout(
-        settled: Boolean,
-        reapplyBackdrop: Boolean = true,
-    ) {
-        val window = dialog.window ?: return
-        applyMotionVisuals(window, computeMotionFrame(1f, 0f), focusable = true, allowOffscreen = !settled)
-        if (reapplyBackdrop) backdropController.apply()
+        if (currentState == PanelState.OPEN && attached) {
+            val window = dialog.window ?: return
+            applyMotionVisuals(window, computeMotionFrame(1f, 0f), focusable = true, allowOffscreen = false)
+            if (reapplyBackdrop) backdropController.apply()
+        }
     }
 
     private fun scheduleWarmCollapse() {
-        cancelPendingCollapse()
+        cancelPendingTimers()
         closingInProgress = false
         onRailMotionProgress(0f)
         setState(PanelState.CLOSED)
@@ -370,17 +362,15 @@ class SidebarPanelWindow(
         mainHandler.postDelayed(task, POST_DISMISS_WARM_RETAIN_MS)
     }
 
-    private fun cancelPendingCollapse() {
-        pendingCollapse?.let(mainHandler::removeCallbacks)
-        pendingCollapse = null
-    }
-
     private fun collapseToWarmInvisible() {
         closingInProgress = false
         val window = dialog.window ?: return
         backdropController.clearWindowBlur(window)
         windowLayout.collapseToWarmInvisible(window)
-        activeWebView?.alpha = 0f
+        activeWebView?.let {
+            it.alpha = 0f
+            OverlayWindowFlags.clearHighFrameRate(it)
+        }
         onRailMotionProgress(0f)
         setState(PanelState.CLOSED)
     }
@@ -395,5 +385,6 @@ class SidebarPanelWindow(
     companion object {
         private const val TAG = "SideVeilPanelWindow"
         private const val POST_DISMISS_WARM_RETAIN_MS = 150L
+        private const val OUTSIDE_CLOSE_DEBOUNCE_MS = 72L
     }
 }

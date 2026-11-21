@@ -8,12 +8,10 @@ import android.os.Looper
 import android.os.Process
 import android.util.Log
 import android.view.WindowManager
-import android.webkit.WebView
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import kotlinx.serialization.json.encodeToJsonElement
 import pochita.sideveil.protocol.ConfigUpdatedPayload
-import pochita.sideveil.protocol.EdgeStatusPayload
 import pochita.sideveil.protocol.HostEventEnvelope
 import pochita.sideveil.protocol.HostFullscreenChangedPayload
 import pochita.sideveil.protocol.HostHelloPayload
@@ -21,11 +19,8 @@ import pochita.sideveil.protocol.PanelCommand
 import pochita.sideveil.protocol.PanelState
 import pochita.sideveil.protocol.PanelStateChangedPayload
 import pochita.sideveil.protocol.PluginBackendStatePayload
-import pochita.sideveil.protocol.PluginDescriptor
-import pochita.sideveil.protocol.PluginPresentationMode
 import pochita.sideveil.protocol.PluginScopedEventPayload
 import pochita.sideveil.protocol.PluginSelectEventPayload
-import pochita.sideveil.protocol.PluginSurfaceBackdrop
 import pochita.sideveil.protocol.PluginsSnapshotPayload
 import pochita.sideveil.protocol.ScopeChangedPayload
 import pochita.sideveil.protocol.SideVeilConfig
@@ -60,6 +55,7 @@ class HostService : LifecycleService() {
     private var latestDarkSurface: Boolean = true
     private var latestThemeId: String = "coloros-glass"
     private var latestForegroundPackage: String = ""
+    private var latestPluginIconSignature: String = ""
 
     override fun onCreate() {
         super.onCreate()
@@ -100,7 +96,7 @@ class HostService : LifecycleService() {
         iconLoader.clear()
         edgeIndicator.detach()
         pluginRail.detach()
-        pinnedWindow.hide()
+        pinnedWindow.detach()
         nativeHudWindow.detach()
         panelWindow.detach()
         pluginManager.destroyAll()
@@ -126,6 +122,11 @@ class HostService : LifecycleService() {
                 onQuickAction = { pluginId, action ->
                     gestureCoordinator.executeRailQuickAction(pluginId, action)
                 },
+                onTouchActivity = {
+                    if (::panelWindow.isInitialized) {
+                        panelWindow.cancelPendingTimers(includeCollapse = false)
+                    }
+                },
             )
         panelWindow =
             SidebarPanelWindow(
@@ -135,15 +136,24 @@ class HostService : LifecycleService() {
                 onBackPressedIntercept = { pluginManager.dispatchBackPress() },
                 isBackIntercepted = { pluginManager.isBackIntercepted() },
                 onRailMotionProgress = { progress -> pluginRail.updateMotionProgress(progress) },
+                shouldIgnoreOutsideTouch = { rawX, rawY ->
+                    pluginRail.isTouchActiveOrRecent() || pluginRail.isScreenPointNearRail(rawX, rawY)
+                },
             )
         pinnedWindow =
             PinnedContainerWindow(
                 context = this,
                 windowManager = windowManager,
-                onUnpinToDrawer = { overlayCoordinator.handleUnpinToDrawer() },
-                onDismissPinned = { pinnedWindow.hide() },
+                onClickThroughChanged = { clickThrough ->
+                    overlayCoordinator.handlePinnedClickThroughChanged(clickThrough)
+                },
             )
-        nativeHudWindow = NativeHudWindow(this, windowManager)
+        nativeHudWindow =
+            NativeHudWindow(this, windowManager) { activeHudId ->
+                if (::pluginManager.isInitialized) {
+                    pluginManager.setActiveHudPlugin(activeHudId)
+                }
+            }
     }
 
     private fun initializeCoordinators() {
@@ -193,6 +203,7 @@ class HostService : LifecycleService() {
                 pluginManager = pluginManager,
                 configProvider = { latestConfig },
                 onSelectPlugin = ::handleRailPluginSelected,
+                onBeforeGestureOpen = { overlayCoordinator.ensureDrawerMountedBeforeOpen() },
             )
         eventDispatcher = HostEventDispatcher(createEventCallbacks(), gestureCoordinator, overlayCoordinator)
     }
@@ -200,6 +211,7 @@ class HostService : LifecycleService() {
     private fun attachWarmWindows() {
         edgeIndicator.attach()
         pluginRail.attachWarm()
+        pinnedWindow.attachWarm()
         nativeHudWindow.attachWarm()
         panelWindow.attachWarm()
         pluginManager.warmStartDefault()
@@ -298,7 +310,7 @@ class HostService : LifecycleService() {
                 latestScopeActive = decoded.active
                 latestForegroundPackage = decoded.foregroundPackage
                 if (!decoded.active) {
-                    pinnedWindow.hide()
+                    overlayCoordinator.ensureDrawerMountedBeforeOpen()
                     edgeIndicator.setEdgeStatus(null)
                 }
                 refreshEdgeIndicator()
@@ -308,7 +320,12 @@ class HostService : LifecycleService() {
             override fun onPluginsUpdated(decoded: PluginsSnapshotPayload) {
                 latestForegroundPackage = decoded.foregroundPackage
                 latestScopeActive = decoded.matchedPluginIds.isNotEmpty()
-                iconLoader.clear()
+                val iconSig =
+                    decoded.plugins.joinToString("|") { p -> "${p.id}:${p.version}:${p.icon.orEmpty()}" }
+                if (iconSig != latestPluginIconSignature) {
+                    latestPluginIconSignature = iconSig
+                    iconLoader.clear()
+                }
                 pluginManager.onPluginsSnapshot(decoded)
                 overlayCoordinator.refreshOverlayStyles()
                 refreshEdgeIndicator()
@@ -324,9 +341,21 @@ class HostService : LifecycleService() {
 
             override fun onPanelCommand(command: PanelCommand) {
                 when (command) {
-                    PanelCommand.OPEN -> panelWindow.open()
-                    PanelCommand.CLOSE -> panelWindow.close()
-                    PanelCommand.TOGGLE -> panelWindow.toggle()
+                    PanelCommand.OPEN -> {
+                        overlayCoordinator.ensureDrawerMountedBeforeOpen()
+                        panelWindow.open()
+                    }
+
+                    PanelCommand.CLOSE -> {
+                        panelWindow.close()
+                    }
+
+                    PanelCommand.TOGGLE -> {
+                        if (panelWindow.currentState == PanelState.CLOSED) {
+                            overlayCoordinator.ensureDrawerMountedBeforeOpen()
+                        }
+                        panelWindow.toggle()
+                    }
                 }
             }
 

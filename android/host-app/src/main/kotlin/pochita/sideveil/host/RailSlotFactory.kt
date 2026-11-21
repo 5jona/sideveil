@@ -1,5 +1,6 @@
 package pochita.sideveil.host
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
@@ -7,6 +8,7 @@ import android.graphics.drawable.GradientDrawable
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.Menu
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -22,6 +24,7 @@ import pochita.sideveil.protocol.PluginDescriptor
  * Constructs individual plugin slot views, async SVG/raster icon overlays, backend status dots,
  * and long-press quick menus for [PluginRailWindow].
  */
+@SuppressLint("ClickableViewAccessibility")
 internal class RailSlotFactory(
     private val themedContext: Context,
     private val densityProvider: () -> Float,
@@ -35,18 +38,12 @@ internal class RailSlotFactory(
         scrubbed: Boolean,
         isDark: Boolean,
     ): View {
-        val slot =
+        val pill =
             FrameLayout(themedContext).apply {
-                contentDescription = plugin.name
-                isClickable = true
-                isFocusable = true
-                setOnClickListener { onSelectPlugin(plugin.id) }
-                setOnLongClickListener { anchor ->
-                    showQuickMenu(anchor, plugin)
-                    true
-                }
+                background = createSlotBackground(active, scrubbed, isDark)
+                isClickable = false
+                isFocusable = false
             }
-        slot.background = createSlotBackground(active, scrubbed, isDark)
 
         val glyph =
             TextView(themedContext).apply {
@@ -56,7 +53,7 @@ internal class RailSlotFactory(
                 typeface = Typeface.DEFAULT_BOLD
                 setTextColor(resolveGlyphColor(active, isDark))
             }
-        slot.addView(
+        pill.addView(
             glyph,
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
         )
@@ -68,7 +65,7 @@ internal class RailSlotFactory(
                     scaleType = ImageView.ScaleType.FIT_CENTER
                     visibility = View.GONE
                 }
-            slot.addView(iconView, FrameLayout.LayoutParams(iconSizePx, iconSizePx, Gravity.CENTER))
+            pill.addView(iconView, FrameLayout.LayoutParams(iconSizePx, iconSizePx, Gravity.CENTER))
             iconLoader.load(plugin, sizePx = (iconSizePx * 2).coerceAtLeast(64), darkSurface = isDark) { bitmap ->
                 if (bitmap != null) {
                     iconView.setImageBitmap(bitmap)
@@ -79,14 +76,45 @@ internal class RailSlotFactory(
         }
 
         if (plugin.backend != PluginBackendKind.NONE) {
-            slot.addView(createBackendDot(plugin.backendState), createBackendDotLayout())
+            pill.addView(createBackendDot(plugin.backendState), createBackendDotLayout())
         }
 
-        slot.layoutParams =
-            LinearLayout.LayoutParams(dp(36f), dp(36f)).apply {
-                topMargin = dp(4f)
-                bottomMargin = dp(4f)
+        val slot =
+            FrameLayout(themedContext).apply {
+                contentDescription = plugin.name
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { onSelectPlugin(plugin.id) }
+                setOnLongClickListener {
+                    showQuickMenu(pill, plugin)
+                    true
+                }
+                setOnTouchListener { _, ev ->
+                    when (ev.actionMasked) {
+                        MotionEvent.ACTION_DOWN -> {
+                            pill.scaleX = 0.91f
+                            pill.scaleY = 0.91f
+                        }
+
+                        MotionEvent.ACTION_UP,
+                        MotionEvent.ACTION_CANCEL,
+                        -> {
+                            pill.scaleX = 1f
+                            pill.scaleY = 1f
+                        }
+                    }
+                    false
+                }
             }
+        slot.addView(
+            pill,
+            FrameLayout.LayoutParams(dp(PILL_SIZE_DP.toFloat()), dp(PILL_SIZE_DP.toFloat()), Gravity.CENTER),
+        )
+        slot.layoutParams =
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(SLOT_HEIGHT_DP.toFloat()),
+            )
         return slot
     }
 
@@ -179,10 +207,12 @@ internal class RailSlotFactory(
         }
     }
 
-    private fun dp(value: Float): Int = (value * densityProvider() + 0.5f).toInt().coerceAtLeast(1)
+    private fun dp(value: Float): Int = OverlayWindowFlags.dp(densityProvider(), value)
 
     companion object {
         private const val ICON_SIZE_DP = 22
+        private const val PILL_SIZE_DP = 40
+        private const val SLOT_HEIGHT_DP = 48
         private const val MENU_PIN_TOP = 1
         private const val MENU_DISABLE = 2
         private const val MENU_RELOAD = 3

@@ -34,12 +34,14 @@ internal class HostGestureCoordinator(
     private val pluginManager: PluginWebViewManager,
     private val configProvider: () -> SideVeilConfig,
     private val onSelectPlugin: (String) -> Unit,
+    private val onBeforeGestureOpen: () -> Unit = {},
 ) : HostGestureEventCallbacks {
     private var thresholdHapticFired = false
     private var lastRepositionSide: EdgeSide? = null
 
     override fun onGestureStart(decoded: GestureDragStartPayload) {
         thresholdHapticFired = false
+        onBeforeGestureOpen()
         haptics.onPilfer()
         panelWindow.onGestureStart(decoded.startYFraction)
     }

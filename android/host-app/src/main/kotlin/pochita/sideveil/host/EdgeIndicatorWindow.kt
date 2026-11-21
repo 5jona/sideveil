@@ -382,7 +382,7 @@ class EdgeIndicatorWindow(
         return if (side == EdgeSide.LEFT) -shift else shift
     }
 
-    private fun dp(value: Float): Int = (value * currentDensity + 0.5f).toInt().coerceAtLeast(1)
+    private fun dp(value: Float): Int = OverlayWindowFlags.dp(currentDensity, value)
 
     private fun dpOrZero(value: Float): Int = (value * currentDensity + 0.5f).toInt().coerceAtLeast(0)
 
