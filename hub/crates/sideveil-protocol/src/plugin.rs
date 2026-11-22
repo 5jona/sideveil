@@ -1,14 +1,21 @@
 //! Open plugin manifest schema, trigger rules, overrides, and capability ACL definitions.
 
 mod rpc_params;
+mod validation;
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use thiserror::Error;
 
 pub use rpc_params::*;
+pub use validation::{
+    ManifestValidationError, is_private_or_lan_host, validate_network_url, validate_plugin_id,
+};
+
+fn default_true() -> bool {
+    true
+}
 
 /// Canonical identifier for the built-in diagnostic panel plugin.
 pub const BUILTIN_DIAG_PLUGIN_ID: &str = "sideveil.diagnostic";
@@ -42,6 +49,33 @@ pub enum PluginCapability {
     Haptics,
     Telemetry,
     InterPluginBus,
+    NetworkLoopback,
+    NetworkLan,
+    NetworkContext,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginEmbedPrefs {
+    pub url: String,
+    #[serde(default)]
+    pub allowed_origins: Vec<String>,
+    #[serde(default)]
+    pub allow_cleartext: bool,
+    #[serde(default = "default_true")]
+    pub wide_viewport: bool,
+    #[serde(default)]
+    pub allow_zoom: bool,
+    #[serde(default = "default_true")]
+    pub web_history_back: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PluginNetworkPrefs {
+    pub allowed_origins: Vec<String>,
+    pub allow_cleartext: bool,
+    pub spa_fallback: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -79,6 +113,7 @@ pub struct PluginSurfacePrefs {
     pub backdrop: PluginSurfaceBackdrop,
     pub presentation: PluginPresentationMode,
     pub cross_origin_isolated: bool,
+    pub keep_alive: bool,
     pub width_dp: Option<i32>,
     pub height_percent: Option<i32>,
 }
@@ -93,6 +128,7 @@ pub struct PluginManifest {
     pub icon: Option<String>,
     #[serde(default)]
     pub triggers: PluginTriggers,
+    #[serde(default)]
     pub entry: String,
     #[serde(default)]
     pub backend: PluginBackendKind,
@@ -100,6 +136,10 @@ pub struct PluginManifest {
     pub capabilities: Vec<PluginCapability>,
     #[serde(default)]
     pub surface: PluginSurfacePrefs,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embed: Option<PluginEmbedPrefs>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network: Option<PluginNetworkPrefs>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -138,6 +178,10 @@ pub struct PluginDescriptor {
     pub backend_state: PluginBackendState,
     pub capabilities: Vec<PluginCapability>,
     pub surface: PluginSurfacePrefs,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embed: Option<PluginEmbedPrefs>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network: Option<PluginNetworkPrefs>,
 }
 
 /// Persisted user override for a single plugin under `/data/system/sideveil/plugins.json`.
@@ -154,6 +198,14 @@ pub struct PluginOverrideEntry {
     pub global_override: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dev_server_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embed_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allowed_origins: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allow_cleartext: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keep_alive: Option<bool>,
 }
 
 /// Persisted plugin override and per-app MRU selection state.
@@ -199,108 +251,5 @@ pub struct PluginScopedEventPayload {
     pub payload: Option<Value>,
 }
 
-#[derive(Debug, Error, PartialEq, Eq)]
-pub enum ManifestValidationError {
-    #[error(
-        "invalid plugin id '{0}': must be 2..=64 ASCII [a-z0-9.-] chars starting with a letter"
-    )]
-    InvalidId(String),
-    #[error("plugin name must not be blank")]
-    BlankName,
-    #[error("plugin version must not be blank")]
-    BlankVersion,
-    #[error("plugin entry '{0}' must be a relative path without '..' or leading '/'")]
-    InvalidEntry(String),
-    #[error("plugin icon '{0}' must be a relative path without '..' or leading '/'")]
-    InvalidIcon(String),
-}
-
-/// Validates a plugin identifier for safe use in directory names and isolated virtual origins.
-pub fn validate_plugin_id(id: &str) -> Result<(), ManifestValidationError> {
-    let bytes = id.as_bytes();
-    if bytes.len() < 2 || bytes.len() > 64 {
-        return Err(ManifestValidationError::InvalidId(id.to_owned()));
-    }
-    if !bytes[0].is_ascii_lowercase() || !bytes[bytes.len() - 1].is_ascii_alphanumeric() {
-        return Err(ManifestValidationError::InvalidId(id.to_owned()));
-    }
-    let mut prev_sep = false;
-    for &b in bytes {
-        let is_sep = b == b'.' || b == b'-';
-        if !(b.is_ascii_lowercase() || b.is_ascii_digit() || is_sep) {
-            return Err(ManifestValidationError::InvalidId(id.to_owned()));
-        }
-        if is_sep && prev_sep {
-            return Err(ManifestValidationError::InvalidId(id.to_owned()));
-        }
-        prev_sep = is_sep;
-    }
-    Ok(())
-}
-
-impl PluginManifest {
-    pub fn validate(&self) -> Result<(), ManifestValidationError> {
-        validate_plugin_id(&self.id)?;
-        if self.name.trim().is_empty() {
-            return Err(ManifestValidationError::BlankName);
-        }
-        if self.version.trim().is_empty() {
-            return Err(ManifestValidationError::BlankVersion);
-        }
-        if !is_safe_relative_asset_path(&self.entry) {
-            return Err(ManifestValidationError::InvalidEntry(self.entry.clone()));
-        }
-        if let Some(icon) = &self.icon
-            && !is_safe_relative_asset_path(icon)
-        {
-            return Err(ManifestValidationError::InvalidIcon(icon.clone()));
-        }
-        Ok(())
-    }
-}
-
-fn is_safe_relative_asset_path(raw: &str) -> bool {
-    let trimmed = raw.trim();
-    !trimmed.is_empty()
-        && !trimmed.starts_with('/')
-        && !trimmed.contains('\\')
-        && !trimmed
-            .split('/')
-            .any(|seg| seg.is_empty() || seg == "." || seg == ".." || seg.starts_with('.'))
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn validates_plugin_ids_and_entries() {
-        assert!(validate_plugin_id("sideveil.diagnostic").is_ok());
-        assert!(validate_plugin_id("com.example.my-plugin-1").is_ok());
-        assert!(validate_plugin_id("../escape").is_err());
-        assert!(validate_plugin_id("UpperCase").is_err());
-        assert!(validate_plugin_id("a..b").is_err());
-
-        let valid = PluginManifest {
-            id: "sideveil.diagnostic".to_owned(),
-            name: "诊断面板".to_owned(),
-            version: "0.1.0".to_owned(),
-            icon: None,
-            triggers: PluginTriggers::default(),
-            entry: "web/index.html".to_owned(),
-            backend: PluginBackendKind::None,
-            capabilities: vec![PluginCapability::Toast],
-            surface: PluginSurfacePrefs::default(),
-        };
-        assert!(valid.validate().is_ok());
-
-        let bad_entry = PluginManifest {
-            entry: "../secret/index.html".to_owned(),
-            ..valid
-        };
-        assert!(matches!(
-            bad_entry.validate(),
-            Err(ManifestValidationError::InvalidEntry(_))
-        ));
-    }
-}
+mod tests;

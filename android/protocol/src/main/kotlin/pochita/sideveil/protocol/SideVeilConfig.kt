@@ -108,12 +108,18 @@ data class ScopeConfig(
 }
 
 @Serializable
+data class DebugConfig(
+    val webviewDebuggingEnabled: Boolean = false,
+)
+
+@Serializable
 data class SideVeilConfig(
     val version: Int = 1,
     val enabled: Boolean = true,
     val edge: EdgeConfig = EdgeConfig(),
     val panel: PanelConfig = PanelConfig(),
     val scope: ScopeConfig = ScopeConfig(),
+    val debug: DebugConfig = DebugConfig(),
 ) {
     fun sanitized(): SideVeilConfig =
         copy(
@@ -121,6 +127,7 @@ data class SideVeilConfig(
             edge = edge.sanitized(),
             panel = panel.sanitized(),
             scope = scope.sanitized(),
+            debug = debug,
         )
 
     fun matchesPackage(packageName: String): Boolean {

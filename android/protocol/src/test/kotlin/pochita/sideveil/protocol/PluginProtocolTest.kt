@@ -3,6 +3,8 @@ package pochita.sideveil.protocol
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -89,5 +91,63 @@ class PluginProtocolTest {
                 params = buildJsonObject { put("timeoutMs", JsonPrimitive(50L)) },
             )
         assertEquals(2_000L, SideVeilTimeouts.resolveForwardTimeoutMs(flooredInvoke))
+    }
+
+    @Test
+    fun `decodes embed network keepAlive and network capabilities cleanly`() {
+        val raw =
+            """
+            {
+              "plugins": [
+                {
+                  "id": "homelab.router",
+                  "name": "Router UI",
+                  "version": "1.2.0",
+                  "capabilities": ["network-loopback", "network-lan", "network-context"],
+                  "surface": { "backdrop": "opaque", "keepAlive": true },
+                  "embed": {
+                    "url": "http://192.168.1.1:8080/ui",
+                    "allowedOrigins": ["http://192.168.1.1:8080", "https://router.lan"],
+                    "allowCleartext": true,
+                    "wideViewport": true,
+                    "allowZoom": true,
+                    "webHistoryBack": false
+                  },
+                  "network": {
+                    "allowedOrigins": ["http://127.0.0.1:9090"],
+                    "allowCleartext": true,
+                    "spaFallback": true
+                  }
+                }
+              ],
+              "matchedPluginIds": ["homelab.router"],
+              "activePluginId": "homelab.router",
+              "foregroundPackage": "com.example.app"
+            }
+            """.trimIndent()
+        val parsed = SideVeilWireJson.decodeFromString<PluginsSnapshotPayload>(raw)
+        val plugin = parsed.plugins.single()
+        assertTrue(plugin.surface.keepAlive)
+        assertTrue(plugin.capabilities.contains(PluginCapability.NETWORK_LOOPBACK))
+        assertTrue(plugin.capabilities.contains(PluginCapability.NETWORK_LAN))
+        assertTrue(plugin.capabilities.contains(PluginCapability.NETWORK_CONTEXT))
+
+        val embed = plugin.embed
+        assertNotNull(embed)
+        assertEquals("http://192.168.1.1:8080/ui", embed?.url)
+        assertEquals(listOf("http://192.168.1.1:8080", "https://router.lan"), embed?.allowedOrigins)
+        assertTrue(embed?.allowCleartext == true)
+        assertTrue(embed?.wideViewport == true)
+        assertTrue(embed?.allowZoom == true)
+        assertFalse(embed?.webHistoryBack == true)
+
+        val network = plugin.network
+        assertNotNull(network)
+        assertEquals(listOf("http://127.0.0.1:9090"), network?.allowedOrigins)
+        assertTrue(network?.allowCleartext == true)
+        assertTrue(network?.spaFallback == true)
+
+        assertEquals("network.contextChanged", SideVeilEvents.NETWORK_CONTEXT_CHANGED)
+        assertEquals("network.context", SideVeilMethods.NETWORK_CONTEXT)
     }
 }

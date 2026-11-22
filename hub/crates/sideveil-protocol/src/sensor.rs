@@ -22,6 +22,34 @@ impl Default for DisplayGeometry {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NetworkTransportKind {
+    Wifi,
+    Cellular,
+    Ethernet,
+    Other,
+    #[default]
+    None,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct NetworkContextSnapshot {
+    pub transport: NetworkTransportKind,
+    pub vpn_active: bool,
+    pub validated: bool,
+    pub metered: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interface_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ssid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gateway: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_ipv4: Option<String>,
+}
+
 /// Messages pushed from the UID 1000 Kotlin `:sensor` process to `sideveild`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -85,6 +113,8 @@ pub enum SensorToHub {
         committed: bool,
     },
     #[serde(rename_all = "camelCase")]
+    NetworkContextChanged { context: NetworkContextSnapshot },
+    #[serde(rename_all = "camelCase")]
     Pong { seq: u64 },
 }
 
@@ -134,5 +164,34 @@ mod tests {
         let decoded_sync: HubToSensor =
             serde_json::from_str(&encoded_sync).expect("decode HubToSensor");
         assert_eq!(decoded_sync, sync);
+    }
+
+    #[test]
+    fn network_context_snapshot_roundtrips_camel_case() {
+        let ctx = NetworkContextSnapshot {
+            transport: NetworkTransportKind::Wifi,
+            vpn_active: true,
+            validated: true,
+            metered: false,
+            interface_name: Some("wlan0".to_owned()),
+            ssid: Some("LabNet".to_owned()),
+            gateway: Some("192.168.1.1".to_owned()),
+            local_ipv4: Some("192.168.1.42".to_owned()),
+        };
+        let msg = SensorToHub::NetworkContextChanged {
+            context: ctx.clone(),
+        };
+        let encoded = serde_json::to_string(&msg).expect("encode NetworkContextChanged");
+        assert!(encoded.contains(r#""type":"networkContextChanged""#));
+        assert!(encoded.contains(r#""transport":"wifi""#));
+        assert!(encoded.contains(r#""vpnActive":true"#));
+        assert!(encoded.contains(r#""localIpv4":"192.168.1.42""#));
+        let decoded: SensorToHub = serde_json::from_str(&encoded).expect("decode network msg");
+        assert_eq!(decoded, SensorToHub::NetworkContextChanged { context: ctx });
+
+        let default_ctx: NetworkContextSnapshot =
+            serde_json::from_str("{}").expect("default network ctx");
+        assert_eq!(default_ctx.transport, NetworkTransportKind::None);
+        assert!(!default_ctx.vpn_active);
     }
 }

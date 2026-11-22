@@ -56,4 +56,29 @@ class SensorProtocolTest {
         assertTrue(ack.ok)
         assertEquals(null, ack.error)
     }
+
+    @Test
+    fun `NetworkContextChanged roundtrips with exact camelCase tags and fields`() {
+        val snapshot =
+            NetworkContextSnapshot(
+                transport = NetworkTransportKind.WIFI,
+                vpnActive = true,
+                validated = true,
+                metered = false,
+                interfaceName = "wlan0",
+                ssid = "HomeLab-5G",
+                gateway = "192.168.1.1",
+                localIpv4 = "192.168.1.42",
+            )
+        val msg: SensorToHub = SensorToHub.NetworkContextChanged(context = snapshot)
+        val encoded = SideVeilWireJson.encodeToString(SensorToHub.serializer(), msg)
+        assertTrue(encoded.contains("\"type\":\"networkContextChanged\""))
+        assertTrue(encoded.contains("\"transport\":\"wifi\""))
+        assertTrue(encoded.contains("\"vpnActive\":true"))
+        assertTrue(encoded.contains("\"interfaceName\":\"wlan0\""))
+        assertTrue(encoded.contains("\"localIpv4\":\"192.168.1.42\""))
+
+        val decoded = SideVeilWireJson.decodeFromString(SensorToHub.serializer(), encoded)
+        assertEquals(msg, decoded)
+    }
 }

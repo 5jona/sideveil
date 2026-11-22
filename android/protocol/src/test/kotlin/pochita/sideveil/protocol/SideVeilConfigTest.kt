@@ -93,6 +93,33 @@ class SideVeilConfigTest {
         val encoded = SideVeilPrettyJson.encodeToString(SideVeilConfig.DEFAULT)
         val decoded = SideVeilPrettyJson.decodeFromString<SideVeilConfig>(encoded)
         assertEquals(SideVeilConfig.DEFAULT, decoded)
+        assertFalse(decoded.debug.webviewDebuggingEnabled)
+    }
+
+    @Test
+    fun `debug config round-trips and legacy config JSON defaults webviewDebuggingEnabled to false`() {
+        val enabledCfg = SideVeilConfig.DEFAULT.copy(debug = DebugConfig(webviewDebuggingEnabled = true))
+        val sanitized = enabledCfg.sanitized()
+        assertTrue(sanitized.debug.webviewDebuggingEnabled)
+
+        val wire = SideVeilWireJson.encodeToString(sanitized)
+        assertTrue(wire.contains("\"webviewDebuggingEnabled\":true"))
+        val decoded = SideVeilWireJson.decodeFromString<SideVeilConfig>(wire)
+        assertEquals(sanitized, decoded)
+
+        val legacyJson =
+            """
+            {
+              "version": 1,
+              "enabled": true,
+              "edge": { "side": "left", "topPercent": 40 },
+              "panel": { "widthDp": 360, "themeId": "coloros-glass" },
+              "scope": { "mode": "allowlist", "allowlist": ["me.weishu.kernelsu"] }
+            }
+            """.trimIndent()
+        val legacyDecoded = SideVeilPrettyJson.decodeFromString<SideVeilConfig>(legacyJson)
+        assertFalse(legacyDecoded.debug.webviewDebuggingEnabled)
+        assertEquals(EdgeSide.LEFT, legacyDecoded.edge.side)
     }
 
     @Test

@@ -11,6 +11,36 @@ data class DisplayGeometry(
 )
 
 @Serializable
+enum class NetworkTransportKind {
+    @SerialName("wifi")
+    WIFI,
+
+    @SerialName("cellular")
+    CELLULAR,
+
+    @SerialName("ethernet")
+    ETHERNET,
+
+    @SerialName("other")
+    OTHER,
+
+    @SerialName("none")
+    NONE,
+}
+
+@Serializable
+data class NetworkContextSnapshot(
+    val transport: NetworkTransportKind = NetworkTransportKind.NONE,
+    val vpnActive: Boolean = false,
+    val validated: Boolean = false,
+    val metered: Boolean = false,
+    val interfaceName: String? = null,
+    val ssid: String? = null,
+    val gateway: String? = null,
+    val localIpv4: String? = null,
+)
+
+@Serializable
 data class SensorUdsHello(
     val role: String = "sensor",
     val pid: Int,
@@ -114,6 +144,12 @@ sealed interface SensorToHub {
         val side: EdgeSide,
         val topPercent: Int,
         val committed: Boolean,
+    ) : SensorToHub
+
+    @Serializable
+    @SerialName("networkContextChanged")
+    data class NetworkContextChanged(
+        val context: NetworkContextSnapshot,
     ) : SensorToHub
 
     @Serializable

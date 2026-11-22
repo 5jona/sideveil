@@ -55,7 +55,33 @@ enum class PluginCapability {
 
     @SerialName("inter-plugin-bus")
     INTER_PLUGIN_BUS,
+
+    @SerialName("network-loopback")
+    NETWORK_LOOPBACK,
+
+    @SerialName("network-lan")
+    NETWORK_LAN,
+
+    @SerialName("network-context")
+    NETWORK_CONTEXT,
 }
+
+@Serializable
+data class PluginEmbedPrefs(
+    val url: String,
+    val allowedOrigins: List<String> = emptyList(),
+    val allowCleartext: Boolean = false,
+    val wideViewport: Boolean = true,
+    val allowZoom: Boolean = false,
+    val webHistoryBack: Boolean = true,
+)
+
+@Serializable
+data class PluginNetworkPrefs(
+    val allowedOrigins: List<String> = emptyList(),
+    val allowCleartext: Boolean = false,
+    val spaFallback: Boolean = false,
+)
 
 @Serializable
 enum class PluginSurfaceBackdrop {
@@ -92,6 +118,7 @@ data class PluginSurfacePrefs(
     val backdrop: PluginSurfaceBackdrop = PluginSurfaceBackdrop.NATIVE_GLASS,
     val presentation: PluginPresentationMode = PluginPresentationMode.DRAWER,
     val crossOriginIsolated: Boolean = false,
+    val keepAlive: Boolean = false,
     val widthDp: Int? = null,
     val heightPercent: Int? = null,
 )
@@ -115,6 +142,8 @@ data class PluginDescriptor(
     val backendState: PluginBackendState = PluginBackendState.NONE,
     val capabilities: List<PluginCapability> = emptyList(),
     val surface: PluginSurfacePrefs = PluginSurfacePrefs(),
+    val embed: PluginEmbedPrefs? = null,
+    val network: PluginNetworkPrefs? = null,
 ) {
     companion object {
         fun builtinDiagnostic(): PluginDescriptor =

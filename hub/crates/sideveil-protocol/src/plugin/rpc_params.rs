@@ -104,6 +104,52 @@ pub struct PluginSetDevUrlParams {
     pub clear: bool,
 }
 
+fn default_true_param() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginSetEmbedConfigParams {
+    pub plugin_id: String,
+    #[serde(default)]
+    pub embed_url: Option<String>,
+    #[serde(default)]
+    pub allowed_origins: Option<Vec<String>>,
+    #[serde(default)]
+    pub allow_cleartext: Option<bool>,
+    #[serde(default)]
+    pub keep_alive: Option<bool>,
+    #[serde(default)]
+    pub clear: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginCreateWebEmbedParams {
+    pub id: String,
+    pub name: String,
+    pub url: String,
+    #[serde(default)]
+    pub allowed_origins: Vec<String>,
+    #[serde(default)]
+    pub allow_cleartext: bool,
+    #[serde(default)]
+    pub keep_alive: bool,
+    #[serde(default)]
+    pub packages: Vec<String>,
+    #[serde(default = "default_true_param")]
+    pub global: bool,
+    #[serde(default)]
+    pub priority: Option<i32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginUninstallParams {
+    pub plugin_id: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginBusPublishParams {
