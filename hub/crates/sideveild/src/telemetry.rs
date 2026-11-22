@@ -1,5 +1,7 @@
 //! Zero-subprocess Linux `/proc` & `/sys` telemetry sampler for plugins holding `telemetry` ACL.
 
+mod thermal;
+
 use std::fs;
 use std::sync::Mutex;
 
@@ -27,7 +29,7 @@ static PREV_CPU: Mutex<Option<CpuTotals>> = Mutex::new(None);
 pub fn sample_snapshot() -> TelemetrySnapshot {
     let cpu_percent = sample_cpu_percent();
     let (mem_used_mb, mem_total_mb) = sample_mem_mb();
-    let soc_temp_c = sample_soc_temp_c();
+    let soc_temp_c = thermal::sample_soc_temp_c();
     let uptime_sec = fs::read_to_string("/proc/uptime")
         .ok()
         .and_then(|s| s.split_whitespace().next()?.parse::<f64>().ok())
@@ -107,33 +109,4 @@ fn parse_kb(rest: &str) -> u64 {
         .next()
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(0)
-}
-
-fn sample_soc_temp_c() -> Option<f32> {
-    let entries = fs::read_dir("/sys/class/thermal").ok()?;
-    let mut best: Option<f32> = None;
-    for entry in entries.flatten().take(32) {
-        let name = entry.file_name();
-        if !name.to_string_lossy().starts_with("thermal_zone") {
-            continue;
-        }
-        let path = entry.path();
-        let raw_temp = fs::read_to_string(path.join("temp"))
-            .ok()
-            .and_then(|s| s.trim().parse::<f32>().ok());
-        let Some(val) = raw_temp else {
-            continue;
-        };
-        let c = if val > 200.0 { val / 1000.0 } else { val };
-        if (15.0..=115.0).contains(&c) {
-            let kind = fs::read_to_string(path.join("type"))
-                .unwrap_or_default()
-                .to_ascii_lowercase();
-            if kind.contains("cpu") || kind.contains("soc") || kind.contains("tsens") {
-                return Some((c * 10.0).round() / 10.0);
-            }
-            best.get_or_insert((c * 10.0).round() / 10.0);
-        }
-    }
-    best
 }
