@@ -54,6 +54,7 @@ object SensorMain {
         lateinit var hubClient: HubUdsClient
         lateinit var foregroundMonitor: ForegroundMonitor
         lateinit var edgeMonitor: EdgeGestureMonitor
+        lateinit var networkWatcher: NetworkContextWatcher
 
         edgeMonitor = createEdgeMonitor(systemContext) { hubClient }
         foregroundMonitor =
@@ -62,6 +63,14 @@ object SensorMain {
                 handler = workerHandler,
                 onForegroundChanged = { pkg, act ->
                     hubClient.send(SensorToHub.ForegroundChanged(packageName = pkg, activityName = act))
+                },
+            )
+        networkWatcher =
+            NetworkContextWatcher(
+                systemContext = systemContext,
+                handler = workerHandler,
+                onContextChanged = { snapshot ->
+                    hubClient.send(SensorToHub.NetworkContextChanged(context = snapshot))
                 },
             )
 
@@ -83,6 +92,7 @@ object SensorMain {
                             foregroundActivity = foregroundMonitor.foregroundActivity,
                         ),
                     )
+                    hubClient.send(SensorToHub.NetworkContextChanged(context = networkWatcher.snapshot))
                 },
                 onMessage = { msg ->
                     handleHubMessage(msg, edgeMonitor, appOpsBridge, workerHandler, hubClient)
@@ -93,6 +103,7 @@ object SensorMain {
             Thread {
                 SensorLog.info("Shutting down SideVeil sensor")
                 hubClient.stop()
+                networkWatcher.stop()
                 edgeMonitor.stop()
                 foregroundMonitor.stop()
                 runCatching { workerThread.quitSafely() }
@@ -102,6 +113,7 @@ object SensorMain {
         SensorLog.info("Initial host permissions: overlayGranted=${initialPerms.overlayGranted}")
         foregroundMonitor.start()
         edgeMonitor.start(SideVeilConfig.DEFAULT)
+        networkWatcher.start()
         hubClient.start()
 
         Looper.loop()
