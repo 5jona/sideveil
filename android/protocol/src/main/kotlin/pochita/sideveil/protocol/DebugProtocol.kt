@@ -3,6 +3,11 @@ package pochita.sideveil.protocol
 import kotlinx.serialization.Serializable
 
 @Serializable
+data class DebugInspectUiParams(
+    val timeoutMs: Long? = null,
+)
+
+@Serializable
 data class DebugSetWebViewDebuggingParams(
     val enabled: Boolean,
 )
@@ -11,9 +16,26 @@ data class DebugSetWebViewDebuggingParams(
 data class DebugCdpStatusResult(
     val ok: Boolean = true,
     val webviewDebuggingEnabled: Boolean = false,
+    val effectiveEnabled: Boolean = false,
+    val devServerActive: Boolean = false,
     val hostPid: Int? = null,
     val cdpSocket: String? = null,
     val restartRecommended: Boolean = false,
+)
+
+@Serializable
+data class DaemonLogsParams(
+    val sinceSeq: Long? = null,
+    val limit: Int? = null,
+    val level: String? = null,
+    val source: String? = null,
+)
+
+@Serializable
+data class DaemonLogsResult(
+    val lines: List<String> = emptyList(),
+    val nextSeq: Long = 0L,
+    val totalDropped: Long = 0L,
 )
 
 @Serializable
@@ -124,6 +146,8 @@ data class DebugWebViewSnapshot(
     val backInterceptEnabled: Boolean = false,
     val rendererPriority: String = "bound",
     val rendererWaivedWhenNotVisible: Boolean = true,
+    val dormant: Boolean = false,
+    val crashCount: Int = 0,
     val widthPx: Int = 0,
     val heightPx: Int = 0,
 )
@@ -161,4 +185,5 @@ data class DebugInspectUiSnapshot(
     val webViews: List<DebugWebViewSnapshot> = emptyList(),
     val frameMetrics: DebugFrameMetricsSnapshot = DebugFrameMetricsSnapshot(),
     val windowFrameMetrics: Map<String, DebugFrameMetricsSnapshot> = emptyMap(),
+    val gestureStats: DebugGestureStats? = null,
 )

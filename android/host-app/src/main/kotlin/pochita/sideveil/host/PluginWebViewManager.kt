@@ -8,7 +8,6 @@ import kotlinx.serialization.json.encodeToJsonElement
 import pochita.sideveil.protocol.BUILTIN_DIAG_PLUGIN_ID
 import pochita.sideveil.protocol.HostEventEnvelope
 import pochita.sideveil.protocol.PanelState
-import pochita.sideveil.protocol.PanelVisibilityPayload
 import pochita.sideveil.protocol.PluginBackendStatePayload
 import pochita.sideveil.protocol.PluginCapability
 import pochita.sideveil.protocol.PluginDescriptor
@@ -27,14 +26,28 @@ import pochita.sideveil.protocol.SideVeilWireJson
  */
 internal class PluginWebViewManager(
     private val context: Context,
-    private val scope: CoroutineScope,
-    private val daemonClient: DaemonClient,
+    scope: CoroutineScope,
+    daemonClient: DaemonClient,
     haptics: EdgeHapticsController,
     private val surfaceDelegate: PluginHostSurfaceDelegate,
     private val isKeepAlivePlugin: (PluginDescriptor) -> Boolean = { it.surface.keepAlive },
 ) {
-    private val assetFetcher = PluginAssetFetcher(context) { daemonClient.currentEndpoint() }
-    private val localRpcHandler = PluginLocalRpcHandler(context, haptics)
+    private val crashRegistry = WebViewCrashRegistry()
+    private val eventBridge = PluginWebViewEventBridge(daemonClient, crashRegistry)
+    private val assetFetcher =
+        PluginAssetFetcher(
+            context = context,
+            endpointProvider = { daemonClient.currentEndpoint() },
+            onFetchError = eventBridge::reportLoopbackFetchError,
+        )
+    private val webViewDeps =
+        PluginWebViewDeps(
+            scope = scope,
+            daemonClient = daemonClient,
+            localRpcHandler = PluginLocalRpcHandler(context, haptics),
+            assetFetcher = assetFetcher,
+            crashRegistry = crashRegistry,
+        )
     private val descriptors = LinkedHashMap<String, PluginDescriptor>()
     private val pool =
         PluginWebViewPool<PluginWebViewInstance>(
@@ -59,9 +72,6 @@ internal class PluginWebViewManager(
     private var pinnedPluginId: String? = null
     private var activeHudPluginId: String? = null
     private var panelState: PanelState = PanelState.CLOSED
-    private var lastConfigEnvelope: HostEventEnvelope? = null
-    private var lastPaletteEnvelope: HostEventEnvelope? = null
-    private var lastNetworkContextEnvelope: HostEventEnvelope? = null
     private val webViewDebugging = WebViewDebuggingController()
 
     val webViewDebuggingEnabled: Boolean
@@ -98,16 +108,10 @@ internal class PluginWebViewManager(
         pinnedPluginId = pluginId
         pool.updateRendererPriorities(panelState, activePluginId, pinnedPluginId)
         if (previousPinned != null && (panelState == PanelState.CLOSED || previousPinned != activePluginId)) {
-            pool.peek(previousPinned)?.pushEvent(
-                SideVeilEvents.PANEL_VISIBILITY,
-                SideVeilWireJson.encodeToJsonElement(PanelVisibilityPayload(visible = false, state = PanelState.CLOSED)),
-            )
+            eventBridge.pushVisibility(pool.peek(previousPinned), visible = false, state = PanelState.CLOSED)
         }
         if (pluginId != null) {
-            pool.peek(pluginId)?.pushEvent(
-                SideVeilEvents.PANEL_VISIBILITY,
-                SideVeilWireJson.encodeToJsonElement(PanelVisibilityPayload(visible = true, state = PanelState.OPEN)),
-            )
+            eventBridge.pushVisibility(pool.peek(pluginId), visible = true, state = PanelState.OPEN)
         }
     }
 
@@ -151,7 +155,7 @@ internal class PluginWebViewManager(
                 }
 
                 DescriptorUpdateOutcome.UNCHANGED -> {
-                    // No mount or backdrop update required.
+                    Unit
                 }
             }
         }
@@ -159,9 +163,7 @@ internal class PluginWebViewManager(
         webViewDebugging.setHasDevServer(descriptors.values.any { !it.devServerUrl.isNullOrBlank() })
 
         val evicted = pool.evictStale { id -> descriptors[id]?.enabled == true }
-        if (pinnedPluginId != null && evicted.contains(pinnedPluginId)) {
-            pinnedPluginId = null
-        }
+        if (pinnedPluginId != null && evicted.contains(pinnedPluginId)) pinnedPluginId = null
 
         matchedPluginIds = snapshot.matchedPluginIds.filter(descriptors::containsKey)
         val targetId =
@@ -184,14 +186,9 @@ internal class PluginWebViewManager(
         pool.updateRendererPriorities(panelState, activePluginId, pinnedPluginId)
         val active = pool.peek(activePluginId)
         if (nextState != PanelState.CLOSED || activePluginId != pinnedPluginId) {
-            active?.pushEvent(
-                SideVeilEvents.PANEL_VISIBILITY,
-                SideVeilWireJson.encodeToJsonElement(PanelVisibilityPayload(visible = nextState != PanelState.CLOSED, state = nextState)),
-            )
+            eventBridge.pushVisibility(active, visible = nextState != PanelState.CLOSED, state = nextState)
         }
-        if (nextState == PanelState.CLOSED) {
-            active?.flushCookies()
-        }
+        if (nextState == PanelState.CLOSED) active?.flushCookies()
         reportDiagnostics()
     }
 
@@ -213,10 +210,7 @@ internal class PluginWebViewManager(
         }
     }
 
-    fun reportDiagnostics() {
-        val diag = buildHostDiagnosticsPayload(pool.warmPluginIds(), activeHudPluginId)
-        daemonClient.sendEvent(SideVeilEvents.HOST_DIAGNOSTICS, SideVeilWireJson.encodeToJsonElement(diag))
-    }
+    fun reportDiagnostics() = eventBridge.reportDiagnostics(pool.warmPluginIds(), activeHudPluginId)
 
     fun isBackIntercepted(): Boolean = pool.peek(activePluginId)?.canConsumeBack() == true
 
@@ -225,15 +219,12 @@ internal class PluginWebViewManager(
     fun dispatchBackPress(): Boolean = pool.peek(activePluginId)?.consumeBackPress() == true
 
     fun broadcastGlobalEvent(envelope: HostEventEnvelope) {
-        when (envelope.event) {
-            SideVeilEvents.CONFIG_UPDATED -> lastConfigEnvelope = envelope
-            SideVeilEvents.THEME_PALETTE_UPDATED -> lastPaletteEnvelope = envelope
-        }
+        eventBridge.recordGlobalEnvelope(envelope)
         pool.forEachInstance { it.pushEnvelope(envelope) }
     }
 
     fun routeNetworkContextChanged(envelope: HostEventEnvelope) {
-        lastNetworkContextEnvelope = envelope
+        eventBridge.recordNetworkContextEnvelope(envelope)
         pool.forEachInstance { inst ->
             if (!inst.isUntrustedEmbed && inst.descriptor.capabilities.contains(PluginCapability.NETWORK_CONTEXT)) {
                 inst.pushEnvelope(envelope)
@@ -281,10 +272,7 @@ internal class PluginWebViewManager(
                 pinnedPluginId = null
             }
             if (panelState != PanelState.CLOSED) {
-                previous?.pushEvent(
-                    SideVeilEvents.PANEL_VISIBILITY,
-                    SideVeilWireJson.encodeToJsonElement(PanelVisibilityPayload(visible = false, state = PanelState.CLOSED)),
-                )
+                eventBridge.pushVisibility(previous, visible = false, state = PanelState.CLOSED)
             }
             previous?.flushCookies()
         }
@@ -296,15 +284,10 @@ internal class PluginWebViewManager(
             if (pinnedPluginId == descriptor.id) pinnedPluginId = null
         }
         pool.updateRendererPriorities(panelState, activePluginId, pinnedPluginId)
-        if (switching || forceMount || instance.webView.parent == null) {
-            mountInstance(instance)
-        }
+        if (switching || forceMount || instance.webView.parent == null) mountInstance(instance)
         reportDiagnostics()
         if (switching && panelState != PanelState.CLOSED) {
-            instance.pushEvent(
-                SideVeilEvents.PANEL_VISIBILITY,
-                SideVeilWireJson.encodeToJsonElement(PanelVisibilityPayload(visible = true, state = panelState)),
-            )
+            eventBridge.pushVisibility(instance, visible = true, state = panelState)
         }
     }
 
@@ -332,32 +315,14 @@ internal class PluginWebViewManager(
         ) {
             PluginWebViewInstance(
                 context = context,
-                scope = scope,
-                daemonClient = daemonClient,
-                localRpcHandler = localRpcHandler,
-                assetFetcher = assetFetcher,
+                deps = webViewDeps,
                 initialDescriptor = descriptor,
                 callbacks = containerCallbacks,
             ).also { created ->
-                created.loadEntry()
-                lastConfigEnvelope?.let(created::pushEnvelope)
-                lastPaletteEnvelope?.let(created::pushEnvelope)
-                if (!created.isUntrustedEmbed && descriptor.capabilities.contains(PluginCapability.NETWORK_CONTEXT)) {
-                    lastNetworkContextEnvelope?.let(created::pushEnvelope)
-                }
-                created.pushBackendState()
                 val initiallyVisible =
                     (panelState != PanelState.CLOSED && descriptor.id == activePluginId) ||
                         descriptor.id == pinnedPluginId
-                created.pushEvent(
-                    SideVeilEvents.PANEL_VISIBILITY,
-                    SideVeilWireJson.encodeToJsonElement(
-                        PanelVisibilityPayload(
-                            visible = initiallyVisible,
-                            state = if (initiallyVisible) panelState else PanelState.CLOSED,
-                        ),
-                    ),
-                )
+                eventBridge.hydrateNewInstance(created, descriptor, panelState, initiallyVisible)
             }
         }
     }
@@ -366,6 +331,7 @@ internal class PluginWebViewManager(
         Log.w(TAG, "Recovering crashed WebView instance for plugin=$pluginId")
         if (pluginId == pinnedPluginId) pinnedPluginId = null
         pool.removeAndDestroy(pluginId)
+        reportDiagnostics()
         val descriptor = descriptors[pluginId] ?: return
         if (pluginId == activePluginId) activatePlugin(descriptor.id, forceMount = true)
     }

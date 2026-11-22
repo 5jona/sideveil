@@ -2,6 +2,7 @@ package pochita.sideveil.host
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import android.webkit.WebResourceResponse
 import pochita.sideveil.protocol.PluginDescriptor
 import java.io.ByteArrayInputStream
@@ -18,6 +19,7 @@ import java.util.Locale
 class PluginAssetFetcher(
     private val context: Context,
     private val endpointProvider: () -> Pair<Int, String>?,
+    private val onFetchError: ((pluginId: String, url: String, description: String, isMainFrame: Boolean) -> Unit)? = null,
 ) {
     fun hostFor(pluginId: String): String = "$pluginId.$PLUGIN_ORIGIN_SUFFIX"
 
@@ -49,6 +51,7 @@ class PluginAssetFetcher(
     fun fetch(
         descriptor: PluginDescriptor,
         uri: Uri,
+        isMainFrame: Boolean = false,
     ): WebResourceResponse {
         if (!isAllowedPluginUri(uri, descriptor.id)) {
             return errorResponse(403, "Forbidden")
@@ -62,12 +65,22 @@ class PluginAssetFetcher(
         if (devBase != null) {
             val rel = rawPath.removePrefix("web/").ifEmpty { "index.html" }
             val querySuffix = uri.encodedQuery?.let { "?$it" }.orEmpty()
-            return fetchLoopbackUrl("$devBase/$rel$querySuffix", authToken = null, fallbackPath = rel, coi = coi)
+            return fetchLoopbackUrl(
+                descriptor = descriptor,
+                targetUrl = "$devBase/$rel$querySuffix",
+                authToken = null,
+                fallbackPath = rel,
+                isMainFrame = isMainFrame,
+            )
         }
         return if (descriptor.builtin) {
             openBuiltinAsset(rawPath.ifEmpty { "index.html" }, coi = coi)
         } else {
-            fetchExternalAsset(descriptor, rawPath.ifEmpty { descriptor.entry.trimStart('/') }, coi = coi)
+            fetchExternalAsset(
+                descriptor = descriptor,
+                relativePath = rawPath.ifEmpty { descriptor.entry.trimStart('/') },
+                isMainFrame = isMainFrame,
+            )
         }
     }
 
@@ -94,12 +107,12 @@ class PluginAssetFetcher(
     private fun fetchExternalAsset(
         descriptor: PluginDescriptor,
         relativePath: String,
-        coi: Boolean,
+        isMainFrame: Boolean,
     ): WebResourceResponse {
         val (port, token) = endpointProvider() ?: return errorResponse(503, "Hub Unavailable")
         val normalized = relativePath.trimStart('/')
         val url = "http://127.0.0.1:$port/plugins/${descriptor.id}/$normalized"
-        val response = fetchLoopbackUrl(url, authToken = token, fallbackPath = normalized, coi = coi)
+        val response = fetchLoopbackUrl(descriptor, url, authToken = token, fallbackPath = normalized, isMainFrame = isMainFrame)
         val entryPath = descriptor.entry.trimStart('/').ifEmpty { "index.html" }
         val isSpaRoute =
             descriptor.network?.spaFallback == true &&
@@ -108,7 +121,7 @@ class PluginAssetFetcher(
                 !normalized.substringAfterLast('/').contains('.')
         return if (isSpaRoute) {
             val entryUrl = "http://127.0.0.1:$port/plugins/${descriptor.id}/$entryPath"
-            fetchLoopbackUrl(entryUrl, authToken = token, fallbackPath = entryPath, coi = coi)
+            fetchLoopbackUrl(descriptor, entryUrl, authToken = token, fallbackPath = entryPath, isMainFrame = isMainFrame)
         } else {
             response
         }
@@ -117,12 +130,14 @@ class PluginAssetFetcher(
     fun forbiddenResponse(): WebResourceResponse = errorResponse(403, "Forbidden")
 
     private fun fetchLoopbackUrl(
+        descriptor: PluginDescriptor,
         targetUrl: String,
         authToken: String?,
         fallbackPath: String,
-        coi: Boolean,
-    ): WebResourceResponse =
-        runCatching {
+        isMainFrame: Boolean,
+    ): WebResourceResponse {
+        val coi = descriptor.surface.crossOriginIsolated
+        return runCatching {
             val conn =
                 (URI(targetUrl).toURL().openConnection() as HttpURLConnection).apply {
                     requestMethod = "GET"
@@ -155,9 +170,14 @@ class PluginAssetFetcher(
             } finally {
                 conn.disconnect()
             }
-        }.getOrElse {
+        }.getOrElse { err ->
+            val safeUrl = WebViewDiagnosticsSanitizer.sanitizeUrl(targetUrl)
+            val detail = "${err.javaClass.simpleName}: ${err.message.orEmpty()}".take(WebViewDiagnosticsSanitizer.MAX_DESCRIPTION_LEN)
+            Log.w(TAG, "Loopback asset fetch failed plugin=${descriptor.id} url=$safeUrl ($detail)")
+            onFetchError?.invoke(descriptor.id, safeUrl, detail, isMainFrame)
             errorResponse(502, "Asset Fetch Failed")
         }
+    }
 
     private fun isUtf8Mime(mime: String): Boolean = mime.startsWith("text/") || UTF8_MIME_SUBSTRINGS.any { mime.contains(it) }
 
@@ -175,6 +195,7 @@ class PluginAssetFetcher(
         )
 
     companion object {
+        private const val TAG = "SideVeilAssetFetcher"
         const val PLUGIN_ORIGIN_SUFFIX = "plugins.sideveil.local"
         private const val CONNECT_TIMEOUT_MS = 2_000
         private const val READ_TIMEOUT_MS = 4_000

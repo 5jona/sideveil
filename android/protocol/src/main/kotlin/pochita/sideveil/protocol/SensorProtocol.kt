@@ -41,6 +41,16 @@ data class NetworkContextSnapshot(
 )
 
 @Serializable
+data class DebugGestureStats(
+    val edgeSwipesTriggered: Long = 0L,
+    val edgeSwipesRejected: Long = 0L,
+    val hotzoneMisses: Long = 0L,
+    val pilferInvocations: Long = 0L,
+    val lastRejectReason: String? = null,
+    val lastEventTimestampMs: Long = 0L,
+)
+
+@Serializable
 data class SensorUdsHello(
     val role: String = "sensor",
     val pid: Int,
@@ -150,6 +160,12 @@ sealed interface SensorToHub {
     @SerialName("networkContextChanged")
     data class NetworkContextChanged(
         val context: NetworkContextSnapshot,
+    ) : SensorToHub
+
+    @Serializable
+    @SerialName("gestureStatsUpdated")
+    data class GestureStatsUpdated(
+        val stats: DebugGestureStats,
     ) : SensorToHub
 
     @Serializable

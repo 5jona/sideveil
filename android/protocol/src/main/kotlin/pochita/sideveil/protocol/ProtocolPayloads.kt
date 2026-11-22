@@ -27,6 +27,24 @@ data class HostWebViewConsolePayload(
 )
 
 @Serializable
+data class HostWebViewErrorPayload(
+    val pluginId: String,
+    val kind: String,
+    val code: Int,
+    val description: String = "",
+    val url: String = "",
+    val isMainFrame: Boolean = false,
+)
+
+@Serializable
+data class HostWebViewCrashPayload(
+    val pluginId: String,
+    val didCrash: Boolean,
+    val rendererPriorityAtExit: Int,
+    val crashCount: Int,
+)
+
+@Serializable
 data class GestureDragStartPayload(
     val side: EdgeSide,
     val startYFraction: Float,

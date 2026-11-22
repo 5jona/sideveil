@@ -11,6 +11,11 @@ class DebugProtocolTest {
     fun `debug method constants match frozen wire contract`() {
         assertEquals("debug.inspectUi", SideVeilMethods.DEBUG_INSPECT_UI)
         assertEquals("debug.setWebViewDebugging", SideVeilMethods.DEBUG_SET_WEBVIEW_DEBUGGING)
+        assertEquals("debug.cdpStatus", SideVeilMethods.DEBUG_CDP_STATUS)
+        assertEquals("debug.resetFrameMetrics", SideVeilMethods.DEBUG_RESET_FRAME_METRICS)
+        assertEquals("daemon.logsClear", SideVeilMethods.DAEMON_LOGS_CLEAR)
+        assertEquals("host.webviewError", SideVeilEvents.HOST_WEBVIEW_ERROR)
+        assertEquals("host.webviewCrash", SideVeilEvents.HOST_WEBVIEW_CRASH)
     }
 
     @Test
@@ -20,17 +25,58 @@ class DebugProtocolTest {
         val decodedParams = SideVeilWireJson.decodeFromString<DebugSetWebViewDebuggingParams>(paramsJson)
         assertTrue(decodedParams.enabled)
 
+        val inspectParamsJson = SideVeilWireJson.encodeToString(DebugInspectUiParams(timeoutMs = 12_000L))
+        assertEquals("""{"timeoutMs":12000}""", inspectParamsJson)
+        assertEquals(12_000L, SideVeilWireJson.decodeFromString<DebugInspectUiParams>(inspectParamsJson).timeoutMs)
+
         val status =
             DebugCdpStatusResult(
                 ok = true,
-                webviewDebuggingEnabled = true,
+                webviewDebuggingEnabled = false,
+                effectiveEnabled = true,
+                devServerActive = true,
                 hostPid = 4242,
                 cdpSocket = "webview_devtools_remote_4242",
                 restartRecommended = false,
             )
         val statusJson = SideVeilWireJson.encodeToString(status)
+        assertTrue(statusJson.contains("\"effectiveEnabled\":true"))
+        assertTrue(statusJson.contains("\"devServerActive\":true"))
         assertTrue(statusJson.contains("\"cdpSocket\":\"webview_devtools_remote_4242\""))
         assertEquals(status, SideVeilWireJson.decodeFromString<DebugCdpStatusResult>(statusJson))
+    }
+
+    @Test
+    fun `DaemonLogs and WebView error crash payloads round-trip cleanly`() {
+        val logsParams = DaemonLogsParams(sinceSeq = 4L, limit = 50, level = "warn", source = "webview:diag")
+        val logsParamsJson = SideVeilWireJson.encodeToString(logsParams)
+        assertEquals(logsParams, SideVeilWireJson.decodeFromString<DaemonLogsParams>(logsParamsJson))
+
+        val logsRes = DaemonLogsResult(lines = listOf("line1"), nextSeq = 5L, totalDropped = 2L)
+        val logsResJson = SideVeilWireJson.encodeToString(logsRes)
+        assertEquals(logsRes, SideVeilWireJson.decodeFromString<DaemonLogsResult>(logsResJson))
+
+        val err =
+            HostWebViewErrorPayload(
+                pluginId = "sideveil.diagnostic",
+                kind = "http",
+                code = 502,
+                description = "Bad Gateway",
+                url = "https://sideveil.diagnostic.plugins.sideveil.local/index.html",
+                isMainFrame = true,
+            )
+        val errJson = SideVeilWireJson.encodeToString(err)
+        assertEquals(err, SideVeilWireJson.decodeFromString<HostWebViewErrorPayload>(errJson))
+
+        val crash =
+            HostWebViewCrashPayload(
+                pluginId = "com.example.demo",
+                didCrash = true,
+                rendererPriorityAtExit = 2,
+                crashCount = 3,
+            )
+        val crashJson = SideVeilWireJson.encodeToString(crash)
+        assertEquals(crash, SideVeilWireJson.decodeFromString<HostWebViewCrashPayload>(crashJson))
     }
 
     @Test
@@ -54,18 +100,7 @@ class DebugProtocolTest {
 
     private fun sampleInspectUiSnapshot(): DebugInspectUiSnapshot {
         val agsl = sampleAgslSnapshot()
-        val frameMetrics =
-            DebugFrameMetricsSnapshot(
-                sampleCount = 64,
-                p50Ms = 4.2,
-                p95Ms = 7.8,
-                p99Ms = 8.1,
-                maxMs = 9.4,
-                drawP95Ms = 2.1,
-                gpuP95Ms = 3.5,
-                jankCount = 1,
-                deadlineMs = 8.33,
-            )
+        val frameMetrics = sampleFrameMetricsSnapshot()
         return DebugInspectUiSnapshot(
             hostPid = 9001,
             webviewDebuggingEnabled = true,
@@ -74,18 +109,7 @@ class DebugProtocolTest {
             pinnedPluginId = null,
             activeHudPluginId = "sideveil.perf-hud",
             matchedPluginIds = listOf("sideveil.diagnostic", "strata.manager"),
-            display =
-                DebugDisplaySnapshot(
-                    widthPx = 1440,
-                    heightPx = 3168,
-                    density = 3.5f,
-                    rotation = 0,
-                    refreshRateHz = 120f,
-                    activeModeId = 1,
-                    maxRefreshRateHz = 120f,
-                    maxSupportedModeId = 1,
-                    crossWindowBlurSupported = true,
-                ),
+            display = sampleDisplaySnapshot(),
             safeBounds =
                 DebugSafeBoundsSnapshot(
                     screenWidthPx = 1440,
@@ -115,14 +139,51 @@ class DebugProtocolTest {
                         isActive = true,
                         rendererPriority = "important",
                         rendererWaivedWhenNotVisible = false,
+                        dormant = true,
+                        crashCount = 2,
                         widthPx = 1020,
                         heightPx = 1800,
                     ),
                 ),
             frameMetrics = frameMetrics,
             windowFrameMetrics = mapOf("panel" to frameMetrics),
+            gestureStats =
+                DebugGestureStats(
+                    edgeSwipesTriggered = 4L,
+                    edgeSwipesRejected = 1L,
+                    hotzoneMisses = 9L,
+                    pilferInvocations = 5L,
+                    lastRejectReason = "vertical_scroll",
+                    lastEventTimestampMs = 1_700_000_000_000L,
+                ),
         )
     }
+
+    private fun sampleFrameMetricsSnapshot(): DebugFrameMetricsSnapshot =
+        DebugFrameMetricsSnapshot(
+            sampleCount = 64,
+            p50Ms = 4.2,
+            p95Ms = 7.8,
+            p99Ms = 8.1,
+            maxMs = 9.4,
+            drawP95Ms = 2.1,
+            gpuP95Ms = 3.5,
+            jankCount = 1,
+            deadlineMs = 8.33,
+        )
+
+    private fun sampleDisplaySnapshot(): DebugDisplaySnapshot =
+        DebugDisplaySnapshot(
+            widthPx = 1440,
+            heightPx = 3168,
+            density = 3.5f,
+            rotation = 0,
+            refreshRateHz = 120f,
+            activeModeId = 1,
+            maxRefreshRateHz = 120f,
+            maxSupportedModeId = 1,
+            crossWindowBlurSupported = true,
+        )
 
     private fun sampleAgslSnapshot(): DebugAgslSnapshot =
         DebugAgslSnapshot(

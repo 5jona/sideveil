@@ -188,10 +188,12 @@ internal class WebViewDebuggingController(
 internal fun buildHostDiagnosticsPayload(
     warmPluginIds: List<String>,
     activeHudPluginId: String?,
+    webviewCrashCount: Int = 0,
 ): HostPluginDiagnosticsPayload =
     HostPluginDiagnosticsPayload(
         warmPluginIds = warmPluginIds,
         activeHudPluginId = activeHudPluginId,
         hostNativeHeapKb = Debug.getNativeHeapAllocatedSize() / 1024L,
         hostPssKb = runCatching { Debug.getPss() }.getOrNull(),
+        webviewCrashCount = webviewCrashCount,
     )

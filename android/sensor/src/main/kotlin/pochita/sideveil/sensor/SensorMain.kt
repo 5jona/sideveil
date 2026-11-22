@@ -7,6 +7,7 @@ import android.os.HandlerThread
 import android.os.Looper
 import android.os.Process
 import com.android.internal.os.ApplicationSharedMemory
+import pochita.sideveil.protocol.DebugGestureStats
 import pochita.sideveil.protocol.DisplayGeometry
 import pochita.sideveil.protocol.EdgeSide
 import pochita.sideveil.protocol.HubToSensor
@@ -93,6 +94,7 @@ object SensorMain {
                         ),
                     )
                     hubClient.send(SensorToHub.NetworkContextChanged(context = networkWatcher.snapshot))
+                    hubClient.send(SensorToHub.GestureStatsUpdated(stats = edgeMonitor.gestureStatsSnapshot()))
                 },
                 onMessage = { msg ->
                     handleHubMessage(msg, edgeMonitor, appOpsBridge, workerHandler, hubClient)
@@ -180,6 +182,10 @@ object SensorMain {
 
                     override fun onDisplayChanged(geometry: DisplayGeometry) {
                         clientProvider().send(SensorToHub.DisplayChanged(geometry))
+                    }
+
+                    override fun onGestureStatsUpdated(stats: DebugGestureStats) {
+                        clientProvider().send(SensorToHub.GestureStatsUpdated(stats))
                     }
                 },
         )

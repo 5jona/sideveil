@@ -175,6 +175,7 @@ data class HostPluginDiagnosticsPayload(
     val activeHudPluginId: String? = null,
     val hostNativeHeapKb: Long? = null,
     val hostPssKb: Long? = null,
+    val webviewCrashCount: Int = 0,
 )
 
 @Serializable

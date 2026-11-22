@@ -9,13 +9,15 @@ import android.view.Display
 import android.view.WindowManager
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
-import pochita.sideveil.protocol.DebugCdpStatusResult
 import pochita.sideveil.protocol.DebugDisplaySnapshot
+import pochita.sideveil.protocol.DebugInspectUiParams
 import pochita.sideveil.protocol.DebugInspectUiSnapshot
 import pochita.sideveil.protocol.DebugSafeBoundsSnapshot
-import pochita.sideveil.protocol.DebugSetWebViewDebuggingParams
 import pochita.sideveil.protocol.PanelState
 import pochita.sideveil.protocol.RpcError
 import pochita.sideveil.protocol.RpcRequest
@@ -27,8 +29,63 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 /**
+ * Pure-Kotlin dispatcher for daemon-initiated reverse debugging RPCs (`debug.inspectUi`,
+ * `debug.resetFrameMetrics`). Kept Android-free for host-side JVM unit tests.
+ */
+internal class HostDebugRpcRouter(
+    private val inspectUi: suspend (timeoutMs: Long) -> DebugInspectUiSnapshot,
+    private val resetFrameMetrics: () -> Unit,
+) {
+    suspend fun handleRpcRequest(req: RpcRequest): RpcResponse =
+        when (req.method) {
+            SideVeilMethods.DEBUG_INSPECT_UI -> {
+                val timeoutMs = resolveInspectTimeoutMs(req.params)
+                val snapshot = inspectUi(timeoutMs)
+                RpcResponse(
+                    id = req.id,
+                    result = SideVeilWireJson.encodeToJsonElement(snapshot),
+                )
+            }
+
+            SideVeilMethods.DEBUG_RESET_FRAME_METRICS -> {
+                resetFrameMetrics()
+                RpcResponse(
+                    id = req.id,
+                    result = buildJsonObject { put("ok", JsonPrimitive(true)) },
+                )
+            }
+
+            else -> {
+                RpcResponse(
+                    id = req.id,
+                    error = RpcError(SideVeilErrorCodes.METHOD_NOT_FOUND, "Method not found: ${req.method}"),
+                )
+            }
+        }
+
+    companion object {
+        const val MIN_INSPECT_TIMEOUT_MS = 500L
+        const val DEFAULT_INSPECT_TIMEOUT_MS = 3_000L
+        const val MAX_INSPECT_TIMEOUT_MS = 55_000L
+
+        fun resolveInspectTimeoutMs(params: JsonElement?): Long {
+            val requested =
+                params?.let { elem ->
+                    runCatching {
+                        SideVeilWireJson.decodeFromJsonElement<DebugInspectUiParams>(elem)
+                    }.getOrNull()?.timeoutMs
+                }
+            return (requested ?: DEFAULT_INSPECT_TIMEOUT_MS).coerceIn(
+                MIN_INSPECT_TIMEOUT_MS,
+                MAX_INSPECT_TIMEOUT_MS,
+            )
+        }
+    }
+}
+
+/**
  * Handles daemon-initiated reverse RPC debugging methods (`debug.inspectUi`,
- * `debug.setWebViewDebugging`) by marshalling read-only UI, AGSL, blur, WebView pool, and
+ * `debug.resetFrameMetrics`) by marshalling read-only UI, AGSL, blur, WebView pool, and
  * [WindowFrameMetricsTracker] inspection safely onto the Android main thread with a bounded
  * timeout.
  */
@@ -44,64 +101,16 @@ internal class HostDebugInspector(
     private val pluginManager: PluginWebViewManager,
     private val frameMetricsTracker: WindowFrameMetricsTracker,
 ) {
-    suspend fun handleRpcRequest(req: RpcRequest): RpcResponse =
-        when (req.method) {
-            SideVeilMethods.DEBUG_INSPECT_UI -> {
-                val snapshot = inspectUi()
-                RpcResponse(
-                    id = req.id,
-                    result = SideVeilWireJson.encodeToJsonElement(snapshot),
-                )
-            }
+    private val router =
+        HostDebugRpcRouter(
+            inspectUi = ::inspectUi,
+            resetFrameMetrics = frameMetricsTracker::reset,
+        )
 
-            SideVeilMethods.DEBUG_SET_WEBVIEW_DEBUGGING -> {
-                val parsed =
-                    req.params?.let { elem ->
-                        runCatching {
-                            SideVeilWireJson.decodeFromJsonElement<DebugSetWebViewDebuggingParams>(elem)
-                        }.getOrNull()
-                    }
-                if (parsed == null) {
-                    RpcResponse(
-                        id = req.id,
-                        error = RpcError(SideVeilErrorCodes.INVALID_PARAMS, "Missing or invalid 'enabled' parameter"),
-                    )
-                } else {
-                    val result = setWebViewDebugging(parsed.enabled)
-                    RpcResponse(
-                        id = req.id,
-                        result = SideVeilWireJson.encodeToJsonElement(result),
-                    )
-                }
-            }
+    suspend fun handleRpcRequest(req: RpcRequest): RpcResponse = router.handleRpcRequest(req)
 
-            else -> {
-                RpcResponse(
-                    id = req.id,
-                    error = RpcError(SideVeilErrorCodes.METHOD_NOT_FOUND, "Method not found: ${req.method}"),
-                )
-            }
-        }
-
-    suspend fun inspectUi(timeoutMs: Long = DEFAULT_INSPECT_TIMEOUT_MS): DebugInspectUiSnapshot =
+    suspend fun inspectUi(timeoutMs: Long = HostDebugRpcRouter.DEFAULT_INSPECT_TIMEOUT_MS): DebugInspectUiSnapshot =
         runOnMainWithTimeout(timeoutMs) { collectInspectUiSnapshot() }
-
-    suspend fun setWebViewDebugging(
-        enabled: Boolean,
-        timeoutMs: Long = DEFAULT_INSPECT_TIMEOUT_MS,
-    ): DebugCdpStatusResult =
-        runOnMainWithTimeout(timeoutMs) {
-            val prevEnabled = pluginManager.webViewDebuggingEnabled
-            val effectiveEnabled = pluginManager.setConfigWebViewDebugging(enabled)
-            val pid = Process.myPid()
-            DebugCdpStatusResult(
-                ok = true,
-                webviewDebuggingEnabled = effectiveEnabled,
-                hostPid = pid,
-                cdpSocket = if (effectiveEnabled) "webview_devtools_remote_$pid" else null,
-                restartRecommended = prevEnabled && !effectiveEnabled,
-            )
-        }
 
     private fun collectInspectUiSnapshot(): DebugInspectUiSnapshot {
         val hostPid = Process.myPid()
@@ -192,9 +201,5 @@ internal class HostDebugInspector(
                 }
             }
         }
-    }
-
-    companion object {
-        private const val DEFAULT_INSPECT_TIMEOUT_MS = 3_000L
     }
 }

@@ -9,7 +9,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import pochita.sideveil.protocol.DebugSetWebViewDebuggingParams
+import pochita.sideveil.protocol.DebugInspectUiParams
 import pochita.sideveil.protocol.RpcRequest
 import pochita.sideveil.protocol.RpcResponse
 import pochita.sideveil.protocol.SideVeilEvents
@@ -50,17 +50,17 @@ class DaemonFrameCodecTest {
 
     @Test
     fun `classifies hub-initiated debug reverse RPC frames and rejects null method`() {
-        val inspectRaw = """{"jsonrpc":"2.0","id":"hub-rpc-0","method":"debug.inspectUi","params":null}"""
+        val inspectRaw = """{"jsonrpc":"2.0","id":"hub-rpc-0","method":"debug.inspectUi","params":{"timeoutMs":12000}}"""
         val inspectMsg = DaemonFrameCodec.decodeIncomingText(inspectRaw) as DaemonInboundMessage.InboundRpc
         assertEquals("hub-rpc-0", inspectMsg.request.id)
         assertEquals(SideVeilMethods.DEBUG_INSPECT_UI, inspectMsg.request.method)
-        assertNull(inspectMsg.request.params)
+        val decodedInspect = SideVeilWireJson.decodeFromJsonElement<DebugInspectUiParams>(inspectMsg.request.params!!)
+        assertEquals(12_000L, decodedInspect.timeoutMs)
 
-        val toggleRaw = """{"jsonrpc":"2.0","id":"hub-rpc-1","method":"debug.setWebViewDebugging","params":{"enabled":true}}"""
-        val toggleMsg = DaemonFrameCodec.decodeIncomingText(toggleRaw) as DaemonInboundMessage.InboundRpc
-        assertEquals(SideVeilMethods.DEBUG_SET_WEBVIEW_DEBUGGING, toggleMsg.request.method)
-        val decodedParams = SideVeilWireJson.decodeFromJsonElement<DebugSetWebViewDebuggingParams>(toggleMsg.request.params!!)
-        assertTrue(decodedParams.enabled)
+        val resetRaw = """{"jsonrpc":"2.0","id":"hub-rpc-1","method":"debug.resetFrameMetrics","params":null}"""
+        val resetMsg = DaemonFrameCodec.decodeIncomingText(resetRaw) as DaemonInboundMessage.InboundRpc
+        assertEquals(SideVeilMethods.DEBUG_RESET_FRAME_METRICS, resetMsg.request.method)
+        assertNull(resetMsg.request.params)
 
         val nullMethodRaw = """{"jsonrpc":"2.0","id":"hub-rpc-2","method":null,"result":{"ok":true}}"""
         assertNull(DaemonFrameCodec.decodeIncomingText(nullMethodRaw))

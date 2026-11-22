@@ -5,51 +5,6 @@ import pochita.sideveil.protocol.PanelState
 import kotlin.math.abs
 import kotlin.math.hypot
 
-interface EdgeGestureCallbacks {
-    fun onPilferPointers()
-
-    fun onDragStart(
-        side: EdgeSide,
-        startYFraction: Float,
-    )
-
-    fun onDragMove(
-        side: EdgeSide,
-        progress: Float,
-        rawX: Float,
-        rawY: Float,
-        deltaX: Float,
-    )
-
-    fun onDragEnd(
-        shouldOpen: Boolean,
-        velocityPxPerSec: Float,
-        canceled: Boolean = false,
-    )
-
-    fun onFullscreenHint(side: EdgeSide) {}
-
-    fun onEdgeRepositionStart(
-        side: EdgeSide,
-        topPercent: Int,
-    ) {}
-
-    fun onEdgeRepositionMove(
-        side: EdgeSide,
-        topPercent: Int,
-    ) {}
-
-    fun onEdgeRepositionEnd(
-        side: EdgeSide,
-        topPercent: Int,
-        committed: Boolean,
-    ) {}
-
-    fun onScheduleLongPress(pointerId: Int) {}
-
-    fun onCancelLongPress() {}
-}
-
 /**
  * Pure JVM edge-gesture state machine decoupled from Android MotionEvent / InputMonitor APIs.
  *
@@ -101,6 +56,7 @@ class EdgeGestureStateMachine(
             return
         }
         if (!EdgeGestureMath.isInsideHotzone(rawX, rawY, env.config.edge, env.geometry)) {
+            callbacks.onSwipeRejected(REJECT_HOTZONE_MISS, hotzoneMiss = true)
             return
         }
 
@@ -145,6 +101,7 @@ class EdgeGestureStateMachine(
     fun onPointerDown() {
         callbacks.onCancelLongPress()
         if (tracking && !pilfered) {
+            callbacks.onSwipeRejected(REJECT_MULTI_TOUCH)
             reset(notifyAbortIfPilfered = false)
         }
     }
@@ -255,11 +212,22 @@ class EdgeGestureStateMachine(
                 !canceled &&
                     !reverseCanceled &&
                     (inwardDx >= triggerDistPx || releaseVelocity >= EdgeGestureMath.FLING_OPEN_VELOCITY_PX_PER_SEC)
+            if (!shouldOpen) {
+                val rejectReason =
+                    when {
+                        reverseCanceled -> REJECT_REVERSE_PULL
+                        canceled -> REJECT_CANCELED
+                        else -> REJECT_SHORT_SWIPE
+                    }
+                callbacks.onSwipeRejected(rejectReason)
+            }
             callbacks.onDragEnd(
                 shouldOpen = shouldOpen,
                 velocityPxPerSec = releaseVelocity,
                 canceled = canceled || reverseCanceled,
             )
+        } else {
+            callbacks.onSwipeRejected(if (canceled) REJECT_CANCELED else REJECT_TOUCH_SLOP)
         }
         reset(notifyAbortIfPilfered = false)
     }
@@ -267,6 +235,7 @@ class EdgeGestureStateMachine(
     fun onScopeInactive() {
         callbacks.onCancelLongPress()
         if (tracking && !pilfered) {
+            callbacks.onSwipeRejected(REJECT_SCOPE_INACTIVE)
             reset(notifyAbortIfPilfered = false)
         }
     }
@@ -323,6 +292,7 @@ class EdgeGestureStateMachine(
         env: EdgeGestureEnv,
     ): Boolean {
         if (abs(dy) > touchSlopPx && abs(dy) > abs(dx) * VERTICAL_SLOPE_REJECT_RATIO) {
+            callbacks.onSwipeRejected(REJECT_VERTICAL_SCROLL)
             reset(notifyAbortIfPilfered = false)
             return false
         }
@@ -336,6 +306,7 @@ class EdgeGestureStateMachine(
             if (!withinWindow) {
                 lastFullscreenHintMs = eventTimeMs
                 callbacks.onFullscreenHint(activeEdge)
+                callbacks.onSwipeRejected(REJECT_FULLSCREEN_FIRST_SWIPE)
                 reset(notifyAbortIfPilfered = false)
                 return false
             }
@@ -358,6 +329,15 @@ class EdgeGestureStateMachine(
         const val INVALID_POINTER_ID = -1
         const val DOUBLE_SWIPE_WINDOW_MS = 1500L
         const val LONG_PRESS_TIMEOUT_MS = 450L
+        const val REJECT_MULTI_TOUCH = "multi_touch"
+        const val REJECT_VERTICAL_SCROLL = "vertical_scroll"
+        const val REJECT_FULLSCREEN_FIRST_SWIPE = "fullscreen_first_swipe"
+        const val REJECT_REVERSE_PULL = "reverse_pull"
+        const val REJECT_SHORT_SWIPE = "short_swipe"
+        const val REJECT_CANCELED = "canceled"
+        const val REJECT_TOUCH_SLOP = "touch_slop_not_reached"
+        const val REJECT_SCOPE_INACTIVE = "scope_inactive"
+        const val REJECT_HOTZONE_MISS = "hotzone_miss"
         private const val TOUCH_SLOP_DP = 10f
         private const val MOVE_THROTTLE_MS = 8L
         private const val MIN_PANEL_WIDTH_PX = 120f

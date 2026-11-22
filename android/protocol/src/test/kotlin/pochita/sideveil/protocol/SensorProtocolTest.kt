@@ -81,4 +81,25 @@ class SensorProtocolTest {
         val decoded = SideVeilWireJson.decodeFromString(SensorToHub.serializer(), encoded)
         assertEquals(msg, decoded)
     }
+
+    @Test
+    fun `GestureStatsUpdated roundtrips with exact camelCase tags and fields`() {
+        val stats =
+            DebugGestureStats(
+                edgeSwipesTriggered = 5L,
+                edgeSwipesRejected = 2L,
+                hotzoneMisses = 11L,
+                pilferInvocations = 7L,
+                lastRejectReason = "multi_touch",
+                lastEventTimestampMs = 1_700_000_001_000L,
+            )
+        val msg: SensorToHub = SensorToHub.GestureStatsUpdated(stats = stats)
+        val encoded = SideVeilWireJson.encodeToString(SensorToHub.serializer(), msg)
+        assertTrue(encoded.contains("\"type\":\"gestureStatsUpdated\""))
+        assertTrue(encoded.contains("\"edgeSwipesTriggered\":5"))
+        assertTrue(encoded.contains("\"lastRejectReason\":\"multi_touch\""))
+
+        val decoded = SideVeilWireJson.decodeFromString(SensorToHub.serializer(), encoded)
+        assertEquals(msg, decoded)
+    }
 }

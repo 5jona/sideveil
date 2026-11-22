@@ -22,10 +22,10 @@ internal class PluginWebChromeClient(
         val level = msg.messageLevel()?.name?.lowercase() ?: "info"
         val pluginId = pluginIdProvider()
         val text = msg.message().orEmpty().take(MAX_MESSAGE_LEN)
-        if (msg.messageLevel() == ConsoleMessage.MessageLevel.ERROR ||
-            msg.messageLevel() == ConsoleMessage.MessageLevel.WARNING
-        ) {
-            Log.d(TAG, "[$pluginId][$level] $text")
+        when (msg.messageLevel()) {
+            ConsoleMessage.MessageLevel.ERROR -> Log.e(TAG, "[$pluginId][$level] $text")
+            ConsoleMessage.MessageLevel.WARNING -> Log.w(TAG, "[$pluginId][$level] $text")
+            else -> Unit
         }
         daemonClient.sendEvent(
             SideVeilEvents.HOST_WEBVIEW_CONSOLE,

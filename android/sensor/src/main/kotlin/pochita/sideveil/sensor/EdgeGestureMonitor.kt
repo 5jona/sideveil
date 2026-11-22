@@ -13,51 +13,11 @@ import android.view.InputEvent
 import android.view.InputEventReceiver
 import android.view.InputMonitor
 import android.view.MotionEvent
+import pochita.sideveil.protocol.DebugGestureStats
 import pochita.sideveil.protocol.DisplayGeometry
 import pochita.sideveil.protocol.EdgeSide
 import pochita.sideveil.protocol.PanelState
 import pochita.sideveil.protocol.SideVeilConfig
-
-interface EdgeGestureListener {
-    fun onDragStart(
-        side: EdgeSide,
-        startYFraction: Float,
-    )
-
-    fun onDragMove(
-        side: EdgeSide,
-        progress: Float,
-        rawX: Float,
-        rawY: Float,
-        deltaX: Float,
-    )
-
-    fun onDragEnd(
-        shouldOpen: Boolean,
-        velocityPxPerSec: Float,
-        canceled: Boolean,
-    )
-
-    fun onFullscreenHint(side: EdgeSide)
-
-    fun onEdgeRepositionStart(
-        side: EdgeSide,
-        topPercent: Int,
-    )
-
-    fun onEdgeRepositionMove(
-        side: EdgeSide,
-        topPercent: Int,
-    )
-
-    fun onEdgeRepositionEnd(
-        side: EdgeSide,
-        topPercent: Int,
-        committed: Boolean,
-    )
-
-    fun onDisplayChanged(geometry: DisplayGeometry)
-}
 
 /**
  * Thin Android Framework adapter connecting `InputManagerGlobal.monitorGestureInput` and
@@ -79,6 +39,10 @@ class EdgeGestureMonitor(
 
     val geometry: DisplayGeometry
         get() = displayWatcher.geometry
+
+    private val diagnosticsTracker = GestureDiagnosticsTracker()
+
+    fun gestureStatsSnapshot(): DebugGestureStats = diagnosticsTracker.snapshot()
 
     @Volatile
     private var config: SideVeilConfig = SideVeilConfig.DEFAULT
@@ -104,6 +68,7 @@ class EdgeGestureMonitor(
                 override fun onPilferPointers() {
                     runCatching { inputMonitor?.pilferPointers() }
                         .onFailure { SensorLog.warn("pilferPointers failed", it) }
+                    listener.onGestureStatsUpdated(diagnosticsTracker.recordPilfer())
                 }
 
                 override fun onDragStart(
@@ -123,7 +88,12 @@ class EdgeGestureMonitor(
                     shouldOpen: Boolean,
                     velocityPxPerSec: Float,
                     canceled: Boolean,
-                ) = listener.onDragEnd(shouldOpen, velocityPxPerSec, canceled)
+                ) {
+                    if (shouldOpen) {
+                        listener.onGestureStatsUpdated(diagnosticsTracker.recordTriggered())
+                    }
+                    listener.onDragEnd(shouldOpen, velocityPxPerSec, canceled)
+                }
 
                 override fun onFullscreenHint(side: EdgeSide) = listener.onFullscreenHint(side)
 
@@ -156,6 +126,17 @@ class EdgeGestureMonitor(
 
                 override fun onCancelLongPress() {
                     cancelPendingLongPress()
+                }
+
+                override fun onSwipeRejected(
+                    reason: String,
+                    hotzoneMiss: Boolean,
+                ) {
+                    if (hotzoneMiss) {
+                        diagnosticsTracker.recordHotzoneMiss()?.let(listener::onGestureStatsUpdated)
+                    } else {
+                        listener.onGestureStatsUpdated(diagnosticsTracker.recordRejected(reason))
+                    }
                 }
             },
         )

@@ -1,16 +1,10 @@
 package pochita.sideveil.host
 
 import android.content.Context
-import android.graphics.Bitmap
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import android.webkit.RenderProcessGoneDetail
-import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
 import android.webkit.WebView
-import android.webkit.WebViewClient
-import androidx.core.net.toUri
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
@@ -19,6 +13,8 @@ import kotlinx.serialization.json.encodeToJsonElement
 import pochita.sideveil.protocol.ContainerActionPayload
 import pochita.sideveil.protocol.DebugWebViewSnapshot
 import pochita.sideveil.protocol.HostEventEnvelope
+import pochita.sideveil.protocol.HostWebViewCrashPayload
+import pochita.sideveil.protocol.HostWebViewErrorPayload
 import pochita.sideveil.protocol.PluginBackendKind
 import pochita.sideveil.protocol.PluginBackendStatePayload
 import pochita.sideveil.protocol.PluginDescriptor
@@ -28,16 +24,24 @@ import pochita.sideveil.protocol.SideVeilEvents
 import pochita.sideveil.protocol.SideVeilWireJson
 
 /**
+ * Immutable host runtime dependencies shared across [PluginWebViewInstance] sandboxes.
+ */
+internal class PluginWebViewDeps(
+    val scope: CoroutineScope,
+    val daemonClient: DaemonClient,
+    val localRpcHandler: PluginLocalRpcHandler,
+    val assetFetcher: PluginAssetFetcher,
+    val crashRegistry: WebViewCrashRegistry,
+)
+
+/**
  * Isolated WebView sandbox instance for a single SideVeil plugin under
  * `https://<pluginId>.plugins.sideveil.local/` with `onRenderProcessGone` crash recovery,
  * per-plugin container preferences, and [PluginWebMessageBridge] IPC routing.
  */
 internal class PluginWebViewInstance(
     context: Context,
-    scope: CoroutineScope,
-    daemonClient: DaemonClient,
-    localRpcHandler: PluginLocalRpcHandler,
-    private val assetFetcher: PluginAssetFetcher,
+    private val deps: PluginWebViewDeps,
     initialDescriptor: PluginDescriptor,
     private val callbacks: PluginContainerCallbacks,
 ) {
@@ -81,11 +85,11 @@ internal class PluginWebViewInstance(
             null
         } else {
             PluginWebMessageBridge(
-                scope = scope,
-                daemonClient = daemonClient,
-                localRpcHandler = localRpcHandler,
+                scope = deps.scope,
+                daemonClient = deps.daemonClient,
+                localRpcHandler = deps.localRpcHandler,
                 webView = webView,
-                pluginOrigin = assetFetcher.originFor(initialDescriptor.id),
+                pluginOrigin = deps.assetFetcher.originFor(initialDescriptor.id),
                 descriptorProvider = { descriptor },
                 onContainerAction = ::applyContainerAction,
             )
@@ -96,8 +100,17 @@ internal class PluginWebViewInstance(
         messageBridge?.let { bridge ->
             webView.addJavascriptInterface(bridge.createJsHostObject(), "__POCHITA_HOST__")
         }
-        webView.webViewClient = createWebViewClient()
-        webView.webChromeClient = PluginWebChromeClient({ descriptor.id }, daemonClient)
+        webView.webViewClient =
+            PluginWebViewClient(
+                isUntrustedEmbed = isUntrustedEmbed,
+                descriptorProvider = { descriptor },
+                assetFetcher = deps.assetFetcher,
+                messageBridge = messageBridge,
+                dormancy = dormancy,
+                onWebViewError = ::emitWebViewError,
+                onRenderProcessGoneEvent = ::handleRenderProcessGone,
+            )
+        webView.webChromeClient = PluginWebChromeClient({ descriptor.id }, deps.daemonClient)
     }
 
     fun updateDescriptor(next: PluginDescriptor): DescriptorUpdateOutcome {
@@ -181,6 +194,8 @@ internal class PluginWebViewInstance(
             backInterceptEnabled = backInterceptEnabled,
             rendererPriority = if (foregroundPriority) "important" else "bound",
             rendererWaivedWhenNotVisible = !foregroundPriority,
+            dormant = dormancy.isPaused,
+            crashCount = deps.crashRegistry.countFor(descriptor.id),
             widthPx = webView.width,
             heightPx = webView.height,
         )
@@ -197,7 +212,7 @@ internal class PluginWebViewInstance(
                 webView.loadUrl("about:blank")
             }
         } else {
-            webView.loadUrl(assetFetcher.entryUrlFor(descriptor))
+            webView.loadUrl(deps.assetFetcher.entryUrlFor(descriptor))
         }
     }
 
@@ -238,6 +253,33 @@ internal class PluginWebViewInstance(
         webView.destroy()
     }
 
+    private fun emitWebViewError(payload: HostWebViewErrorPayload) {
+        deps.daemonClient.sendEvent(
+            SideVeilEvents.HOST_WEBVIEW_ERROR,
+            SideVeilWireJson.encodeToJsonElement(payload),
+        )
+    }
+
+    private fun handleRenderProcessGone(
+        didCrash: Boolean,
+        rendererPriorityAtExit: Int,
+    ) {
+        val pluginId = descriptor.id
+        val nextCount = deps.crashRegistry.recordCrash(pluginId)
+        deps.daemonClient.sendEvent(
+            SideVeilEvents.HOST_WEBVIEW_CRASH,
+            SideVeilWireJson.encodeToJsonElement(
+                HostWebViewCrashPayload(
+                    pluginId = pluginId,
+                    didCrash = didCrash,
+                    rendererPriorityAtExit = rendererPriorityAtExit,
+                    crashCount = nextCount,
+                ),
+            ),
+        )
+        mainHandler.post { callbacks.onRenderProcessCrashed(pluginId) }
+    }
+
     private fun syncSurfaceDefaults(
         prev: PluginDescriptor,
         next: PluginDescriptor,
@@ -257,73 +299,6 @@ internal class PluginWebViewInstance(
         }
         return changed
     }
-
-    private fun createWebViewClient(): WebViewClient =
-        object : WebViewClient() {
-            override fun shouldOverrideUrlLoading(
-                view: WebView,
-                request: WebResourceRequest,
-            ): Boolean {
-                val allowed =
-                    (!isUntrustedEmbed && assetFetcher.isAllowedPluginUri(request.url, descriptor.id)) ||
-                        PluginNetworkPolicy.shouldAllowNativeNetwork(descriptor, request.url, isMainFrame = true)
-                return !allowed
-            }
-
-            override fun shouldInterceptRequest(
-                view: WebView,
-                request: WebResourceRequest,
-            ): WebResourceResponse? =
-                when {
-                    !isUntrustedEmbed && assetFetcher.isAllowedPluginUri(request.url, descriptor.id) -> {
-                        assetFetcher.fetch(descriptor, request.url)
-                    }
-
-                    PluginNetworkPolicy.shouldAllowNativeNetwork(descriptor, request.url, request.isForMainFrame) -> {
-                        null
-                    }
-
-                    else -> {
-                        assetFetcher.forbiddenResponse()
-                    }
-                }
-
-            override fun onPageStarted(
-                view: WebView,
-                url: String?,
-                favicon: Bitmap?,
-            ) {
-                super.onPageStarted(view, url, favicon)
-                messageBridge?.onNavigationCommitted(url)
-            }
-
-            override fun onPageFinished(
-                view: WebView,
-                url: String?,
-            ) {
-                super.onPageFinished(view, url)
-                messageBridge?.let { bridge ->
-                    bridge.onNavigationCommitted(url)
-                    if (url != null && assetFetcher.isAllowedPluginUri(url.toUri(), descriptor.id)) {
-                        bridge.installChannel()
-                    }
-                }
-                dormancy.onPageFinished()
-            }
-
-            override fun onRenderProcessGone(
-                view: WebView,
-                detail: RenderProcessGoneDetail,
-            ): Boolean {
-                Log.e(
-                    TAG,
-                    "WebView render process gone for plugin=${descriptor.id} " +
-                        "didCrash=${detail.didCrash()} priority=${detail.rendererPriorityAtExit()}",
-                )
-                mainHandler.post { callbacks.onRenderProcessCrashed(descriptor.id) }
-                return true
-            }
-        }
 
     private fun applyContainerAction(action: ContainerActionPayload?) =
         PluginContainerActionRouter.dispatch(

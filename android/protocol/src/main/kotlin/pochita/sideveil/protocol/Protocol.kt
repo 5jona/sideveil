@@ -21,6 +21,8 @@ object SideVeilEvents {
     const val HOST_DYNAMIC_COLORS = "host.dynamicColors"
     const val HOST_DIAGNOSTICS = "host.diagnostics"
     const val HOST_WEBVIEW_CONSOLE = "host.webviewConsole"
+    const val HOST_WEBVIEW_ERROR = "host.webviewError"
+    const val HOST_WEBVIEW_CRASH = "host.webviewCrash"
     const val HOST_SELECT_PLUGIN = "host.selectPlugin"
     const val PANEL_STATE_CHANGED = "panel.stateChanged"
     const val PANEL_VISIBILITY = "panel.visibility"
@@ -42,6 +44,7 @@ object SideVeilMethods {
     const val DAEMON_PING = "daemon.ping"
     const val DAEMON_STATUS = "daemon.status"
     const val DAEMON_LOGS = "daemon.logs"
+    const val DAEMON_LOGS_CLEAR = "daemon.logsClear"
     const val CONFIG_GET = "config.get"
     const val CONFIG_PATCH_APPEARANCE = "config.patchAppearance"
     const val CONFIG_PATCH_EDGE = "config.patchEdge"
@@ -70,6 +73,8 @@ object SideVeilMethods {
     const val NETWORK_CONTEXT = "network.context"
     const val DEBUG_INSPECT_UI = "debug.inspectUi"
     const val DEBUG_SET_WEBVIEW_DEBUGGING = "debug.setWebViewDebugging"
+    const val DEBUG_CDP_STATUS = "debug.cdpStatus"
+    const val DEBUG_RESET_FRAME_METRICS = "debug.resetFrameMetrics"
 }
 
 object SideVeilErrorCodes {
@@ -88,15 +93,19 @@ object SideVeilTimeouts {
     const val DEFAULT_RPC_MS = 8_000L
     const val MAX_PLUGIN_INVOKE_MS = 60_000L
     const val FORWARD_WIRE_MARGIN_MS = 1_000L
+    const val INSPECT_UI_WIRE_MARGIN_MS = 2_500L
 
     /**
      * Resolves the bounded WebSocket forwarding timeout for [req], giving `sideveild` a small
      * wire margin so backend timeout diagnostics return cleanly before host cancellation.
      */
     fun resolveForwardTimeoutMs(req: RpcRequest): Long {
-        if (req.method != SideVeilMethods.PLUGIN_INVOKE) {
-            return DEFAULT_RPC_MS
-        }
+        val marginMs =
+            when (req.method) {
+                SideVeilMethods.PLUGIN_INVOKE -> FORWARD_WIRE_MARGIN_MS
+                SideVeilMethods.DEBUG_INSPECT_UI -> INSPECT_UI_WIRE_MARGIN_MS
+                else -> return DEFAULT_RPC_MS
+            }
         val requested =
             (req.params as? JsonObject)
                 ?.get("timeoutMs")
@@ -104,7 +113,7 @@ object SideVeilTimeouts {
                 ?.longOrNull
                 ?: return DEFAULT_RPC_MS
         val bounded = requested.coerceIn(MIN_PLUGIN_INVOKE_MS, MAX_PLUGIN_INVOKE_MS)
-        return bounded + FORWARD_WIRE_MARGIN_MS
+        return bounded + marginMs
     }
 }
 
@@ -151,6 +160,7 @@ data class DaemonStatus(
     val sensorPid: Int? = null,
     val activePluginId: String? = null,
     val matchedPluginsCount: Int = 0,
+    val gestureStats: DebugGestureStats? = null,
 )
 
 @Serializable
