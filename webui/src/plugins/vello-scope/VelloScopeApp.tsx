@@ -3,6 +3,7 @@ import {
   SideVeilPluginProvider,
   useContainerAction,
   useHaptics,
+  usePanelVisibility,
   usePresentationMode,
   useTelemetry,
 } from '@pochita/sideveil-sdk';
@@ -32,7 +33,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSyncedPluginTheme } from '../../shared/useSyncedPluginTheme.ts';
 import { VELLO_SCOPE_MANIFEST, VELLO_SCOPE_PLUGIN_ID } from './manifest.ts';
 import { createMockVelloRpcHandler } from './mockVelloBridge.ts';
-import { type ScopePipelineKind, startScopeRenderer } from './scopeRenderer.ts';
+import {
+  type ScopePipelineKind,
+  type ScopeRendererController,
+  startScopeRenderer,
+} from './scopeRenderer.ts';
 
 const SAMPLE_COUNT = 48;
 const PINNED_DEFAULT_BOUNDS = { widthDp: 316, heightDp: 452 };
@@ -55,6 +60,7 @@ function VelloScopeWorkbench() {
   const { dismiss, setSurfaceBackdrop } = useContainerAction();
   const { isPinned, clickThrough, setMode, setClickThrough } = usePresentationMode('drawer');
   const { trigger: triggerHaptic } = useHaptics();
+  const { visible: surfaceVisible } = usePanelVisibility();
   const { snapshot } = useTelemetry(600);
 
   const [backdrop, setBackdrop] = useState<ContainerBackdrop>('native-glass');
@@ -63,6 +69,9 @@ function VelloScopeWorkbench() {
 
   const stageRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const rendererRef = useRef<ScopeRendererController | null>(null);
+  const surfaceVisibleRef = useRef(surfaceVisible);
+  surfaceVisibleRef.current = surfaceVisible;
   const samplesRef = useRef<number[]>(createSeedSamples());
   const schemeRef = useRef(resolvedScheme);
   schemeRef.current = resolvedScheme;
@@ -79,13 +88,23 @@ function VelloScopeWorkbench() {
     const canvas = canvasRef.current;
     const stage = stageRef.current;
     if (!canvas || !stage) return;
-    return startScopeRenderer(canvas, stage, {
+    const controller = startScopeRenderer(canvas, stage, {
       onPipelineReady: setPipeline,
       onFpsSample: setFps,
       readSamples: () => samplesRef.current,
       readScheme: () => schemeRef.current,
+      initialActive: surfaceVisibleRef.current,
     });
+    rendererRef.current = controller;
+    return () => {
+      controller.dispose();
+      rendererRef.current = null;
+    };
   }, []);
+
+  useEffect(() => {
+    rendererRef.current?.setActive(surfaceVisible);
+  }, [surfaceVisible]);
 
   const handleTogglePin = useCallback(() => {
     void triggerHaptic('click');

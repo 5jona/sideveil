@@ -40,21 +40,10 @@ export function useSideVeilControl() {
   const [configLoadError, setConfigLoadError] = useState<string | null>(null);
   const [daemonOfflineError, setDaemonOfflineError] = useState<string | null>(null);
 
-  const {
-    pluginsSnapshot,
-    auditReport,
-    pluginBusyAction,
-    refreshPlugins,
-    reloadPlugins,
-    setPluginEnabled,
-    setPluginPriority,
-    setPluginScopeOverride,
-    setPluginDevUrl,
-    refreshPluginAudit,
-    selectPlugin,
-  } = usePluginsControl(bridge, pushToast);
+  const pluginsControl = usePluginsControl(bridge, pushToast);
+  const { refreshPlugins } = pluginsControl;
 
-  const busyAction = ctlBusyAction ?? pluginBusyAction;
+  const busyAction = ctlBusyAction ?? pluginsControl.pluginBusyAction;
 
   const latestConfigRef = useRef<SideVeilConfig>(DEFAULT_CONFIG);
   const pendingSaveConfigRef = useRef<SideVeilConfig | null>(null);
@@ -279,8 +268,7 @@ export function useSideVeilControl() {
     config,
     status,
     logs,
-    pluginsSnapshot,
-    auditReport,
+    ...pluginsControl,
     busyAction,
     lastPingMs,
     saving,
@@ -290,14 +278,6 @@ export function useSideVeilControl() {
     loadConfigFromDisk,
     refreshStatus,
     refreshLogs,
-    refreshPlugins,
-    reloadPlugins,
-    setPluginEnabled,
-    setPluginPriority,
-    setPluginScopeOverride,
-    setPluginDevUrl,
-    refreshPluginAudit,
-    selectPlugin,
     runCtl,
     clearLogs,
   };

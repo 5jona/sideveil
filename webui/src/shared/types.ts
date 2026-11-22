@@ -1,4 +1,19 @@
 import type { ColorMode, ThemeId } from '@pochita/ui';
+import type { DebugConfig } from './debugTypes.ts';
+
+export type {
+  DebugAgslSnapshot,
+  DebugCdpStatusResult,
+  DebugConfig,
+  DebugDisplaySnapshot,
+  DebugFrameMetricsSnapshot,
+  DebugInspectUiSnapshot,
+  DebugOverlayWindowSnapshot,
+  DebugPanelWindowSnapshot,
+  DebugSafeBoundsSnapshot,
+  DebugSetWebViewDebuggingParams,
+  DebugWebViewSnapshot,
+} from './debugTypes.ts';
 
 export type EdgeSide = 'left' | 'right';
 export type ScopeMode = 'allowlist' | 'global';
@@ -41,6 +56,7 @@ export interface SideVeilConfig {
   edge: EdgeConfig;
   panel: PanelConfig;
   scope: ScopeConfig;
+  debug?: DebugConfig;
 }
 
 export interface DaemonStatus {
@@ -84,12 +100,19 @@ export const SIDEVEIL_METHODS = {
   PANEL_CLOSE: 'panel.close',
   PANEL_TOGGLE: 'panel.toggle',
   HOST_RESTART: 'host.restart',
+  DEBUG_INSPECT_UI: 'debug.inspectUi',
+  DEBUG_SET_WEBVIEW_DEBUGGING: 'debug.setWebViewDebugging',
+  PLUGINS_SET_EMBED_CONFIG: 'plugins.setEmbedConfig',
+  PLUGINS_CREATE_WEB_EMBED: 'plugins.createWebEmbed',
+  PLUGINS_UNINSTALL: 'plugins.uninstall',
+  NETWORK_CONTEXT: 'network.context',
 } as const;
 
 export const SIDEVEIL_EVENTS = {
   CONFIG_UPDATED: 'config.updated',
   SCOPE_CHANGED: 'scope.changed',
   PANEL_VISIBILITY: 'panel.visibility',
+  NETWORK_CONTEXT_CHANGED: 'network.contextChanged',
 } as const;
 
 export interface ScopeChangedEventPayload {
@@ -200,6 +223,9 @@ export function normalizeSideVeilConfig(
       allowlist: sanitizePkgList(scope?.allowlist, DEFAULT_CONFIG.scope.allowlist),
       denylist: sanitizePkgList(scope?.denylist, DEFAULT_CONFIG.scope.denylist),
     },
+    ...(raw?.debug !== undefined
+      ? { debug: { webviewDebuggingEnabled: Boolean(raw.debug.webviewDebuggingEnabled) } }
+      : {}),
   };
 }
 

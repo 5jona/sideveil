@@ -1,29 +1,19 @@
-import type {
-  PluginBackendKind,
-  PluginBackendState,
-  PluginCapability,
-  PluginDescriptor,
-} from '@pochita/sideveil-sdk';
+import type { PluginDescriptor } from '@pochita/sideveil-sdk';
 import { Badge, Button, Card, Switch } from '@pochita/ui';
-import {
-  Activity,
-  Bell,
-  CheckCircle2,
-  Clipboard,
-  Code2,
-  FolderLock,
-  Gauge,
-  Globe,
-  Pencil,
-  Play,
-  Radio,
-  Sliders,
-  Terminal,
-  Vibrate,
-} from 'lucide-react';
+import { CheckCircle2, Code2, Globe, Pencil, Play, Sliders } from 'lucide-react';
 import { useState } from 'react';
-import type { PluginScopeOverrideInput } from '../hooks/usePluginsControl.ts';
+import type {
+  PluginEmbedConfigInput,
+  PluginScopeOverrideInput,
+} from '../hooks/usePluginsControl.ts';
+import { PluginEmbedBanner, PluginUninstallAction } from './PluginCardActions.tsx';
 import { PluginDevDialog } from './PluginDevDialog.tsx';
+import { PluginEmbedDialog } from './PluginEmbedDialog.tsx';
+import {
+  PluginBackendBadge,
+  PluginCapabilitiesRow,
+  PluginTrustBadges,
+} from './PluginMetaBadges.tsx';
 import { PluginScopeEditor } from './PluginScopeEditor.tsx';
 
 export interface PluginCardProps {
@@ -36,105 +26,9 @@ export interface PluginCardProps {
   onSetPriority: (pluginId: string, priority: number) => Promise<void>;
   onSetScopeOverride: (pluginId: string, override: PluginScopeOverrideInput) => Promise<void>;
   onSetDevUrl: (pluginId: string, url: string | null) => Promise<void>;
+  onSetEmbedConfig: (pluginId: string, input: PluginEmbedConfigInput) => Promise<boolean>;
+  onUninstallPlugin: (pluginId: string) => Promise<boolean>;
   onSelectPlugin: (pluginId: string) => Promise<void>;
-}
-
-function renderBackendBadge(kind: PluginBackendKind, state: PluginBackendState) {
-  if (kind === 'none') return null;
-  const isOnline = state === 'online';
-  const label = kind === 'uds-native' ? 'Native 后端' : 'App 后端';
-  return (
-    <Badge variant={isOnline ? 'success' : 'neutral'} dot={isOnline}>
-      {label} ({isOnline ? '就绪' : '未连接'})
-    </Badge>
-  );
-}
-
-function renderCapabilityBadge(cap: PluginCapability) {
-  switch (cap) {
-    case 'storage':
-      return (
-        <span
-          key={cap}
-          className="inline-flex items-center gap-1 rounded bg-[var(--surface-elevated)] px-1.5 py-0.5 text-[11px] text-[var(--text-secondary)]"
-        >
-          <FolderLock className="size-3 text-[var(--accent)]" />
-          私有存储
-        </span>
-      );
-    case 'toast':
-      return (
-        <span
-          key={cap}
-          className="inline-flex items-center gap-1 rounded bg-[var(--surface-elevated)] px-1.5 py-0.5 text-[11px] text-[var(--text-secondary)]"
-        >
-          <Bell className="size-3 text-[var(--warning)]" />
-          Toast
-        </span>
-      );
-    case 'system-exec':
-      return (
-        <span
-          key={cap}
-          className="inline-flex items-center gap-1 rounded bg-[var(--surface-elevated)] px-1.5 py-0.5 text-[11px] text-[var(--text-secondary)]"
-        >
-          <Terminal className="size-3 text-[var(--danger)]" />
-          Root 执行
-        </span>
-      );
-    case 'native-hud':
-      return (
-        <span
-          key={cap}
-          className="inline-flex items-center gap-1 rounded bg-[var(--surface-elevated)] px-1.5 py-0.5 text-[11px] text-[var(--text-secondary)]"
-        >
-          <Gauge className="size-3 text-[var(--success)]" />
-          原生 HUD
-        </span>
-      );
-    case 'clipboard':
-      return (
-        <span
-          key={cap}
-          className="inline-flex items-center gap-1 rounded bg-[var(--surface-elevated)] px-1.5 py-0.5 text-[11px] text-[var(--text-secondary)]"
-        >
-          <Clipboard className="size-3 text-[var(--accent)]" />
-          剪贴板
-        </span>
-      );
-    case 'haptics':
-      return (
-        <span
-          key={cap}
-          className="inline-flex items-center gap-1 rounded bg-[var(--surface-elevated)] px-1.5 py-0.5 text-[11px] text-[var(--text-secondary)]"
-        >
-          <Vibrate className="size-3 text-[var(--accent)]" />
-          触觉反馈
-        </span>
-      );
-    case 'telemetry':
-      return (
-        <span
-          key={cap}
-          className="inline-flex items-center gap-1 rounded bg-[var(--surface-elevated)] px-1.5 py-0.5 text-[11px] text-[var(--text-secondary)]"
-        >
-          <Activity className="size-3 text-[var(--success)]" />
-          系统遥测
-        </span>
-      );
-    case 'inter-plugin-bus':
-      return (
-        <span
-          key={cap}
-          className="inline-flex items-center gap-1 rounded bg-[var(--surface-elevated)] px-1.5 py-0.5 text-[11px] text-[var(--text-secondary)]"
-        >
-          <Radio className="size-3 text-[var(--warning)]" />
-          插件总线
-        </span>
-      );
-    default:
-      return null;
-  }
 }
 
 export function PluginCard({
@@ -147,22 +41,27 @@ export function PluginCard({
   onSetPriority,
   onSetScopeOverride,
   onSetDevUrl,
+  onSetEmbedConfig,
+  onUninstallPlugin,
   onSelectPlugin,
 }: PluginCardProps) {
   const [editingPriority, setEditingPriority] = useState(false);
   const [tempPriority, setTempPriority] = useState(plugin.priority);
   const [editingScope, setEditingScope] = useState(false);
   const [editingDev, setEditingDev] = useState(false);
+  const [editingEmbed, setEditingEmbed] = useState(false);
+
+  const isEmbed = plugin.embed != null;
 
   return (
     <Card
-      className={`space-y-3 p-3.5 transition-all ${
+      className={`flex flex-col gap-3 p-3.5 transition-all ${
         isActive ? 'ring-1 ring-[var(--accent)] shadow-sm' : ''
       }`}
     >
       {/* Header row */}
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="space-y-1">
+        <div className="flex flex-col gap-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-sm font-semibold text-[var(--text-primary)]">{plugin.name}</span>
             <span className="text-xs font-mono text-[var(--text-secondary)]">
@@ -171,6 +70,7 @@ export function PluginCard({
             <Badge variant={plugin.builtin ? 'neutral' : 'accent'}>
               {plugin.builtin ? '内置' : '第三方'}
             </Badge>
+            <PluginTrustBadges isEmbed={isEmbed} keepAlive={Boolean(plugin.surface.keepAlive)} />
             {isActive ? (
               <Badge variant="success" dot pulse>
                 当前激活
@@ -181,22 +81,31 @@ export function PluginCard({
             {plugin.hasScopeOverride ? <Badge variant="warning">已覆盖范围</Badge> : null}
             {plugin.devServerUrl ? <Badge variant="warning">Dev 热重载</Badge> : null}
             {plugin.surface.crossOriginIsolated ? <Badge variant="accent">WebGPU/COI</Badge> : null}
-            {renderBackendBadge(plugin.backend, plugin.backendState)}
+            <PluginBackendBadge kind={plugin.backend} state={plugin.backendState} />
           </div>
           <div className="text-xs font-mono text-[var(--text-secondary)]">{plugin.id}</div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {plugin.enabled && isMatched && !isActive ? (
             <Button
               size="sm"
               variant="secondary"
+              aria-label={`切换到 ${plugin.name}`}
               disabled={isBusy}
               onClick={() => void onSelectPlugin(plugin.id)}
             >
               <Play className="size-3" />
               切换至此
             </Button>
+          ) : null}
+          {!plugin.builtin ? (
+            <PluginUninstallAction
+              pluginId={plugin.id}
+              pluginName={plugin.name}
+              isBusy={isBusy}
+              onUninstall={onUninstallPlugin}
+            />
           ) : null}
           <Switch
             checked={plugin.enabled}
@@ -207,16 +116,29 @@ export function PluginCard({
         </div>
       </div>
 
+      {plugin.embed ? (
+        <PluginEmbedBanner
+          pluginName={plugin.name}
+          embed={plugin.embed}
+          editing={editingEmbed}
+          isBusy={isBusy}
+          onToggleEdit={() => setEditingEmbed((prev) => !prev)}
+        />
+      ) : null}
+
       <div className="pochita-divider" />
 
       {/* Details grid */}
       <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
         {/* Triggers */}
-        <div className="space-y-1">
+        <div className="flex flex-col gap-1">
           <div className="flex items-center justify-between gap-2">
             <span className="text-[11px] font-medium text-[var(--text-secondary)]">触发规则</span>
             <button
               type="button"
+              aria-label={
+                editingScope ? `收起 ${plugin.name} 范围编辑` : `编辑 ${plugin.name} 触发范围`
+              }
               disabled={isBusy}
               onClick={() => setEditingScope((prev) => !prev)}
               className="inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-[var(--accent)] hover:bg-[var(--surface-elevated)]"
@@ -247,20 +169,25 @@ export function PluginCard({
         </div>
 
         {/* Priority & Surface */}
-        <div className="space-y-1">
+        <div className="flex flex-col gap-1">
           <div className="flex items-center justify-between gap-2">
             <span className="text-[11px] font-medium text-[var(--text-secondary)]">
               优先级与外观
             </span>
-            <button
-              type="button"
-              disabled={isBusy}
-              onClick={() => setEditingDev((prev) => !prev)}
-              className="inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-[var(--accent)] hover:bg-[var(--surface-elevated)]"
-            >
-              <Code2 className="size-3" />
-              {editingDev ? '收起开发' : '开发模式'}
-            </button>
+            {!isEmbed ? (
+              <button
+                type="button"
+                aria-label={
+                  editingDev ? `收起 ${plugin.name} 开发模式` : `配置 ${plugin.name} 开发模式`
+                }
+                disabled={isBusy}
+                onClick={() => setEditingDev((prev) => !prev)}
+                className="inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-[var(--accent)] hover:bg-[var(--surface-elevated)]"
+              >
+                <Code2 className="size-3" />
+                {editingDev ? '收起开发' : '开发模式'}
+              </button>
+            ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {editingPriority ? (
@@ -275,6 +202,7 @@ export function PluginCard({
                 <Button
                   size="icon-sm"
                   variant="primary"
+                  aria-label={`保存 ${plugin.name} 优先级`}
                   disabled={isBusy}
                   onClick={() => {
                     void onSetPriority(plugin.id, tempPriority);
@@ -287,6 +215,7 @@ export function PluginCard({
             ) : (
               <button
                 type="button"
+                aria-label={`修改 ${plugin.name} 优先级`}
                 className="inline-flex cursor-pointer items-center gap-1 rounded bg-[var(--surface-elevated)] px-1.5 py-0.5 text-[11px] text-[var(--text-primary)] hover:border-[var(--accent)]"
                 onClick={() => {
                   setTempPriority(plugin.priority);
@@ -309,6 +238,19 @@ export function PluginCard({
           </div>
         </div>
       </div>
+
+      {/* Inline Embed Config editor */}
+      {editingEmbed && plugin.embed ? (
+        <PluginEmbedDialog
+          pluginId={plugin.id}
+          pluginName={plugin.name}
+          embed={plugin.embed}
+          initialKeepAlive={Boolean(plugin.surface.keepAlive)}
+          isBusy={isBusy}
+          onSave={onSetEmbedConfig}
+          onCancel={() => setEditingEmbed(false)}
+        />
+      ) : null}
 
       {/* Inline Scope Override editor */}
       {editingScope ? (
@@ -338,12 +280,7 @@ export function PluginCard({
       ) : null}
 
       {/* Capabilities row */}
-      {plugin.capabilities.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-1.5 pt-1">
-          <span className="text-[11px] font-medium text-[var(--text-secondary)]">权限：</span>
-          {plugin.capabilities.map((cap) => renderCapabilityBadge(cap))}
-        </div>
-      ) : null}
+      <PluginCapabilitiesRow capabilities={plugin.capabilities} />
     </Card>
   );
 }

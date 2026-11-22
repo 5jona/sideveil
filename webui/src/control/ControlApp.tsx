@@ -3,12 +3,14 @@ import {
   AppShell,
   Badge,
   Button,
+  ErrorBoundary,
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
   ThemeProvider,
   ToastProvider,
+  useToast,
 } from '@pochita/ui';
 import {
   AlertCircle,
@@ -23,10 +25,13 @@ import { AppearanceScopeTab } from './components/AppearanceScopeTab.tsx';
 import { DiagnosticsTab } from './components/DiagnosticsTab.tsx';
 import { OverviewEdgeTab } from './components/OverviewEdgeTab.tsx';
 import { PluginsTab } from './components/PluginsTab.tsx';
+import { useDebugControl } from './hooks/useDebugControl.ts';
+import { useNetworkContextControl } from './hooks/useNetworkContextControl.ts';
 import { useSideVeilControl } from './hooks/useSideVeilControl.ts';
 import { handleMockControlExec } from './mockControlBridge.ts';
 
 function ControlWorkbench() {
+  const { pushToast } = useToast();
   const {
     bridge,
     config,
@@ -48,11 +53,32 @@ function ControlWorkbench() {
     setPluginPriority,
     setPluginScopeOverride,
     setPluginDevUrl,
+    createWebEmbed,
+    setEmbedConfig,
+    uninstallPlugin,
     refreshPluginAudit,
     selectPlugin,
     runCtl,
     clearLogs,
   } = useSideVeilControl();
+
+  const { networkContext, networkLoading, networkError, refreshNetworkContext } =
+    useNetworkContextControl(bridge);
+
+  const {
+    cdpStatus,
+    uiSnapshot,
+    inspectCapturedAt,
+    debugBusy,
+    debugError,
+    setWebViewDebugging,
+    inspectUi,
+  } = useDebugControl({
+    bridge,
+    pushToast,
+    onConfigSynced: loadConfigFromDisk,
+    onRefreshLogs: refreshLogs,
+  });
 
   const isPanelOpen = status?.panelState === 'open';
   const envLabel =
@@ -171,6 +197,9 @@ function ControlWorkbench() {
             onSetPriority={setPluginPriority}
             onSetScopeOverride={setPluginScopeOverride}
             onSetDevUrl={setPluginDevUrl}
+            onCreateWebEmbed={createWebEmbed}
+            onSetEmbedConfig={setEmbedConfig}
+            onUninstallPlugin={uninstallPlugin}
             onRefreshAudit={refreshPluginAudit}
             onSelectPlugin={selectPlugin}
           />
@@ -178,15 +207,27 @@ function ControlWorkbench() {
 
         <TabsContent value="diagnostics">
           <DiagnosticsTab
+            config={config}
             status={status}
             logs={logs}
             busyAction={busyAction}
             lastPingMs={lastPingMs}
+            cdpStatus={cdpStatus}
+            uiSnapshot={uiSnapshot}
+            inspectCapturedAt={inspectCapturedAt}
+            debugBusy={debugBusy}
+            debugError={debugError}
+            networkContext={networkContext}
+            networkLoading={networkLoading}
+            networkError={networkError}
             onPing={() => void runCtl('ping', 'Daemon Ping')}
             onReloadConfig={() => void runCtl('reload', '重载配置')}
             onRestartHost={() => void runCtl('restart-host', '重启 Host 服务')}
             onRefreshLogs={() => void refreshLogs()}
             onClearLogs={clearLogs}
+            onSetWebViewDebugging={(enabled) => void setWebViewDebugging(enabled)}
+            onInspectUi={() => void inspectUi()}
+            onRefreshNetwork={() => void refreshNetworkContext()}
           />
         </TabsContent>
       </Tabs>
@@ -212,7 +253,9 @@ export function ControlApp() {
         defaultSurfaceMode="standalone"
       >
         <ToastProvider>
-          <ControlWorkbench />
+          <ErrorBoundary title="SideVeil 控制台渲染异常">
+            <ControlWorkbench />
+          </ErrorBoundary>
         </ToastProvider>
       </ThemeProvider>
     </BridgeProvider>

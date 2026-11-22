@@ -22,6 +22,8 @@ export interface UseDiagnosticPanelOptions {
   onHydrated: () => void;
 }
 
+const INITIAL_STORED_PREF: { lastCheckedAt?: number } = {};
+
 export function useDiagnosticPanel({ onAppendLog, onHydrated }: UseDiagnosticPanelOptions) {
   const { bridge, pluginId } = useSideVeilPlugin();
   const backendState = usePluginBackendState();
@@ -69,7 +71,7 @@ export function useDiagnosticPanel({ onAppendLog, onHydrated }: UseDiagnosticPan
   // Backed by jailed /data/system/sideveil/data/sideveil.diagnostic/preferences.json
   const { value: storedPref, setValue: setStoredPref } = usePluginStorage<{
     lastCheckedAt?: number;
-  }>('preferences.json', {});
+  }>('preferences.json', INITIAL_STORED_PREF);
 
   // Intercept back navigation when IME focus is active
   useBackPress(() => {

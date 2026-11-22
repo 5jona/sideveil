@@ -10,6 +10,7 @@ import {
   Button,
   Card,
   cn,
+  ErrorBoundary,
   Input,
   LogConsole,
   type LogEntry,
@@ -230,12 +231,14 @@ function PanelThemedContainer({
       onThemeSync={handleThemeSync}
     >
       <ToastProvider>
-        <PanelWorkbench
-          eventsLog={eventsLog}
-          onAppendLog={onAppendLog}
-          onClearLogs={onClearLogs}
-          onHydrated={markHydrated}
-        />
+        <ErrorBoundary title="诊断面板渲染异常">
+          <PanelWorkbench
+            eventsLog={eventsLog}
+            onAppendLog={onAppendLog}
+            onClearLogs={onClearLogs}
+            onHydrated={markHydrated}
+          />
+        </ErrorBoundary>
       </ToastProvider>
     </ThemeProvider>
   );

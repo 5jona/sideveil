@@ -1,8 +1,13 @@
 import type { PluginAuditReport, PluginsSnapshotPayload } from '@pochita/sideveil-sdk';
 import { Button, Card, MetricTile } from '@pochita/ui';
-import { Boxes, Layers, RefreshCw, Shield, Sparkles } from 'lucide-react';
+import { Boxes, Layers, Plus, RefreshCw, Shield, Sparkles } from 'lucide-react';
 import { useState } from 'react';
-import type { PluginScopeOverrideInput } from '../hooks/usePluginsControl.ts';
+import type {
+  CreateWebEmbedInput,
+  PluginEmbedConfigInput,
+  PluginScopeOverrideInput,
+} from '../hooks/usePluginsControl.ts';
+import { CreateWebEmbedCard } from './CreateWebEmbedCard.tsx';
 import { PluginAuditDrawer } from './PluginAuditDrawer.tsx';
 import { PluginCard } from './PluginCard.tsx';
 
@@ -16,6 +21,9 @@ export interface PluginsTabProps {
   onSetPriority: (pluginId: string, priority: number) => Promise<void>;
   onSetScopeOverride: (pluginId: string, override: PluginScopeOverrideInput) => Promise<void>;
   onSetDevUrl: (pluginId: string, url: string | null) => Promise<void>;
+  onCreateWebEmbed: (input: CreateWebEmbedInput) => Promise<boolean>;
+  onSetEmbedConfig: (pluginId: string, input: PluginEmbedConfigInput) => Promise<boolean>;
+  onUninstallPlugin: (pluginId: string) => Promise<boolean>;
   onRefreshAudit: () => Promise<void>;
   onSelectPlugin: (pluginId: string) => Promise<void>;
 }
@@ -30,10 +38,14 @@ export function PluginsTab({
   onSetPriority,
   onSetScopeOverride,
   onSetDevUrl,
+  onCreateWebEmbed,
+  onSetEmbedConfig,
+  onUninstallPlugin,
   onRefreshAudit,
   onSelectPlugin,
 }: PluginsTabProps) {
   const [showAudit, setShowAudit] = useState(false);
+  const [showCreateEmbed, setShowCreateEmbed] = useState(false);
   const plugins = snapshot?.plugins ?? [];
   const activePluginId = snapshot?.activePluginId ?? null;
   const matchedIds = snapshot?.matchedPluginIds ?? [];
@@ -42,7 +54,7 @@ export function PluginsTab({
   const activePlugin = plugins.find((p) => p.id === activePluginId);
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
         <MetricTile
           label="已注册插件"
@@ -77,10 +89,21 @@ export function PluginsTab({
             插件目录：/data/system/sideveil/plugins/
           </span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            variant="primary"
+            aria-label={showCreateEmbed ? '收起新建网页嵌入表单' : '新建网页嵌入'}
+            disabled={busyAction !== null}
+            onClick={() => setShowCreateEmbed((prev) => !prev)}
+          >
+            <Plus className="size-3.5" />
+            {showCreateEmbed ? '收起表单' : '新建网页嵌入'}
+          </Button>
           <Button
             size="sm"
             variant="secondary"
+            aria-label={showAudit ? '收起运行时与审计' : '查看运行时与审计'}
             disabled={busyAction !== null}
             onClick={() => {
               const next = !showAudit;
@@ -94,6 +117,7 @@ export function PluginsTab({
           <Button
             size="sm"
             variant="secondary"
+            aria-label="重新扫描插件"
             disabled={busyAction !== null}
             onClick={() => void onReload()}
           >
@@ -103,6 +127,14 @@ export function PluginsTab({
         </div>
       </div>
 
+      {showCreateEmbed ? (
+        <CreateWebEmbedCard
+          isBusy={busyAction === 'create-web-embed'}
+          onCreate={onCreateWebEmbed}
+          onCancel={() => setShowCreateEmbed(false)}
+        />
+      ) : null}
+
       {showAudit ? (
         <PluginAuditDrawer
           report={auditReport}
@@ -111,11 +143,11 @@ export function PluginsTab({
         />
       ) : null}
 
-      <div className="space-y-3">
+      <div className="flex flex-col gap-3">
         {plugins.length === 0 ? (
           <Card className="p-8 text-center text-xs text-[var(--text-secondary)]">
             未检测到已注册的插件。请将插件放置在 /data/system/sideveil/plugins/&lt;id&gt;/
-            目录下，并确保包含 manifest.json。
+            目录下，或点击上方「新建网页嵌入」快速添加局域网面板。
           </Card>
         ) : (
           plugins.map((plugin) => (
@@ -130,6 +162,8 @@ export function PluginsTab({
               onSetPriority={onSetPriority}
               onSetScopeOverride={onSetScopeOverride}
               onSetDevUrl={onSetDevUrl}
+              onSetEmbedConfig={onSetEmbedConfig}
+              onUninstallPlugin={onUninstallPlugin}
               onSelectPlugin={onSelectPlugin}
             />
           ))

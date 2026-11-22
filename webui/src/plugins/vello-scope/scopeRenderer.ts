@@ -7,6 +7,12 @@ export interface ScopeRendererCallbacks {
   onFpsSample: (fps: number) => void;
   readSamples: () => readonly number[];
   readScheme: () => ResolvedColorScheme;
+  initialActive?: boolean;
+}
+
+export interface ScopeRendererController {
+  setActive: (active: boolean) => void;
+  dispose: () => void;
 }
 
 interface GpuDeviceLike {
@@ -110,17 +116,19 @@ function syncCanvasSize(canvas: HTMLCanvasElement, stageEl: HTMLElement) {
 
 /**
  * Starts the uncapped WebGPU (with automatic Canvas 2D fallback) vector oscilloscope loop.
- * Returns a cleanup function that cancels the active `requestAnimationFrame` handle.
+ * Returns a controller that pauses/resumes `requestAnimationFrame` cleanly when hidden.
  */
 export function startScopeRenderer(
   canvas: HTMLCanvasElement,
   stageEl: HTMLElement,
   callbacks: ScopeRendererCallbacks,
-): () => void {
+): ScopeRendererController {
   let disposed = false;
+  let active = callbacks.initialActive ?? true;
   let rafId = 0;
   let frameCount = 0;
   let lastFpsTick = performance.now();
+  let resumeLoop: (() => void) | null = null;
 
   const recordFrameTiming = (now: number) => {
     frameCount += 1;
@@ -183,8 +191,16 @@ export function startScopeRenderer(
     let palette = readScopeColors(lastScheme);
     let lastPaletteTick = t0;
 
+    const uniforms = new Float32Array(12);
+    const scheduleNext = () => {
+      if (!disposed && active && rafId === 0) {
+        rafId = requestAnimationFrame(frame);
+      }
+    };
+
     const frame = (now: number) => {
-      if (disposed) return;
+      rafId = 0;
+      if (disposed || !active) return;
       syncCanvasSize(canvas, stageEl);
       recordFrameTiming(now);
       const curScheme = callbacks.readScheme();
@@ -195,20 +211,18 @@ export function startScopeRenderer(
       }
       const samples = callbacks.readSamples();
       const load = (samples[samples.length - 1] ?? 20) / 100;
-      const uniforms = new Float32Array([
-        (now - t0) / 1000,
-        load,
-        0,
-        0,
-        palette.accentRgb[0],
-        palette.accentRgb[1],
-        palette.accentRgb[2],
-        1,
-        palette.secondaryRgb[0],
-        palette.secondaryRgb[1],
-        palette.secondaryRgb[2],
-        1,
-      ]);
+      uniforms[0] = (now - t0) / 1000;
+      uniforms[1] = load;
+      uniforms[2] = 0;
+      uniforms[3] = 0;
+      uniforms[4] = palette.accentRgb[0];
+      uniforms[5] = palette.accentRgb[1];
+      uniforms[6] = palette.accentRgb[2];
+      uniforms[7] = 1;
+      uniforms[8] = palette.secondaryRgb[0];
+      uniforms[9] = palette.secondaryRgb[1];
+      uniforms[10] = palette.secondaryRgb[2];
+      uniforms[11] = 1;
       device.queue.writeBuffer(uBuf, 0, uniforms);
       const enc = device.createCommandEncoder();
       const pass = enc.beginRenderPass({
@@ -226,9 +240,14 @@ export function startScopeRenderer(
       pass.draw(3);
       pass.end();
       device.queue.submit([enc.finish()]);
-      rafId = requestAnimationFrame(frame);
+      scheduleNext();
     };
-    rafId = requestAnimationFrame(frame);
+    resumeLoop = () => {
+      frameCount = 0;
+      lastFpsTick = performance.now();
+      scheduleNext();
+    };
+    scheduleNext();
   };
 
   const runCanvas2d = () => {
@@ -237,9 +256,15 @@ export function startScopeRenderer(
     let lastScheme = callbacks.readScheme();
     let palette = readScopeColors(lastScheme);
     let lastPaletteTick = performance.now();
+    const scheduleNext = () => {
+      if (!disposed && active && rafId === 0) {
+        rafId = requestAnimationFrame(frame);
+      }
+    };
 
     const frame = (now: number) => {
-      if (disposed) return;
+      rafId = 0;
+      if (disposed || !active) return;
       const { w, h, dpr } = syncCanvasSize(canvas, stageEl);
       recordFrameTiming(now);
       const curScheme = callbacks.readScheme();
@@ -262,7 +287,7 @@ export function startScopeRenderer(
 
       const samples = callbacks.readSamples();
       if (samples.length < 2) {
-        rafId = requestAnimationFrame(frame);
+        scheduleNext();
         return;
       }
 
@@ -301,9 +326,14 @@ export function startScopeRenderer(
       ctx.arc(last.x, last.y, 3.2 * dpr, 0, Math.PI * 2);
       ctx.fill();
 
-      rafId = requestAnimationFrame(frame);
+      scheduleNext();
     };
-    rafId = requestAnimationFrame(frame);
+    resumeLoop = () => {
+      frameCount = 0;
+      lastFpsTick = performance.now();
+      scheduleNext();
+    };
+    scheduleNext();
   };
 
   const boot = async () => {
@@ -334,8 +364,26 @@ export function startScopeRenderer(
 
   void boot();
 
-  return () => {
-    disposed = true;
-    if (rafId) cancelAnimationFrame(rafId);
+  return {
+    setActive(nextActive: boolean) {
+      if (disposed || active === nextActive) return;
+      active = nextActive;
+      if (!active) {
+        if (rafId) {
+          cancelAnimationFrame(rafId);
+          rafId = 0;
+        }
+      } else {
+        resumeLoop?.();
+      }
+    },
+    dispose() {
+      disposed = true;
+      active = false;
+      if (rafId) {
+        cancelAnimationFrame(rafId);
+        rafId = 0;
+      }
+    },
   };
 }

@@ -1,11 +1,22 @@
 import type { ExecResult } from '@pochita/bridge';
-import type { PluginDescriptor, PluginsSnapshotPayload } from '@pochita/sideveil-sdk';
+import type {
+  NetworkContextSnapshot,
+  PluginDescriptor,
+  PluginsSnapshotPayload,
+} from '@pochita/sideveil-sdk';
 import {
   CONFIG_PATH,
   type DaemonStatus,
   DEFAULT_CONFIG,
   type SideVeilConfig,
 } from '../shared/types.ts';
+import { handleMockDebugExec } from './mockDebugBridge.ts';
+import { handleMockPluginExec } from './mockPluginBridge.ts';
+import {
+  INITIAL_MOCK_NETWORK_CONTEXT,
+  INITIAL_MOCK_PLUGINS,
+  MOCK_HOST_PID,
+} from './mockPluginFixtures.ts';
 
 interface MockControlState {
   panelState: 'closed' | 'open';
@@ -13,70 +24,8 @@ interface MockControlState {
   logs: string[];
   activePluginId: string;
   plugins: PluginDescriptor[];
+  network: NetworkContextSnapshot;
 }
-
-const INITIAL_MOCK_PLUGINS: readonly PluginDescriptor[] = [
-  {
-    id: 'sideveil.diagnostic',
-    name: '系统诊断',
-    version: '1.0.0',
-    entry: 'index.html',
-    builtin: true,
-    enabled: true,
-    priority: 0,
-    packages: [],
-    global: true,
-    hasScopeOverride: false,
-    backend: 'none',
-    backendState: 'none',
-    capabilities: ['storage', 'toast', 'system-exec'],
-    surface: {
-      backdrop: 'native-glass',
-      widthDp: 340,
-      heightPercent: 72,
-    },
-  },
-  {
-    id: 'com.gamer.hud',
-    name: '游戏性能悬浮条',
-    version: '2.1.4',
-    entry: 'dist/index.html',
-    builtin: false,
-    enabled: true,
-    priority: 20,
-    packages: ['com.miHoYo.GenshinImpact', 'com.tencent.tmgp.sgame'],
-    global: false,
-    hasScopeOverride: false,
-    backend: 'uds-native',
-    backendState: 'online',
-    capabilities: ['storage', 'toast', 'system-exec'],
-    surface: {
-      backdrop: 'transparent',
-      widthDp: 380,
-      heightPercent: 65,
-    },
-  },
-  {
-    id: 'org.music.remote',
-    name: '全局流媒体歌词与控制',
-    version: '1.3.0',
-    entry: 'index.html',
-    builtin: false,
-    enabled: true,
-    priority: 10,
-    packages: ['com.netease.cloudmusic', 'com.spotify.music'],
-    global: false,
-    hasScopeOverride: false,
-    backend: 'uds-app',
-    backendState: 'offline',
-    capabilities: ['toast'],
-    surface: {
-      backdrop: 'opaque',
-      widthDp: 320,
-      heightPercent: 50,
-    },
-  },
-];
 
 const mockState: MockControlState = {
   panelState: 'closed',
@@ -88,10 +37,18 @@ const mockState: MockControlState = {
     '09:00:00.268 [I] Registered ATM ITaskStackListener',
     '09:00:00.291 [I] Opened [Gesture Monitor] input channel: [Gesture Monitor] sideveil-edge',
     '09:00:00.610 [I] Host WebSocket connected',
-    '09:00:00.614 [I] Host hello pid=14905 blurSupported=true',
+    `09:00:00.614 [I] Host hello pid=${MOCK_HOST_PID} blurSupported=true`,
+    '09:00:01.042 [I] [WebView:sideveil.diagnostic][INFO] Panel hydrated in 18ms',
+    '09:00:02.180 [W] [WebView:com.gamer.hud][WARNING] Telemetry frame budget exceeded',
   ],
   activePluginId: 'sideveil.diagnostic',
-  plugins: INITIAL_MOCK_PLUGINS.map((p) => ({ ...p, packages: [...p.packages] })),
+  plugins: INITIAL_MOCK_PLUGINS.map((p) => ({
+    ...p,
+    packages: [...p.packages],
+    ...(p.embed ? { embed: { ...p.embed } } : {}),
+    surface: { ...p.surface },
+  })),
+  network: { ...INITIAL_MOCK_NETWORK_CONTEXT },
 };
 
 function getMockSnapshot(fgPkg = 'me.weishu.kernelsu'): PluginsSnapshotPayload {
@@ -128,9 +85,26 @@ function appendMockLog(msg: string) {
   }
 }
 
+function okJson(payload: unknown): ExecResult {
+  return { errno: 0, stdout: JSON.stringify(payload), stderr: '' };
+}
+
+function rpcOk(result: unknown): ExecResult {
+  return okJson({ jsonrpc: '2.0', id: 'ctl', result });
+}
+
 export async function handleMockControlExec(cmd: string): Promise<ExecResult> {
   const cfg = readMockStoredConfig();
   const normalized = cmd.replace(/['"]/g, '');
+
+  const debugRes = handleMockDebugExec(normalized, {
+    cfg,
+    panelState: mockState.panelState,
+    activePluginId: mockState.activePluginId,
+    matchedPluginIds: getMockSnapshot().matchedPluginIds,
+    appendLog: appendMockLog,
+  });
+  if (debugRes) return debugRes;
 
   if (normalized.includes('sideveil-ctl status')) {
     const fg = 'me.weishu.kernelsu';
@@ -169,213 +143,44 @@ export async function handleMockControlExec(cmd: string): Promise<ExecResult> {
   if (normalized.includes('sideveil-ctl open')) {
     mockState.panelState = 'open';
     appendMockLog('RPC panel.open executed');
-    return { errno: 0, stdout: '{"jsonrpc":"2.0","id":"ctl","result":{"ok":true}}', stderr: '' };
+    return rpcOk({ ok: true });
   }
-
   if (normalized.includes('sideveil-ctl close')) {
     mockState.panelState = 'closed';
     appendMockLog('RPC panel.close executed');
-    return { errno: 0, stdout: '{"jsonrpc":"2.0","id":"ctl","result":{"ok":true}}', stderr: '' };
+    return rpcOk({ ok: true });
   }
-
   if (normalized.includes('sideveil-ctl toggle')) {
     mockState.panelState = mockState.panelState === 'open' ? 'closed' : 'open';
     appendMockLog(`RPC panel.toggle -> ${mockState.panelState}`);
-    return { errno: 0, stdout: '{"jsonrpc":"2.0","id":"ctl","result":{"ok":true}}', stderr: '' };
+    return rpcOk({ ok: true });
   }
-
   if (normalized.includes('sideveil-ctl ping')) {
     mockState.pingCount += 1;
     appendMockLog(`RPC daemon.ping #${mockState.pingCount}`);
-    return {
-      errno: 0,
-      stdout: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 'ctl',
-        result: { pong: true, daemonUptimeMs: 184_200, timestampMs: Date.now() },
-      }),
-      stderr: '',
-    };
+    return rpcOk({ pong: true, daemonUptimeMs: 184_200, timestampMs: Date.now() });
   }
-
   if (normalized.includes('sideveil-ctl reload')) {
     appendMockLog('Configuration reloaded from disk');
-    return {
-      errno: 0,
-      stdout: JSON.stringify({ jsonrpc: '2.0', id: 'ctl', result: cfg }),
-      stderr: '',
-    };
+    return rpcOk(cfg);
   }
-
   if (normalized.includes('sideveil-ctl restart-host')) {
     appendMockLog('Restarted HostService via supervisor');
-    return { errno: 0, stdout: '{"jsonrpc":"2.0","id":"ctl","result":{"ok":true}}', stderr: '' };
+    return rpcOk({ ok: true });
   }
-
   if (normalized.includes('sideveil-ctl logs')) {
-    return {
-      errno: 0,
-      stdout: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 'ctl',
-        result: { lines: mockState.logs },
-      }),
-      stderr: '',
-    };
+    return rpcOk({ lines: mockState.logs });
+  }
+  if (normalized.includes('sideveil-ctl network')) {
+    return okJson(mockState.network);
   }
 
-  if (normalized.includes('sideveil-ctl plugins list')) {
-    return {
-      errno: 0,
-      stdout: JSON.stringify(getMockSnapshot()),
-      stderr: '',
-    };
-  }
-
-  if (normalized.includes('sideveil-ctl plugins reload')) {
-    appendMockLog('Rescanned plugins directory');
-    return {
-      errno: 0,
-      stdout: JSON.stringify({
-        ok: true,
-        count: mockState.plugins.length,
-        snapshot: getMockSnapshot(),
-      }),
-      stderr: '',
-    };
-  }
-
-  const enableMatch = normalized.match(/sideveil-ctl plugins (enable|disable) ([^\s]+)/);
-  if (enableMatch) {
-    const isEnable = enableMatch[1] === 'enable';
-    const targetId = enableMatch[2];
-    mockState.plugins = mockState.plugins.map((p) =>
-      p.id === targetId ? { ...p, enabled: isEnable } : p,
-    );
-    appendMockLog(`Plugin ${targetId} ${isEnable ? 'enabled' : 'disabled'}`);
-    return {
-      errno: 0,
-      stdout: JSON.stringify(getMockSnapshot()),
-      stderr: '',
-    };
-  }
-
-  const priorityMatch = normalized.match(/sideveil-ctl plugins priority ([^\s]+) (-?\d+)/);
-  if (priorityMatch) {
-    const targetId = priorityMatch[1];
-    const prio = Number.parseInt(priorityMatch[2], 10);
-    mockState.plugins = mockState.plugins.map((p) =>
-      p.id === targetId ? { ...p, priority: prio } : p,
-    );
-    appendMockLog(`Plugin ${targetId} priority set to ${prio}`);
-    return {
-      errno: 0,
-      stdout: JSON.stringify(getMockSnapshot()),
-      stderr: '',
-    };
-  }
-
-  const scopeMatch = normalized.match(/sideveil-ctl plugins scope ([^\s]+)(.*)$/);
-  if (scopeMatch) {
-    const targetId = scopeMatch[1];
-    const rest = scopeMatch[2] ?? '';
-    const isClear = rest.includes('--clear');
-    const globalMatch = rest.match(/--global\s+(true|false|1|0)/);
-    const pkgsMatch = rest.match(/--packages\s+([^\s-][^\s]*)/);
-    const hasEmptyPkgs = /--packages(?:\s+$|\s+--|$)/.test(rest);
-    const defaults = INITIAL_MOCK_PLUGINS.find((p) => p.id === targetId);
-
-    mockState.plugins = mockState.plugins.map((p) => {
-      if (p.id !== targetId) return p;
-      if (isClear && defaults) {
-        return {
-          ...p,
-          global: defaults.global,
-          packages: [...defaults.packages],
-          hasScopeOverride: false,
-        };
-      }
-      const nextGlobal = globalMatch
-        ? globalMatch[1] === 'true' || globalMatch[1] === '1'
-        : p.global;
-      const nextPackages = pkgsMatch
-        ? pkgsMatch[1]
-            .split(',')
-            .map((s) => s.trim())
-            .filter(Boolean)
-        : hasEmptyPkgs
-          ? []
-          : p.packages;
-      return {
-        ...p,
-        global: nextGlobal,
-        packages: nextPackages,
-        hasScopeOverride: true,
-      };
-    });
-    appendMockLog(`Plugin ${targetId} scope ${isClear ? 'cleared' : 'overridden'}`);
-    return {
-      errno: 0,
-      stdout: JSON.stringify(getMockSnapshot()),
-      stderr: '',
-    };
-  }
-
-  const devMatch = normalized.match(/sideveil-ctl plugins dev ([^\s]+) ([^\s]+)/);
-  if (devMatch) {
-    const targetId = devMatch[1];
-    const arg = devMatch[2];
-    const nextUrl = arg === '--clear' ? undefined : arg;
-    mockState.plugins = mockState.plugins.map((p) =>
-      p.id === targetId ? { ...p, devServerUrl: nextUrl } : p,
-    );
-    appendMockLog(`Plugin ${targetId} devServerUrl -> ${nextUrl ?? 'cleared'}`);
-    return {
-      errno: 0,
-      stdout: JSON.stringify(getMockSnapshot()),
-      stderr: '',
-    };
-  }
-
-  if (normalized.includes('sideveil-ctl plugins audit')) {
-    return {
-      errno: 0,
-      stdout: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 'mock-audit',
-        result: {
-          entries: [
-            {
-              timestampMs: Date.now() - 4000,
-              pluginId: 'com.gamer.hud',
-              action: 'telemetry.snapshot',
-              allowed: true,
-              detail: 'sampled /proc/stat',
-            },
-          ],
-          diagnostics: {
-            warmPluginIds: ['sideveil.diagnostic', 'com.gamer.hud'],
-            activeHudPluginId: 'com.gamer.hud',
-            hostNativeHeapKb: 16384,
-            hostPssKb: 54200,
-          },
-        },
-      }),
-      stderr: '',
-    };
-  }
-
-  const selectMatch = normalized.match(/sideveil-ctl plugins select ([^\s]+)/);
-  if (selectMatch) {
-    const targetId = selectMatch[1];
-    mockState.activePluginId = targetId;
-    appendMockLog(`Active plugin switched to ${targetId}`);
-    return {
-      errno: 0,
-      stdout: JSON.stringify(getMockSnapshot()),
-      stderr: '',
-    };
-  }
+  const pluginRes = handleMockPluginExec(cmd, normalized, {
+    state: mockState,
+    getSnapshot: getMockSnapshot,
+    appendLog: appendMockLog,
+  });
+  if (pluginRes) return pluginRes;
 
   return { errno: 0, stdout: `[mock] ${cmd}`, stderr: '' };
 }

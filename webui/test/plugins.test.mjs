@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { BUILTIN_DIAG_PLUGIN_ID } from '@pochita/sideveil-sdk';
-import { buildPluginScopeCommand } from '../src/control/hooks/usePluginsControl.ts';
+import {
+  buildCreateWebEmbedCommand,
+  buildPluginScopeCommand,
+  buildSetEmbedConfigCommand,
+  buildUninstallPluginCommand,
+} from '../src/control/hooks/usePluginsControl.ts';
 import { handleMockControlExec } from '../src/control/mockControlBridge.ts';
 import { DIAGNOSTIC_PLUGIN_MANIFEST } from '../src/panel/manifest.ts';
 
@@ -79,4 +84,58 @@ test('handleMockControlExec supports plugins list, reload, enable, disable, prio
     'com.miHoYo.GenshinImpact',
     'com.tencent.tmgp.sgame',
   ]);
+});
+
+test('handleMockControlExec supports web-embed create, edit, uninstall, and network context', async () => {
+  // network context
+  const netRes = await handleMockControlExec('sideveil-ctl network');
+  assert.equal(netRes.errno, 0);
+  const netSnap = JSON.parse(netRes.stdout);
+  assert.equal(netSnap.transport, 'wifi');
+  assert.equal(typeof netSnap.vpnActive, 'boolean');
+
+  // create web-embed
+  const createCmd = buildCreateWebEmbedCommand({
+    id: 'lan.openclash',
+    name: 'OpenClash',
+    url: 'http://192.168.1.1:9090/ui',
+    allowCleartext: true,
+    keepAlive: true,
+    global: true,
+    priority: 12,
+  });
+  const createRes = await handleMockControlExec(createCmd);
+  assert.equal(createRes.errno, 0);
+  const createdEnvelope = JSON.parse(createRes.stdout);
+  const createdPlugin = createdEnvelope.result.snapshot.plugins.find(
+    (p) => p.id === 'lan.openclash',
+  );
+  assert.equal(createdPlugin?.embed?.url, 'http://192.168.1.1:9090/ui');
+  assert.equal(createdPlugin?.embed?.allowCleartext, true);
+  assert.equal(createdPlugin?.surface?.keepAlive, true);
+
+  // edit embed config
+  const editCmd = buildSetEmbedConfigCommand('lan.openclash', {
+    embedUrl: 'http://192.168.1.2:9090/ui',
+    allowedOrigins: ['http://192.168.1.2:9090'],
+    allowCleartext: false,
+    keepAlive: false,
+  });
+  const editRes = await handleMockControlExec(editCmd);
+  assert.equal(editRes.errno, 0);
+  const editedEnvelope = JSON.parse(editRes.stdout);
+  const editedPlugin = editedEnvelope.result.plugins.find((p) => p.id === 'lan.openclash');
+  assert.equal(editedPlugin?.embed?.url, 'http://192.168.1.2:9090/ui');
+  assert.equal(editedPlugin?.embed?.allowCleartext, false);
+  assert.equal(editedPlugin?.surface?.keepAlive, false);
+
+  // uninstall
+  const uninstallCmd = buildUninstallPluginCommand('lan.openclash');
+  const uninstallRes = await handleMockControlExec(uninstallCmd);
+  assert.equal(uninstallRes.errno, 0);
+  const afterUninstall = JSON.parse(uninstallRes.stdout);
+  assert.equal(
+    afterUninstall.result.snapshot.plugins.some((p) => p.id === 'lan.openclash'),
+    false,
+  );
 });
