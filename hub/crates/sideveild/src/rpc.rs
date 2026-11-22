@@ -1,6 +1,7 @@
 //! Async JSON-RPC 2.0 request dispatcher shared by `hub.sock` CLI and `SideVeilHost` WS.
 
 mod control;
+mod daemon;
 mod debug;
 mod plugins;
 mod sandbox;
@@ -66,7 +67,11 @@ async fn dispatch_inner(
         methods::PLUGINS_LIST => serialize_result(&state.plugins_snapshot()),
         methods::DAEMON_LOGS => {
             require_privileged(is_privileged, &req.method)?;
-            Ok(json!({ "lines": state.logs().recent() }))
+            daemon::handle_daemon_logs(state, req.params)
+        }
+        methods::DAEMON_LOGS_CLEAR => {
+            require_privileged(is_privileged, &req.method)?;
+            daemon::handle_daemon_logs_clear(state)
         }
         methods::CONFIG_RELOAD => {
             require_privileged(is_privileged, &req.method)?;
@@ -183,9 +188,17 @@ async fn dispatch_inner(
             require_privileged(is_privileged, &req.method)?;
             debug::handle_inspect_ui(state, req.params).await
         }
+        methods::DEBUG_CDP_STATUS => {
+            require_privileged(is_privileged, &req.method)?;
+            debug::handle_cdp_status(state)
+        }
         methods::DEBUG_SET_WEBVIEW_DEBUGGING => {
             require_privileged(is_privileged, &req.method)?;
             debug::handle_set_webview_debugging(state, req.params)
+        }
+        methods::DEBUG_RESET_FRAME_METRICS => {
+            require_privileged(is_privileged, &req.method)?;
+            debug::handle_reset_frame_metrics(state).await
         }
         other => Err((
             error_codes::METHOD_NOT_FOUND,
@@ -245,5 +258,7 @@ pub(crate) fn serialize_result<T: serde::Serialize>(value: &T) -> Result<Value, 
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_debug;
 #[cfg(test)]
 mod tests_embed;

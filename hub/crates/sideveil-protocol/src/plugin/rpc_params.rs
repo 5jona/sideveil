@@ -187,6 +187,8 @@ pub struct HostPluginDiagnosticsPayload {
     pub host_native_heap_kb: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub host_pss_kb: Option<u64>,
+    #[serde(default)]
+    pub webview_crash_count: u32,
 }
 
 #[cfg(test)]

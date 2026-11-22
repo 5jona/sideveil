@@ -14,6 +14,8 @@ pub mod events {
     pub const HOST_DYNAMIC_COLORS: &str = "host.dynamicColors";
     pub const HOST_DIAGNOSTICS: &str = "host.diagnostics";
     pub const HOST_WEBVIEW_CONSOLE: &str = "host.webviewConsole";
+    pub const HOST_WEBVIEW_ERROR: &str = "host.webviewError";
+    pub const HOST_WEBVIEW_CRASH: &str = "host.webviewCrash";
     pub const HOST_SELECT_PLUGIN: &str = "host.selectPlugin";
     pub const PANEL_STATE_CHANGED: &str = "panel.stateChanged";
     pub const PANEL_VISIBILITY: &str = "panel.visibility";
@@ -36,6 +38,7 @@ pub mod methods {
     pub const DAEMON_STATUS: &str = "daemon.status";
     pub const DAEMON_HEALTH: &str = "daemon.health";
     pub const DAEMON_LOGS: &str = "daemon.logs";
+    pub const DAEMON_LOGS_CLEAR: &str = "daemon.logsClear";
     pub const CONFIG_GET: &str = "config.get";
     pub const CONFIG_PATCH_APPEARANCE: &str = "config.patchAppearance";
     pub const CONFIG_PATCH_EDGE: &str = "config.patchEdge";
@@ -72,6 +75,8 @@ pub mod methods {
     pub const HUD_DISMISS: &str = "hud.dismiss";
     pub const DEBUG_INSPECT_UI: &str = "debug.inspectUi";
     pub const DEBUG_SET_WEBVIEW_DEBUGGING: &str = "debug.setWebViewDebugging";
+    pub const DEBUG_CDP_STATUS: &str = "debug.cdpStatus";
+    pub const DEBUG_RESET_FRAME_METRICS: &str = "debug.resetFrameMetrics";
 }
 
 pub mod error_codes {

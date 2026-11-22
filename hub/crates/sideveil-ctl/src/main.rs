@@ -9,7 +9,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use sideveil_protocol::rpc::{RpcRequest, RpcResponse, methods};
+use sideveil_protocol::rpc::{RpcRequest, RpcResponse};
 use sideveil_protocol::uds::{UdsClientHello, UdsHandshakeAck};
 
 use crate::cli::{CliAction, CliInvocation, OutputMode, parse_args};
@@ -54,38 +54,7 @@ fn execute(inv: &CliInvocation) -> Result<String, String> {
                 }
             }
         }
-        CliAction::DebugCdpStatus => execute_debug_cdp_status(&inv.socket_path, inv.io_timeout),
     }
-}
-
-fn execute_debug_cdp_status(socket_path: &Path, timeout: Duration) -> Result<String, String> {
-    let cfg_resp = execute_rpc(socket_path, timeout, methods::CONFIG_GET, None)?;
-    let status_resp = execute_rpc(socket_path, timeout, methods::DAEMON_STATUS, None)?;
-
-    let enabled = cfg_resp
-        .result
-        .as_ref()
-        .and_then(|v| v.pointer("/debug/webviewDebuggingEnabled"))
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let host_pid = status_resp
-        .result
-        .as_ref()
-        .and_then(|v| v.get("hostPid"))
-        .and_then(Value::as_u64)
-        .and_then(|v| u32::try_from(v).ok());
-    let cdp_socket = if enabled {
-        host_pid.map(|pid| format!("webview_devtools_remote_{pid}"))
-    } else {
-        None
-    };
-
-    let out = json!({
-        "webviewDebuggingEnabled": enabled,
-        "hostPid": host_pid,
-        "cdpSocket": cdp_socket,
-    });
-    serde_json::to_string(&out).map_err(|e| format!("Failed encoding output: {e}"))
 }
 
 fn execute_rpc(

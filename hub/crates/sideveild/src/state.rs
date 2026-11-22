@@ -11,7 +11,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use sideveil_protocol::plugin::{HostPluginDiagnosticsPayload, PluginsSnapshotPayload};
 use sideveil_protocol::rpc::RpcResponse;
-use sideveil_protocol::sensor::NetworkContextSnapshot;
+use sideveil_protocol::sensor::{DebugGestureStats, NetworkContextSnapshot};
 use tokio::sync::{mpsc, oneshot};
 
 pub use self::runtime::HostWakeSignal;
@@ -125,6 +125,15 @@ impl HubState {
             .read()
             .unwrap_or_else(PoisonError::into_inner)
             .network_context
+            .clone()
+    }
+
+    #[must_use]
+    pub fn gesture_stats(&self) -> Option<DebugGestureStats> {
+        self.runtime
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .gesture_stats
             .clone()
     }
 

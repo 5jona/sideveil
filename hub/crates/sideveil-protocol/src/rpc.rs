@@ -1,13 +1,16 @@
 //! JSON-RPC 2.0 wire types, method/event constants, and host/control payloads.
 
 mod constants;
+mod debug;
 mod payloads;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub use self::constants::{error_codes, events, methods};
+pub use self::debug::*;
 pub use self::payloads::*;
+pub use crate::sensor::DebugGestureStats;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RpcError {

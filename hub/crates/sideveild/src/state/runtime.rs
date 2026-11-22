@@ -5,7 +5,9 @@ use std::io::Read;
 
 use sideveil_protocol::config::PanelState;
 use sideveil_protocol::plugin::HostPluginDiagnosticsPayload;
-use sideveil_protocol::sensor::{DisplayGeometry, HubToSensor, NetworkContextSnapshot};
+use sideveil_protocol::sensor::{
+    DebugGestureStats, DisplayGeometry, HubToSensor, NetworkContextSnapshot,
+};
 use sideveil_protocol::theme::HostDynamicColorsPayload;
 use tokio::sync::mpsc;
 
@@ -49,6 +51,7 @@ pub(crate) struct RuntimeSnapshot {
     pub(crate) cross_window_blur_supported: Option<bool>,
     pub(crate) sensor_pid: Option<u32>,
     pub(crate) network_context: NetworkContextSnapshot,
+    pub(crate) gesture_stats: Option<DebugGestureStats>,
 }
 
 impl Default for RuntimeSnapshot {
@@ -69,6 +72,7 @@ impl Default for RuntimeSnapshot {
             cross_window_blur_supported: None,
             sensor_pid: None,
             network_context: NetworkContextSnapshot::default(),
+            gesture_stats: None,
         }
     }
 }

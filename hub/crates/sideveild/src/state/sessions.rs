@@ -87,6 +87,7 @@ impl HubState {
             sensor_pid: snap.sensor_pid,
             active_plugin_id: plugins_snap.active_plugin_id,
             matched_plugins_count: plugins_snap.matched_plugin_ids.len(),
+            gesture_stats: snap.gesture_stats,
         }
     }
 

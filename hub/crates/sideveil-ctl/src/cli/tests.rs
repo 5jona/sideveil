@@ -15,7 +15,6 @@ fn unwrap_rpc(action: CliAction) -> (String, Option<Value>, OutputMode) {
             params,
             output_mode,
         } => (method, params, output_mode),
-        CliAction::DebugCdpStatus => panic!("expected Rpc action"),
     }
 }
 
@@ -155,10 +154,10 @@ fn parses_debug_subcommands() {
         "15000".to_owned(),
     ])
     .expect("debug inspect-ui");
-    assert_eq!(inspect.io_timeout, Duration::from_millis(15_000));
+    assert_eq!(inspect.io_timeout, Duration::from_millis(17_000));
     let (method, params, output_mode) = unwrap_rpc(inspect.action);
     assert_eq!(method, methods::DEBUG_INSPECT_UI);
-    assert_eq!(params, None);
+    assert_eq!(params, Some(json!({ "timeoutMs": 15_000 })));
     assert_eq!(output_mode, OutputMode::FullEnvelope);
 
     let cdp_on =
@@ -175,7 +174,64 @@ fn parses_debug_subcommands() {
 
     let cdp_status = parse_args(["debug".to_owned(), "cdp".to_owned(), "status".to_owned()])
         .expect("cdp status");
-    assert_eq!(cdp_status.action, CliAction::DebugCdpStatus);
+    let (method, params, output_mode) = unwrap_rpc(cdp_status.action);
+    assert_eq!(method, methods::DEBUG_CDP_STATUS);
+    assert_eq!(params, None);
+    assert_eq!(output_mode, OutputMode::UnwrapResult);
+
+    let reset = parse_args(["debug".to_owned(), "reset-frames".to_owned()]).expect("reset-frames");
+    let (method, params, output_mode) = unwrap_rpc(reset.action);
+    assert_eq!(method, methods::DEBUG_RESET_FRAME_METRICS);
+    assert_eq!(params, None);
+    assert_eq!(output_mode, OutputMode::FullEnvelope);
+}
+
+#[test]
+fn parses_logs_flags_and_clear_subcommand() {
+    let basic = parse_args(["logs".to_owned()]).expect("basic logs");
+    let (method, params, _) = unwrap_rpc(basic.action);
+    assert_eq!(method, methods::DAEMON_LOGS);
+    assert_eq!(params, None);
+
+    let queried = parse_args([
+        "logs".to_owned(),
+        "--since-seq".to_owned(),
+        "42".to_owned(),
+        "--limit".to_owned(),
+        "50".to_owned(),
+        "--level".to_owned(),
+        "warn".to_owned(),
+        "--source".to_owned(),
+        "webview:diag".to_owned(),
+    ])
+    .expect("logs query");
+    let (method, params, _) = unwrap_rpc(queried.action);
+    assert_eq!(method, methods::DAEMON_LOGS);
+    assert_eq!(
+        params,
+        Some(json!({
+            "sinceSeq": 42,
+            "limit": 50,
+            "level": "warn",
+            "source": "webview:diag",
+        }))
+    );
+
+    let cleared = parse_args(["logs".to_owned(), "--clear".to_owned()]).expect("logs clear");
+    let (method, params, _) = unwrap_rpc(cleared.action);
+    assert_eq!(method, methods::DAEMON_LOGS_CLEAR);
+    assert_eq!(params, None);
+
+    assert!(
+        parse_args([
+            "logs".to_owned(),
+            "--clear".to_owned(),
+            "--level".to_owned(),
+            "error".to_owned(),
+        ])
+        .is_err()
+    );
+    assert!(parse_args(["logs".to_owned(), "--level".to_owned(), "debug".to_owned()]).is_err());
 }
 
 #[test]

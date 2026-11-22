@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::config::{EdgeSide, PanelState, SideVeilConfig};
+use crate::sensor::DebugGestureStats;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DaemonEndpoint {
@@ -46,6 +47,8 @@ pub struct DaemonStatus {
     pub active_plugin_id: Option<String>,
     #[serde(default)]
     pub matched_plugins_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gesture_stats: Option<DebugGestureStats>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -183,22 +186,4 @@ pub struct PingResult {
     pub pong: bool,
     pub daemon_uptime_ms: u64,
     pub timestamp_ms: u64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DebugSetWebViewDebuggingParams {
-    pub enabled: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DebugCdpStatusResult {
-    pub ok: bool,
-    pub webview_debugging_enabled: bool,
-    #[serde(default)]
-    pub host_pid: Option<u32>,
-    #[serde(default)]
-    pub cdp_socket: Option<String>,
-    pub restart_recommended: bool,
 }

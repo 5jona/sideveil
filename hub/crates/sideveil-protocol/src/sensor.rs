@@ -50,6 +50,19 @@ pub struct NetworkContextSnapshot {
     pub local_ipv4: Option<String>,
 }
 
+/// Edge-gesture diagnostic counters reported by the UID 1000 `:sensor` process.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct DebugGestureStats {
+    pub edge_swipes_triggered: u64,
+    pub edge_swipes_rejected: u64,
+    pub hotzone_misses: u64,
+    pub pilfer_invocations: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_reject_reason: Option<String>,
+    pub last_event_timestamp_ms: u64,
+}
+
 /// Messages pushed from the UID 1000 Kotlin `:sensor` process to `sideveild`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -114,6 +127,8 @@ pub enum SensorToHub {
     },
     #[serde(rename_all = "camelCase")]
     NetworkContextChanged { context: NetworkContextSnapshot },
+    #[serde(rename_all = "camelCase")]
+    GestureStatsUpdated { stats: DebugGestureStats },
     #[serde(rename_all = "camelCase")]
     Pong { seq: u64 },
 }
@@ -193,5 +208,26 @@ mod tests {
             serde_json::from_str("{}").expect("default network ctx");
         assert_eq!(default_ctx.transport, NetworkTransportKind::None);
         assert!(!default_ctx.vpn_active);
+    }
+
+    #[test]
+    fn gesture_stats_updated_roundtrips_camel_case() {
+        let stats = DebugGestureStats {
+            edge_swipes_triggered: 7,
+            edge_swipes_rejected: 3,
+            hotzone_misses: 12,
+            pilfer_invocations: 9,
+            last_reject_reason: Some("vertical_scroll".to_owned()),
+            last_event_timestamp_ms: 1_700_000_000_000,
+        };
+        let msg = SensorToHub::GestureStatsUpdated {
+            stats: stats.clone(),
+        };
+        let encoded = serde_json::to_string(&msg).expect("encode GestureStatsUpdated");
+        assert!(encoded.contains(r#""type":"gestureStatsUpdated""#));
+        assert!(encoded.contains(r#""edgeSwipesTriggered":7"#));
+        assert!(encoded.contains(r#""lastRejectReason":"vertical_scroll""#));
+        let decoded: SensorToHub = serde_json::from_str(&encoded).expect("decode gesture stats");
+        assert_eq!(decoded, SensorToHub::GestureStatsUpdated { stats });
     }
 }

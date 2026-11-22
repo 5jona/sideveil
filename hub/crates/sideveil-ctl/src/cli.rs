@@ -2,6 +2,7 @@
 
 mod debug_cmd;
 mod hud_cmd;
+mod logs_cmd;
 mod plugins_cmd;
 
 use std::path::PathBuf;
@@ -33,7 +34,6 @@ pub(crate) enum CliAction {
         params: Option<Value>,
         output_mode: OutputMode,
     },
-    DebugCdpStatus,
 }
 
 #[derive(Debug)]
@@ -71,7 +71,7 @@ pub(crate) fn parse_args(
         "reload" => rpc_action(methods::CONFIG_RELOAD, None, OutputMode::FullEnvelope),
         "restart-host" => rpc_action(methods::HOST_RESTART, None, OutputMode::FullEnvelope),
         "ping" => rpc_action(methods::DAEMON_PING, None, OutputMode::FullEnvelope),
-        "logs" => rpc_action(methods::DAEMON_LOGS, None, OutputMode::FullEnvelope),
+        "logs" => logs_cmd::parse_logs_subcommand(&positional[1..])?,
         "network" => rpc_action(methods::NETWORK_CONTEXT, None, OutputMode::UnwrapResult),
         "plugins" => {
             let parsed = plugins_cmd::parse_plugins_subcommand(&positional[1..])?;

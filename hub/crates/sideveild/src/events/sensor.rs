@@ -203,6 +203,10 @@ impl HubState {
                         .broadcast_system_event(events::NETWORK_CONTEXT_CHANGED, val);
                 }
             }
+            SensorToHub::GestureStatsUpdated { stats } => {
+                let mut rt = self.runtime.write().unwrap_or_else(PoisonError::into_inner);
+                rt.gesture_stats = Some(stats);
+            }
             SensorToHub::Pong { .. } => {}
         }
     }

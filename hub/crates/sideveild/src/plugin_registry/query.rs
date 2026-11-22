@@ -65,6 +65,19 @@ impl PluginRegistry {
     }
 
     #[must_use]
+    pub fn has_active_dev_server(&self) -> bool {
+        let guard = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+        guard.plugins.keys().any(|id| {
+            guard
+                .overrides
+                .overrides
+                .get(id)
+                .and_then(|ov| ov.dev_server_url.as_deref())
+                .is_some_and(|url| !url.trim().is_empty())
+        })
+    }
+
+    #[must_use]
     pub fn has_capability(&self, plugin_id: &str, capability: PluginCapability) -> bool {
         let guard = self.inner.read().unwrap_or_else(PoisonError::into_inner);
         guard
