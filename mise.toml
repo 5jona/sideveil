@@ -14,8 +14,16 @@ description = "Build Rust hub binaries, WebUI bundles, sensor DEX, host APK, and
 run = "bash build.sh"
 
 [tasks.reload]
-description = "Build and hot-reload SideVeil onto connected Android device via ADB"
+description = "Build and hot-reload SideVeil onto Android device via container SSH or on-device host-exec"
 run = "bash reload.sh"
+
+[tasks."reload:fast"]
+description = "Skip full build and hot-reload existing SideVeil artifacts (forwards extra flags like --hub-only / --ssh)"
+run = "bash reload.sh --skip-build"
+
+[tasks."verify:live"]
+description = "Run live end-to-end SideVeil verification harness (supports --ssh, --mode, --report-json)"
+run = "python3 scripts/verify-live.py"
 
 [tasks."webui:check"]
 description = "Lint, typecheck, test, and build Control Plane and Panel WebUIs"

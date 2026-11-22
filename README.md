@@ -59,7 +59,7 @@ sideveil/
 ├── system/                     # KernelSU Magic Mount priv-app & sysconfig XMLs
 ├── webui/                      # React + Vite + Tailwind v4 Control Plane & Panel apps
 ├── build.sh                    # Full Rust + WebUI + Gradle + KernelSU ZIP packager
-├── reload.sh                   # Zero-reboot ADB push/install/restart helper
+├── reload.sh                   # Zero-reboot SSH / on-device push/install/restart helper
 ├── config.json                 # Default configuration template
 ├── module.prop
 ├── post-fs-data.sh
@@ -79,8 +79,8 @@ mise run check
 # Build everything and generate out/sideveil.zip
 bash build.sh
 
-# Build + live-reload onto ADB device without rebooting
-bash reload.sh <device-serial>
+# Build + live-reload onto Android device via Strata container SSH (or on-device --local)
+bash reload.sh --ssh <host|user@host>
 ```
 
 ## Runtime Notes

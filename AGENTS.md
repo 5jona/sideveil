@@ -18,4 +18,4 @@ Read `.agent/rules.md` for complete engineering standards and `docs/architecture
 ## Build & Verification Commands
 - Full quality gate: `mise run check` (Rust workspace + bundled Rust plugins, WebUI lint/typecheck/tests/builds + standards guard tests, Android Spotless/Detekt/Lint/tests/DEX/APK).
 - Full module archive build: `bash build.sh` (outputs `out/sideveil.zip`).
-- Live device hot-reload & verification (when requested): `bash reload.sh --skip-build` (supports `--ssh <user@host>` for ADB-free container reload) followed by `python3 scripts/verify-live.py` (auto-detects on-device `host-exec` / `local` or workstation `adb`).
+- Live device hot-reload & verification (when requested): `bash reload.sh --skip-build --ssh <host|user@host>` (or set `STRATA_SSH_HOST` / run on-device via `--local`) followed by `python3 scripts/verify-live.py` (supports `ssh`, on-device `host-exec`, and `local` transports).

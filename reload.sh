@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 #
 # Zero-reboot development deploy & live reload script for SideVeil.
-# Supports both ADB deployment and ADB-free container SSH deployment (--ssh <host|user@host>).
+# Supports full and incremental (--hub-only/--host-only/--sensor-only/--webui-only/--plugin)
+# deployment over Strata container SSH (--ssh <host|user@host> or STRATA_SSH_HOST / SSH_TARGET)
+# or locally on-device (host-exec / Android root), plus --cdp-forward.
 #
 
 set -euo pipefail
@@ -15,220 +17,256 @@ STAGE_DIR="/data/local/tmp/sideveil_stage"
 
 SKIP_BUILD=0
 RESET_CONFIG=0
-TARGET_SERIAL="${TARGET_SERIAL:-}"
-SSH_TARGET="${SSH_TARGET:-}"
-SSH_PORT="${SSH_PORT:-2222}"
+LOCAL_MODE=0
+LOCAL_TRANSPORT=""
+DEPLOY_MODE="full"
+TARGET_PLUGIN=""
+CDP_FORWARD=0
+CDP_FORWARD_PORT="9222"
+SSH_TARGET="${SSH_TARGET:-${STRATA_SSH_HOST:-}}"
+SSH_PORT="${SSH_PORT:-${STRATA_SSH_PORT:-2222}}"
+
+# shellcheck source=scripts/reload-helpers.sh
+source "${SCRIPT_DIR}/scripts/reload-helpers.sh"
 
 usage() {
     cat <<'EOF'
-Usage: ./reload.sh [options] [adb-serial]
+Usage: ./reload.sh [options] [ssh-target]
 
 Options:
-  --ssh <host|user@host>  Deploy and reload over on-device container SSH (host-exec, no ADB)
-  --ssh-port <port>       SSH port for --ssh mode (default: 2222)
-  --skip-build            Skip build.sh quality gates and compilation
-  --reset-config          Overwrite /data/system/sideveil/config.json with repo defaults
-  -h, --help              Show this help message
+  --ssh <host|user@host>     Deploy and reload over Strata container SSH (host-exec)
+  --ssh-port <port>          SSH port (default: $STRATA_SSH_PORT / $SSH_PORT / 2222)
+  --local                    Deploy locally on-device via host-exec or Android UID 0
+  --skip-build               Skip compilation and quality gates
+  --reset-config             Overwrite /data/system/sideveil/config.json with repo defaults
+  --hub-only                 Incremental: deploy only sideveild + sideveil-ctl + example daemon
+  --host-only                Incremental: reinstall only SideVeilHost.apk and restart host
+  --sensor-only              Incremental: deploy only sideveil-sensor.dex and respawn sensor
+  --webui-only               Incremental: sync only KernelSU Control Plane webroot/
+  --plugin <id>              Incremental: sync only one plugin directory and reload plugins
+  --cdp-forward [port]       Enable WebView CDP and print strata-debug bridge command (default: 9222)
+  -h, --help                 Show this help message
 EOF
+}
+
+set_deploy_mode() {
+    local next="$1"
+    if [ "$DEPLOY_MODE" != "full" ] && [ "$DEPLOY_MODE" != "$next" ]; then
+        echo "[!] Error: Cannot combine multiple incremental modes (${DEPLOY_MODE} vs ${next})." >&2
+        exit 2
+    fi
+    DEPLOY_MODE="$next"
 }
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --skip-build) SKIP_BUILD=1; shift ;;
         --reset-config) RESET_CONFIG=1; shift ;;
+        --local) LOCAL_MODE=1; SSH_TARGET=""; shift ;;
         --ssh) SSH_TARGET="$2"; shift 2 ;;
         --ssh-port) SSH_PORT="$2"; shift 2 ;;
+        --hub-only) set_deploy_mode "hub"; shift ;;
+        --host-only) set_deploy_mode "host"; shift ;;
+        --sensor-only) set_deploy_mode "sensor"; shift ;;
+        --webui-only) set_deploy_mode "webui"; shift ;;
+        --plugin) set_deploy_mode "plugin"; TARGET_PLUGIN="$2"; shift 2 ;;
+        --cdp-forward)
+            CDP_FORWARD=1
+            if [ "$#" -ge 2 ] && [[ "$2" =~ ^[0-9]+$ ]]; then
+                CDP_FORWARD_PORT="$2"
+                shift 2
+            else
+                shift
+            fi
+            ;;
         -h|--help) usage; exit 0 ;;
-        *) TARGET_SERIAL="$1"; shift ;;
+        *) SSH_TARGET="$1"; shift ;;
     esac
 done
+
+if [ "$LOCAL_MODE" -eq 0 ] && [ -z "$SSH_TARGET" ]; then
+    if [ -x /usr/local/bin/host-exec ]; then
+        LOCAL_MODE=1
+        LOCAL_TRANSPORT="host-exec"
+    elif [ -x /system/bin/getprop ] && [ "$(id -u)" -eq 0 ]; then
+        LOCAL_MODE=1
+        LOCAL_TRANSPORT="local"
+    else
+        echo "[!] Error: Specify --ssh <host|user@host> (or set STRATA_SSH_HOST / SSH_TARGET), or run on-device." >&2
+        exit 1
+    fi
+elif [ "$LOCAL_MODE" -eq 1 ]; then
+    if [ -x /usr/local/bin/host-exec ]; then
+        LOCAL_TRANSPORT="host-exec"
+    elif [ -x /system/bin/getprop ] && [ "$(id -u)" -eq 0 ]; then
+        LOCAL_TRANSPORT="local"
+    else
+        echo "[!] Error: --local requires on-device host-exec or Android UID 0." >&2
+        exit 1
+    fi
+fi
 
 if [ -n "$SSH_TARGET" ] && [[ "$SSH_TARGET" != *@* ]]; then
     SSH_TARGET="root@${SSH_TARGET}"
 fi
 
+SSH_OPTS=(
+    -p "${SSH_PORT}"
+    -o BatchMode=yes
+    -o ConnectTimeout=6
+    -o StrictHostKeyChecking=accept-new
+    -o ControlMaster=auto
+    -o ControlPersist=60
+    -o "ControlPath=/tmp/sideveil-reload-%r@%h:%p"
+)
+
 if [ "$SKIP_BUILD" -eq 0 ]; then
-    bash "${SCRIPT_DIR}/build.sh"
+    case "$DEPLOY_MODE" in
+        full)
+            bash "${SCRIPT_DIR}/build.sh"
+            ;;
+        hub)
+            echo "[*] Incremental build: Rust hub + example HUD binaries..."
+            (cd "${SCRIPT_DIR}/hub" && run_in_env cargo build --release --target aarch64-linux-android -p sideveild -p sideveil-ctl)
+            (cd "${SCRIPT_DIR}/examples/native-perf-hud" && run_in_env cargo build --release --target aarch64-linux-android)
+            cp "${SCRIPT_DIR}/hub/target/aarch64-linux-android/release/sideveild" "${SCRIPT_DIR}/bin/sideveild"
+            cp "${SCRIPT_DIR}/hub/target/aarch64-linux-android/release/sideveil-ctl" "${SCRIPT_DIR}/bin/sideveil-ctl"
+            cp "${SCRIPT_DIR}/examples/native-perf-hud/target/aarch64-linux-android/release/sideveil-example-perf-hud" "${SCRIPT_DIR}/bin/sideveil-example-perf-hud"
+            chmod 0755 "${SCRIPT_DIR}/bin/sideveild" "${SCRIPT_DIR}/bin/sideveil-ctl" "${SCRIPT_DIR}/bin/sideveil-example-perf-hud"
+            ;;
+        host)
+            echo "[*] Incremental build: SideVeilHost release APK..."
+            (cd "${SCRIPT_DIR}/android" && run_in_env ./gradlew :host-app:assembleRelease)
+            cp "${SCRIPT_DIR}/android/host-app/build/outputs/apk/release/host-app-release.apk" \
+               "${SCRIPT_DIR}/system/priv-app/SideVeilHost/SideVeilHost.apk"
+            chmod 0644 "${SCRIPT_DIR}/system/priv-app/SideVeilHost/SideVeilHost.apk"
+            ;;
+        sensor)
+            echo "[*] Incremental build: sideveil-sensor.dex..."
+            (cd "${SCRIPT_DIR}/android" && run_in_env ./gradlew :sensor:buildDex)
+            ;;
+        webui|plugin)
+            echo "[*] Incremental build: WebUI bundles..."
+            (cd "${SCRIPT_DIR}/webui" && run_in_env pnpm build)
+            ;;
+    esac
 fi
 
-stop_and_prepare_script() {
-    cat <<EOF
-set -e
-rm -rf ${REMOTE_MOD_DIR}/system/priv-app
-mkdir -p ${REMOTE_MOD_DIR}/bin \
-         ${REMOTE_MOD_DIR}/system/priv-app/SideVeilHost \
-         ${REMOTE_MOD_DIR}/system/etc/permissions \
-         ${REMOTE_MOD_DIR}/system/etc/sysconfig \
-         ${REMOTE_STATE_DIR}/run \
-         ${REMOTE_STATE_DIR}/plugins \
-         ${REMOTE_STATE_DIR}/data \
-         ${REMOTE_ROOT_RUN_DIR}
-chown 0:1000 ${REMOTE_STATE_DIR} ${REMOTE_STATE_DIR}/run ${REMOTE_STATE_DIR}/plugins
-chmod 1775 ${REMOTE_STATE_DIR}
-chmod 0711 ${REMOTE_STATE_DIR}/run
-chmod 0755 ${REMOTE_STATE_DIR}/plugins
-chown 0:0 ${REMOTE_STATE_DIR}/data /data/adb/${MODULE_ID} ${REMOTE_ROOT_RUN_DIR}
-chmod 0700 ${REMOTE_STATE_DIR}/data /data/adb/${MODULE_ID} ${REMOTE_ROOT_RUN_DIR}
+TRANSPORT_LABEL="${SSH_TARGET:+SSH (${SSH_TARGET}:${SSH_PORT})}"
+TRANSPORT_LABEL="${TRANSPORT_LABEL:-local (${LOCAL_TRANSPORT})}"
+echo "[*] Target: ${TRANSPORT_LABEL} | Mode: ${DEPLOY_MODE}"
 
-for pidfile in ${REMOTE_ROOT_RUN_DIR}/supervisor.pid ${REMOTE_ROOT_RUN_DIR}/sideveild.pid ${REMOTE_ROOT_RUN_DIR}/hostwatch.pid ${REMOTE_STATE_DIR}/run/hostwatch.pid ${REMOTE_STATE_DIR}/run/supervisor.pid; do
-    if [ -f "\$pidfile" ] && [ ! -L "\$pidfile" ]; then
-        P=\$(cat "\$pidfile" 2>/dev/null || true)
-        if [ -n "\$P" ]; then
-            kill -TERM "\$P" 2>/dev/null || true
-            sleep 0.2
-            kill -9 "\$P" 2>/dev/null || true
-        fi
-    fi
-done
-pkill -l TERM -x "sideveild" 2>/dev/null || true
-pkill -l TERM -x "sideveil-example-perf-hud" 2>/dev/null || true
-pkill -l TERM -U 1000 -f "sideveil-sensor|pochita\\.sideveil\\.sensor\\.SensorMain" 2>/dev/null || true
-pkill -l TERM -U 1000 -f "sideveil-daemon|pochita\\.sideveil\\.daemon\\.DaemonMain" 2>/dev/null || true
-sleep 0.3
-pkill -l KILL -x "sideveild" 2>/dev/null || true
-pkill -l KILL -x "sideveil-example-perf-hud" 2>/dev/null || true
-pkill -l KILL -U 1000 -f "sideveil-sensor|pochita\\.sideveil\\.sensor\\.SensorMain" 2>/dev/null || true
-pkill -l KILL -U 1000 -f "sideveil-daemon|pochita\\.sideveil\\.daemon\\.DaemonMain" 2>/dev/null || true
-am force-stop pochita.sideveil.host 2>/dev/null || true
-rm -f ${REMOTE_STATE_DIR}/run/hub.sock ${REMOTE_STATE_DIR}/run/app.sock ${REMOTE_STATE_DIR}/run/daemon.env ${REMOTE_STATE_DIR}/run/hostwatch.pid ${REMOTE_STATE_DIR}/run/supervisor.pid
-EOF
-}
+TMP_STAGE="$(mktemp -d)"
+trap 'rm -rf "${TMP_STAGE}"' EXIT
 
-install_staged_script() {
-    cat <<EOF
+case "$DEPLOY_MODE" in
+    full)
+        cp "${SCRIPT_DIR}/module.prop" "${SCRIPT_DIR}/config.json" \
+           "${SCRIPT_DIR}/service.sh" "${SCRIPT_DIR}/post-fs-data.sh" \
+           "${SCRIPT_DIR}/customize.sh" "${SCRIPT_DIR}/uninstall.sh" "${TMP_STAGE}/"
+        cp "${SCRIPT_DIR}/bin/sideveild" "${SCRIPT_DIR}/bin/sideveil-ctl" \
+           "${SCRIPT_DIR}/bin/sideveil-example-perf-hud" "${SCRIPT_DIR}/bin/sideveil-sensor.dex" "${TMP_STAGE}/"
+        cp "${SCRIPT_DIR}/system/priv-app/SideVeilHost/SideVeilHost.apk" "${TMP_STAGE}/SideVeilHost.apk"
+        cp "${SCRIPT_DIR}/system/etc/permissions/privapp-permissions-pochita-sideveil.xml" "${TMP_STAGE}/privapp.xml"
+        cp "${SCRIPT_DIR}/system/etc/sysconfig/sideveil-allowlist.xml" "${TMP_STAGE}/sysconfig.xml"
+        cp -r "${SCRIPT_DIR}/webroot" "${TMP_STAGE}/webroot"
+        mkdir -p "${TMP_STAGE}/plugins/example.vello-scope" "${TMP_STAGE}/plugins/example.native-perf-hud"
+        cp "${SCRIPT_DIR}/examples/vello-vector-scope/manifest.json" "${TMP_STAGE}/plugins/example.vello-scope/"
+        cp -r "${SCRIPT_DIR}/examples/vello-vector-scope/web" "${TMP_STAGE}/plugins/example.vello-scope/web"
+        cp "${SCRIPT_DIR}/examples/native-perf-hud/manifest.json" "${TMP_STAGE}/plugins/example.native-perf-hud/"
+        cp -r "${SCRIPT_DIR}/examples/native-perf-hud/web" "${TMP_STAGE}/plugins/example.native-perf-hud/web"
+
+        stop_and_prepare_script | run_remote_sh
+        push_stage_dir "${TMP_STAGE}"
+        install_full_staged_script | run_remote_sh
+        start_service_detached
+        wait_for_ready 12000
+        ;;
+    hub)
+        cp "${SCRIPT_DIR}/bin/sideveild" "${SCRIPT_DIR}/bin/sideveil-ctl" \
+           "${SCRIPT_DIR}/bin/sideveil-example-perf-hud" "${TMP_STAGE}/"
+        push_stage_dir "${TMP_STAGE}"
+        run_remote_sh <<EOF
 set -e
-pm install -r -d ${STAGE_DIR}/SideVeilHost.apk
-cp ${STAGE_DIR}/module.prop ${REMOTE_MOD_DIR}/module.prop
-cp ${STAGE_DIR}/config.json ${REMOTE_MOD_DIR}/config.json
-cp ${STAGE_DIR}/service.sh ${REMOTE_MOD_DIR}/service.sh
-cp ${STAGE_DIR}/post-fs-data.sh ${REMOTE_MOD_DIR}/post-fs-data.sh
-cp ${STAGE_DIR}/customize.sh ${REMOTE_MOD_DIR}/customize.sh
-cp ${STAGE_DIR}/uninstall.sh ${REMOTE_MOD_DIR}/uninstall.sh
+$(stop_hub_processes_script)
 cp ${STAGE_DIR}/sideveild ${REMOTE_MOD_DIR}/bin/sideveild
 cp ${STAGE_DIR}/sideveil-ctl ${REMOTE_MOD_DIR}/bin/sideveil-ctl
 cp ${STAGE_DIR}/sideveil-example-perf-hud ${REMOTE_MOD_DIR}/bin/sideveil-example-perf-hud
-cp ${STAGE_DIR}/sideveil-sensor.dex ${REMOTE_MOD_DIR}/bin/sideveil-sensor.dex
-rm -f ${REMOTE_MOD_DIR}/bin/sideveil-common.sh ${REMOTE_MOD_DIR}/bin/sideveil-daemon.dex ${REMOTE_STATE_DIR}/sideveil-daemon.dex
-cp ${STAGE_DIR}/SideVeilHost.apk ${REMOTE_MOD_DIR}/system/priv-app/SideVeilHost/SideVeilHost.apk
-cp ${STAGE_DIR}/privapp.xml ${REMOTE_MOD_DIR}/system/etc/permissions/privapp-permissions-pochita-sideveil.xml
-cp ${STAGE_DIR}/sysconfig.xml ${REMOTE_MOD_DIR}/system/etc/sysconfig/sideveil-allowlist.xml
-rm -rf ${REMOTE_MOD_DIR}/webroot
-cp -r ${STAGE_DIR}/webroot ${REMOTE_MOD_DIR}/webroot
-rm -rf ${REMOTE_MOD_DIR}/plugins
-cp -r ${STAGE_DIR}/plugins ${REMOTE_MOD_DIR}/plugins
-for pdir in ${STAGE_DIR}/plugins/*; do
-    [ -d "\$pdir" ] || continue
-    pname="\${pdir##*/}"
-    rm -rf ${REMOTE_STATE_DIR}/plugins/"\$pname"
-    cp -r "\$pdir" ${REMOTE_STATE_DIR}/plugins/"\$pname"
-    chown -R 0:1000 ${REMOTE_STATE_DIR}/plugins/"\$pname"
-    find ${REMOTE_STATE_DIR}/plugins/"\$pname" -type d -exec chmod 0755 {} +
-    find ${REMOTE_STATE_DIR}/plugins/"\$pname" -type f -exec chmod 0644 {} +
-done
-
-if [ "${RESET_CONFIG}" -eq 1 ] || [ ! -f ${REMOTE_STATE_DIR}/config.json ]; then
-    cp ${STAGE_DIR}/config.json ${REMOTE_STATE_DIR}/config.json
-    chown 0:1000 ${REMOTE_STATE_DIR}/config.json
-    chmod 0644 ${REMOTE_STATE_DIR}/config.json
-fi
-
-chmod 0755 ${REMOTE_MOD_DIR}/service.sh ${REMOTE_MOD_DIR}/post-fs-data.sh ${REMOTE_MOD_DIR}/customize.sh ${REMOTE_MOD_DIR}/uninstall.sh ${REMOTE_MOD_DIR}/bin/sideveild ${REMOTE_MOD_DIR}/bin/sideveil-ctl ${REMOTE_MOD_DIR}/bin/sideveil-example-perf-hud
-chmod 0644 ${REMOTE_MOD_DIR}/module.prop ${REMOTE_MOD_DIR}/config.json ${REMOTE_MOD_DIR}/bin/sideveil-sensor.dex ${REMOTE_MOD_DIR}/system/priv-app/SideVeilHost/SideVeilHost.apk ${REMOTE_MOD_DIR}/system/etc/permissions/privapp-permissions-pochita-sideveil.xml ${REMOTE_MOD_DIR}/system/etc/sysconfig/sideveil-allowlist.xml
-find ${REMOTE_MOD_DIR}/webroot ${REMOTE_MOD_DIR}/plugins -type d -exec chmod 0755 {} +
-find ${REMOTE_MOD_DIR}/webroot ${REMOTE_MOD_DIR}/plugins -type f -exec chmod 0644 {} +
+chmod 0755 ${REMOTE_MOD_DIR}/bin/sideveild ${REMOTE_MOD_DIR}/bin/sideveil-ctl ${REMOTE_MOD_DIR}/bin/sideveil-example-perf-hud
+rm -f ${REMOTE_STATE_DIR}/run/hub.sock ${REMOTE_STATE_DIR}/run/app.sock ${REMOTE_STATE_DIR}/run/daemon.env
 rm -rf ${STAGE_DIR}
 EOF
-}
+        start_service_detached
+        wait_for_ready 12000
+        ;;
+    host)
+        cp "${SCRIPT_DIR}/system/priv-app/SideVeilHost/SideVeilHost.apk" "${TMP_STAGE}/SideVeilHost.apk"
+        push_stage_dir "${TMP_STAGE}"
+        run_remote_sh <<EOF
+set -e
+am force-stop pochita.sideveil.host 2>/dev/null || true
+pm install -r -d ${STAGE_DIR}/SideVeilHost.apk
+cp ${STAGE_DIR}/SideVeilHost.apk ${REMOTE_MOD_DIR}/system/priv-app/SideVeilHost/SideVeilHost.apk
+chmod 0644 ${REMOTE_MOD_DIR}/system/priv-app/SideVeilHost/SideVeilHost.apk
+rm -rf ${STAGE_DIR}
+EOF
+        run_remote_ctl restart-host >/dev/null 2>&1 || true
+        wait_for_ready 12000
+        ;;
+    sensor)
+        cp "${SCRIPT_DIR}/bin/sideveil-sensor.dex" "${TMP_STAGE}/sideveil-sensor.dex"
+        push_stage_dir "${TMP_STAGE}"
+        run_remote_sh <<EOF
+set -e
+cp ${STAGE_DIR}/sideveil-sensor.dex ${REMOTE_MOD_DIR}/bin/sideveil-sensor.dex
+chmod 0644 ${REMOTE_MOD_DIR}/bin/sideveil-sensor.dex
+pkill -l TERM -U 1000 -f "sideveil-sensor|pochita\\.sideveil\\.sensor\\.SensorMain" 2>/dev/null || true
+rm -rf ${STAGE_DIR}
+EOF
+        wait_for_ready 12000
+        ;;
+    webui)
+        cp -r "${SCRIPT_DIR}/webroot" "${TMP_STAGE}/webroot"
+        push_stage_dir "${TMP_STAGE}"
+        run_remote_sh <<EOF
+set -e
+rm -rf ${REMOTE_MOD_DIR}/webroot
+cp -r ${STAGE_DIR}/webroot ${REMOTE_MOD_DIR}/webroot
+find ${REMOTE_MOD_DIR}/webroot -type d -exec chmod 0755 {} +
+find ${REMOTE_MOD_DIR}/webroot -type f -exec chmod 0644 {} +
+rm -rf ${STAGE_DIR}
+EOF
+        echo "[+] Control Plane webroot synced."
+        ;;
+    plugin)
+        SRC_PLUGIN_DIR="$(resolve_plugin_source_dir "${TARGET_PLUGIN}")" || {
+            echo "[!] Error: Plugin '${TARGET_PLUGIN}' not found under examples/ or as a directory." >&2
+            exit 1
+        }
+        PLUGIN_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "${SRC_PLUGIN_DIR}/manifest.json")"
+        mkdir -p "${TMP_STAGE}/${PLUGIN_ID}"
+        cp "${SRC_PLUGIN_DIR}/manifest.json" "${TMP_STAGE}/${PLUGIN_ID}/"
+        if [ -d "${SRC_PLUGIN_DIR}/web" ]; then
+            cp -r "${SRC_PLUGIN_DIR}/web" "${TMP_STAGE}/${PLUGIN_ID}/web"
+        fi
+        push_stage_dir "${TMP_STAGE}"
+        run_remote_sh <<EOF
+set -e
+rm -rf ${REMOTE_STATE_DIR}/plugins/${PLUGIN_ID} ${REMOTE_MOD_DIR}/plugins/${PLUGIN_ID}
+cp -r ${STAGE_DIR}/${PLUGIN_ID} ${REMOTE_STATE_DIR}/plugins/${PLUGIN_ID}
+cp -r ${STAGE_DIR}/${PLUGIN_ID} ${REMOTE_MOD_DIR}/plugins/${PLUGIN_ID}
+chown -R 0:1000 ${REMOTE_STATE_DIR}/plugins/${PLUGIN_ID}
+find ${REMOTE_STATE_DIR}/plugins/${PLUGIN_ID} ${REMOTE_MOD_DIR}/plugins/${PLUGIN_ID} -type d -exec chmod 0755 {} +
+find ${REMOTE_STATE_DIR}/plugins/${PLUGIN_ID} ${REMOTE_MOD_DIR}/plugins/${PLUGIN_ID} -type f -exec chmod 0644 {} +
+rm -rf ${STAGE_DIR}
+EOF
+        run_remote_ctl plugins reload >/dev/null 2>&1 || true
+        echo "[+] Plugin '${PLUGIN_ID}' synced and reloaded."
+        ;;
+esac
 
-if [ -n "$SSH_TARGET" ]; then
-    SSH_OPTS=(-p "${SSH_PORT}" -o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new)
-    echo "[*] Deploying SideVeil via ADB-free SSH (${SSH_TARGET}:${SSH_PORT})..."
-
-    TMP_STAGE="$(mktemp -d)"
-    trap 'rm -rf "${TMP_STAGE}"' EXIT
-    cp "${SCRIPT_DIR}/module.prop" "${SCRIPT_DIR}/config.json" \
-       "${SCRIPT_DIR}/service.sh" "${SCRIPT_DIR}/post-fs-data.sh" \
-       "${SCRIPT_DIR}/customize.sh" "${SCRIPT_DIR}/uninstall.sh" "${TMP_STAGE}/"
-    cp "${SCRIPT_DIR}/bin/sideveild" "${SCRIPT_DIR}/bin/sideveil-ctl" \
-       "${SCRIPT_DIR}/bin/sideveil-example-perf-hud" "${SCRIPT_DIR}/bin/sideveil-sensor.dex" "${TMP_STAGE}/"
-    cp "${SCRIPT_DIR}/system/priv-app/SideVeilHost/SideVeilHost.apk" "${TMP_STAGE}/SideVeilHost.apk"
-    cp "${SCRIPT_DIR}/system/etc/permissions/privapp-permissions-pochita-sideveil.xml" "${TMP_STAGE}/privapp.xml"
-    cp "${SCRIPT_DIR}/system/etc/sysconfig/sideveil-allowlist.xml" "${TMP_STAGE}/sysconfig.xml"
-    cp -r "${SCRIPT_DIR}/webroot" "${TMP_STAGE}/webroot"
-    mkdir -p "${TMP_STAGE}/plugins/example.vello-scope" "${TMP_STAGE}/plugins/example.native-perf-hud"
-    cp "${SCRIPT_DIR}/examples/vello-vector-scope/manifest.json" "${TMP_STAGE}/plugins/example.vello-scope/"
-    cp -r "${SCRIPT_DIR}/examples/vello-vector-scope/web" "${TMP_STAGE}/plugins/example.vello-scope/web"
-    cp "${SCRIPT_DIR}/examples/native-perf-hud/manifest.json" "${TMP_STAGE}/plugins/example.native-perf-hud/"
-    cp -r "${SCRIPT_DIR}/examples/native-perf-hud/web" "${TMP_STAGE}/plugins/example.native-perf-hud/web"
-
-    stop_and_prepare_script | ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" "host-exec /system/bin/sh -s"
-    tar -C "${TMP_STAGE}" -cf - . \
-        | ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" \
-            "rm -rf ${STAGE_DIR} && mkdir -p ${STAGE_DIR} && tar -xf - -C ${STAGE_DIR}"
-    install_staged_script | ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" "host-exec /system/bin/sh -s"
-
-    echo "[*] Starting SideVeil supervisor detached in root cgroup..."
-    ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" "host-exec /system/bin/sh -c '
-        for cg in /sys/fs/cgroup/cgroup.procs /dev/cpuctl/cgroup.procs /dev/cpuset/cgroup.procs; do
-            [ -w \"\$cg\" ] && printf \"%s\\n\" \"\$\$\" > \"\$cg\" 2>/dev/null || true
-        done
-        nohup /system/bin/sh ${REMOTE_MOD_DIR}/service.sh >/dev/null 2>&1 </dev/null &
-    '"
-
-    sleep 5
-    echo "[*] Querying live daemon status..."
-    ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" "host-exec ${REMOTE_MOD_DIR}/bin/sideveil-ctl status"
-    echo ""
-    echo "[+] ADB-free SSH live reload completed on ${SSH_TARGET}."
-    exit 0
+if [ "$CDP_FORWARD" -eq 1 ]; then
+    setup_cdp_forward "${CDP_FORWARD_PORT}"
 fi
 
-if [ -z "$TARGET_SERIAL" ]; then
-    DETECTED_SERIALS=$(adb devices | awk 'NR>1 && $2=="device" {print $1}')
-    SERIAL_COUNT=$(printf '%s\n' "$DETECTED_SERIALS" | sed '/^$/d' | wc -l | tr -d ' ')
-    if [ "$SERIAL_COUNT" -eq 1 ]; then
-        TARGET_SERIAL="$DETECTED_SERIALS"
-    else
-        echo "[!] Error: Specify --ssh <user@host> or an ADB serial via TARGET_SERIAL / positional arg." >&2
-        exit 1
-    fi
-fi
-
-echo "[*] Target device (ADB): ${TARGET_SERIAL}"
-adb -s "${TARGET_SERIAL}" shell "rm -rf ${STAGE_DIR} && mkdir -p ${STAGE_DIR}"
-stop_and_prepare_script | adb -s "${TARGET_SERIAL}" shell "su"
-
-echo "[*] Pushing build outputs to staging directory..."
-adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/module.prop" "${STAGE_DIR}/module.prop" >/dev/null
-adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/config.json" "${STAGE_DIR}/config.json" >/dev/null
-adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/service.sh" "${STAGE_DIR}/service.sh" >/dev/null
-adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/post-fs-data.sh" "${STAGE_DIR}/post-fs-data.sh" >/dev/null
-adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/customize.sh" "${STAGE_DIR}/customize.sh" >/dev/null
-adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/uninstall.sh" "${STAGE_DIR}/uninstall.sh" >/dev/null
-adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/bin/sideveild" "${STAGE_DIR}/sideveild" >/dev/null
-adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/bin/sideveil-ctl" "${STAGE_DIR}/sideveil-ctl" >/dev/null
-adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/bin/sideveil-example-perf-hud" "${STAGE_DIR}/sideveil-example-perf-hud" >/dev/null
-adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/bin/sideveil-sensor.dex" "${STAGE_DIR}/sideveil-sensor.dex" >/dev/null
-adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/system/priv-app/SideVeilHost/SideVeilHost.apk" "${STAGE_DIR}/SideVeilHost.apk" >/dev/null
-adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/system/etc/permissions/privapp-permissions-pochita-sideveil.xml" "${STAGE_DIR}/privapp.xml" >/dev/null
-adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/system/etc/sysconfig/sideveil-allowlist.xml" "${STAGE_DIR}/sysconfig.xml" >/dev/null
-adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/webroot" "${STAGE_DIR}/webroot" >/dev/null
-
-adb -s "${TARGET_SERIAL}" shell "mkdir -p ${STAGE_DIR}/plugins/example.vello-scope ${STAGE_DIR}/plugins/example.native-perf-hud"
-adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/examples/vello-vector-scope/manifest.json" "${STAGE_DIR}/plugins/example.vello-scope/manifest.json" >/dev/null
-adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/examples/vello-vector-scope/web" "${STAGE_DIR}/plugins/example.vello-scope/web" >/dev/null
-adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/examples/native-perf-hud/manifest.json" "${STAGE_DIR}/plugins/example.native-perf-hud/manifest.json" >/dev/null
-adb -s "${TARGET_SERIAL}" push "${SCRIPT_DIR}/examples/native-perf-hud/web" "${STAGE_DIR}/plugins/example.native-perf-hud/web" >/dev/null
-
-echo "[*] Installing SideVeilHost APK and syncing module files..."
-install_staged_script | adb -s "${TARGET_SERIAL}" shell "su"
-
-echo "[*] Starting SideVeil supervisor detached..."
-adb -s "${TARGET_SERIAL}" shell "su -c 'nohup ${REMOTE_MOD_DIR}/service.sh >/dev/null 2>&1 &'"
-
-sleep 5
-
-echo "[*] Querying live daemon status..."
-adb -s "${TARGET_SERIAL}" shell "su -c '${REMOTE_MOD_DIR}/bin/sideveil-ctl status'"
-echo ""
-echo "[+] Live reload completed on ${TARGET_SERIAL}."
+echo "[+] Live reload (${DEPLOY_MODE}) completed on ${TRANSPORT_LABEL}."
