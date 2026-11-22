@@ -103,26 +103,58 @@ wait_for_ready() {
 
 setup_cdp_forward() {
     local port="$1"
+    local exec_mode="${2:-0}"
     echo "[*] Enabling WebView CDP debugging and resolving hostPid..."
     local cdp_json
     cdp_json="$(run_remote_ctl debug cdp on)"
     printf '%s\n' "$cdp_json"
 
-    local host_pid
-    host_pid="$(printf '%s' "$cdp_json" | python3 -c 'import json,sys; d=json.load(sys.stdin); r=d.get("result", d); print(r.get("hostPid") or "")' 2>/dev/null || true)"
+    local parsed host_pid socket_name
+    parsed="$(printf '%s' "$cdp_json" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+r = d.get("result", d) if isinstance(d, dict) else {}
+pid = r.get("hostPid") or ""
+sock = r.get("cdpSocket") or (f"webview_devtools_remote_{pid}" if pid else "")
+print(f"{pid}\t{sock}")
+' 2>/dev/null || true)"
+    IFS=$'\t' read -r host_pid socket_name <<< "$parsed"
     if [ -z "$host_pid" ]; then
         echo "[!] Error: Unable to determine SideVeilHost PID for CDP forwarding." >&2
         return 1
     fi
-
-    local socket_name="webview_devtools_remote_${host_pid}"
+    socket_name="${socket_name:-webview_devtools_remote_${host_pid}}"
     echo "[*] CDP abstract socket: @${socket_name}"
+
+    local attempt=0
+    local socket_ready=0
+    while [ "$attempt" -lt 6 ]; do
+        if printf 'grep -q "@%s" /proc/net/unix\n' "${socket_name}" | run_remote_sh >/dev/null 2>&1; then
+            socket_ready=1
+            break
+        fi
+        sleep 0.5
+        attempt=$((attempt + 1))
+    done
+    if [ "$socket_ready" -eq 1 ]; then
+        echo "[+] Verified @${socket_name} is listening in /proc/net/unix."
+    else
+        echo "[!] Warning: @${socket_name} not yet in /proc/net/unix (no WebView initialized yet)." >&2
+    fi
+
     if [ -n "$SSH_TARGET" ]; then
         echo "[*] Bridge CDP to http://127.0.0.1:${port}/json via Strata SSH:"
         echo "    ssh -p ${SSH_PORT} -L ${port}:127.0.0.1:${port} ${SSH_TARGET} \"strata-debug cdp serve --port ${port} --pid ${host_pid}\""
+        if [ "$exec_mode" -eq 1 ]; then
+            exec ssh -p "${SSH_PORT}" -L "${port}:127.0.0.1:${port}" "${SSH_TARGET}" \
+                "strata-debug cdp serve --port ${port} --pid ${host_pid}"
+        fi
     else
         echo "[*] Serve CDP locally on http://127.0.0.1:${port}/json:"
         echo "    strata-debug cdp serve --port ${port} --pid ${host_pid}"
+        if [ "$exec_mode" -eq 1 ]; then
+            exec strata-debug cdp serve --port "${port}" --pid "${host_pid}"
+        fi
     fi
 }
 

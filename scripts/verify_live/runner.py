@@ -30,6 +30,14 @@ def default_ssh_port(explicit: int | None = None) -> int:
     return 2222
 
 
+def _ssh_control_dir() -> str:
+    base = os.environ.get("XDG_RUNTIME_DIR") or "/tmp"
+    path = os.path.join(base, f"sideveil-ssh-{os.geteuid()}")
+    os.makedirs(path, mode=0o700, exist_ok=True)
+    os.chmod(path, 0o700)
+    return path
+
+
 class DeviceRunner:
     def __init__(
         self,
@@ -84,7 +92,7 @@ class DeviceRunner:
                 "-o",
                 "ControlPersist=120",
                 "-o",
-                "ControlPath=/tmp/sideveil-verify-%r@%h:%p",
+                f"ControlPath={_ssh_control_dir()}/verify-%r@%h:%p",
                 str(self.ssh_target),
                 "host-exec /system/bin/sh -s",
             ]

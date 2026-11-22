@@ -22,6 +22,7 @@ LOCAL_TRANSPORT=""
 DEPLOY_MODE="full"
 TARGET_PLUGIN=""
 CDP_FORWARD=0
+CDP_FORWARD_EXEC=0
 CDP_FORWARD_PORT="9222"
 SSH_TARGET="${SSH_TARGET:-${STRATA_SSH_HOST:-}}"
 SSH_PORT="${SSH_PORT:-${STRATA_SSH_PORT:-2222}}"
@@ -45,6 +46,7 @@ Options:
   --webui-only               Incremental: sync only KernelSU Control Plane webroot/
   --plugin <id>              Incremental: sync only one plugin directory and reload plugins
   --cdp-forward [port]       Enable WebView CDP and print strata-debug bridge command (default: 9222)
+  --cdp-forward-exec [port]  Enable WebView CDP and directly launch strata-debug bridge (default: 9222)
   -h, --help                 Show this help message
 EOF
 }
@@ -70,8 +72,9 @@ while [ "$#" -gt 0 ]; do
         --sensor-only) set_deploy_mode "sensor"; shift ;;
         --webui-only) set_deploy_mode "webui"; shift ;;
         --plugin) set_deploy_mode "plugin"; TARGET_PLUGIN="$2"; shift 2 ;;
-        --cdp-forward)
+        --cdp-forward|--cdp-forward-exec)
             CDP_FORWARD=1
+            [ "$1" = "--cdp-forward-exec" ] && CDP_FORWARD_EXEC=1
             if [ "$#" -ge 2 ] && [[ "$2" =~ ^[0-9]+$ ]]; then
                 CDP_FORWARD_PORT="$2"
                 shift 2
@@ -110,6 +113,10 @@ if [ -n "$SSH_TARGET" ] && [[ "$SSH_TARGET" != *@* ]]; then
     SSH_TARGET="root@${SSH_TARGET}"
 fi
 
+SSH_CONTROL_DIR="${XDG_RUNTIME_DIR:-/tmp}/sideveil-ssh-$(id -u)"
+mkdir -p "${SSH_CONTROL_DIR}"
+chmod 0700 "${SSH_CONTROL_DIR}"
+
 SSH_OPTS=(
     -p "${SSH_PORT}"
     -o BatchMode=yes
@@ -117,7 +124,7 @@ SSH_OPTS=(
     -o StrictHostKeyChecking=accept-new
     -o ControlMaster=auto
     -o ControlPersist=60
-    -o "ControlPath=/tmp/sideveil-reload-%r@%h:%p"
+    -o "ControlPath=${SSH_CONTROL_DIR}/reload-%r@%h:%p"
 )
 
 if [ "$SKIP_BUILD" -eq 0 ]; then
@@ -135,7 +142,13 @@ if [ "$SKIP_BUILD" -eq 0 ]; then
             chmod 0755 "${SCRIPT_DIR}/bin/sideveild" "${SCRIPT_DIR}/bin/sideveil-ctl" "${SCRIPT_DIR}/bin/sideveil-example-perf-hud"
             ;;
         host)
-            echo "[*] Incremental build: SideVeilHost release APK..."
+            echo "[*] Incremental build: panel WebUI + sideveil-hud-jni + SideVeilHost APK..."
+            (cd "${SCRIPT_DIR}/webui" && run_in_env pnpm build:panel)
+            (cd "${SCRIPT_DIR}/hub" && run_in_env cargo build --release --target aarch64-linux-android -p sideveil-hud-jni)
+            mkdir -p "${SCRIPT_DIR}/android/host-app/src/main/jniLibs/arm64-v8a"
+            cp "${SCRIPT_DIR}/hub/target/aarch64-linux-android/release/libsideveil_hud.so" \
+               "${SCRIPT_DIR}/android/host-app/src/main/jniLibs/arm64-v8a/libsideveil_hud.so"
+            chmod 0644 "${SCRIPT_DIR}/android/host-app/src/main/jniLibs/arm64-v8a/libsideveil_hud.so"
             (cd "${SCRIPT_DIR}/android" && run_in_env ./gradlew :host-app:assembleRelease)
             cp "${SCRIPT_DIR}/android/host-app/build/outputs/apk/release/host-app-release.apk" \
                "${SCRIPT_DIR}/system/priv-app/SideVeilHost/SideVeilHost.apk"
@@ -145,9 +158,24 @@ if [ "$SKIP_BUILD" -eq 0 ]; then
             echo "[*] Incremental build: sideveil-sensor.dex..."
             (cd "${SCRIPT_DIR}/android" && run_in_env ./gradlew :sensor:buildDex)
             ;;
-        webui|plugin)
-            echo "[*] Incremental build: WebUI bundles..."
-            (cd "${SCRIPT_DIR}/webui" && run_in_env pnpm build)
+        webui)
+            echo "[*] Incremental build: Control Plane WebUI..."
+            (cd "${SCRIPT_DIR}/webui" && run_in_env pnpm build:control)
+            ;;
+        plugin)
+            case "$TARGET_PLUGIN" in
+                example.vello-scope|vello-vector-scope)
+                    echo "[*] Incremental build: bundled plugin vello-scope..."
+                    (cd "${SCRIPT_DIR}/webui" && run_in_env pnpm build:vello-scope)
+                    ;;
+                example.native-perf-hud|native-perf-hud)
+                    echo "[*] Incremental build: bundled plugin native-perf-hud..."
+                    (cd "${SCRIPT_DIR}/webui" && run_in_env pnpm build:native-perf-hud)
+                    ;;
+                *)
+                    echo "[*] Skipping bundled WebUI rebuild for external plugin '${TARGET_PLUGIN}'."
+                    ;;
+            esac
             ;;
     esac
 fi
@@ -266,7 +294,7 @@ EOF
 esac
 
 if [ "$CDP_FORWARD" -eq 1 ]; then
-    setup_cdp_forward "${CDP_FORWARD_PORT}"
+    setup_cdp_forward "${CDP_FORWARD_PORT}" "${CDP_FORWARD_EXEC}"
 fi
 
 echo "[+] Live reload (${DEPLOY_MODE}) completed on ${TRANSPORT_LABEL}."
