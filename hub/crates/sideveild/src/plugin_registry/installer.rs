@@ -61,18 +61,20 @@ pub(super) fn install_plugin_dir(
         ));
     }
 
-    let entry_path = src_canon.join(&manifest.entry);
-    let entry_meta = fs::symlink_metadata(&entry_path).map_err(|e| {
-        format!(
-            "manifest entry '{}' missing in source directory: {e}",
-            manifest.entry
-        )
-    })?;
-    if !entry_meta.file_type().is_file() {
-        return Err(format!(
-            "manifest entry '{}' must be a regular file",
-            manifest.entry
-        ));
+    if manifest.embed.is_none() {
+        let entry_path = src_canon.join(&manifest.entry);
+        let entry_meta = fs::symlink_metadata(&entry_path).map_err(|e| {
+            format!(
+                "manifest entry '{}' missing in source directory: {e}",
+                manifest.entry
+            )
+        })?;
+        if !entry_meta.file_type().is_file() {
+            return Err(format!(
+                "manifest entry '{}' must be a regular file",
+                manifest.entry
+            ));
+        }
     }
 
     let seq = INSTALL_SEQ.fetch_add(1, Ordering::Relaxed);
@@ -142,7 +144,7 @@ fn copy_dir_no_symlinks(src: &Path, dst: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn try_chown_root_system(path: &Path) {
+pub(super) fn try_chown_root_system(path: &Path) {
     let Ok(c_path) = CString::new(path.as_os_str().as_bytes()) else {
         return;
     };

@@ -106,6 +106,23 @@ impl ConfigStore {
         Ok(next)
     }
 
+    /// Updates `debug.webview_debugging_enabled`, atomically persists it, and notifies subscribers.
+    /// Returns `(previous_enabled, updated_config)`.
+    pub fn set_webview_debugging(&self, enabled: bool) -> io::Result<(bool, SideVeilConfig)> {
+        let (prev, next) = {
+            let mut guard = self.current.write().unwrap_or_else(PoisonError::into_inner);
+            let prev = guard.debug.webview_debugging_enabled;
+            let mut updated = guard.clone();
+            updated.debug.webview_debugging_enabled = enabled;
+            let updated = updated.sanitized();
+            *guard = updated.clone();
+            (prev, updated)
+        };
+        self.persist_config(&next)?;
+        let _ = self.updates_tx.send(next.clone());
+        Ok((prev, next))
+    }
+
     /// Spawns a Linux `inotify` async watcher on the config parent directory for zero-poll reload.
     pub fn spawn_watcher(self: &Arc<Self>) -> io::Result<tokio::task::JoinHandle<()>> {
         let parent = self

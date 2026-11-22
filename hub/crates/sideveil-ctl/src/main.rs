@@ -9,10 +9,10 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use sideveil_protocol::rpc::{RpcRequest, RpcResponse};
+use sideveil_protocol::rpc::{RpcRequest, RpcResponse, methods};
 use sideveil_protocol::uds::{UdsClientHello, UdsHandshakeAck};
 
-use crate::cli::{CliInvocation, OutputMode, parse_args};
+use crate::cli::{CliAction, CliInvocation, OutputMode, parse_args};
 
 fn main() -> ExitCode {
     let invocation = match parse_args(std::env::args().skip(1)) {
@@ -36,7 +36,65 @@ fn main() -> ExitCode {
 }
 
 fn execute(inv: &CliInvocation) -> Result<String, String> {
-    let mut stream = connect_socket(&inv.socket_path, inv.io_timeout)?;
+    match &inv.action {
+        CliAction::Rpc {
+            method,
+            params,
+            output_mode,
+        } => {
+            let resp = execute_rpc(&inv.socket_path, inv.io_timeout, method, params.clone())?;
+            match output_mode {
+                OutputMode::UnwrapResult => {
+                    let result = resp.result.unwrap_or(Value::Null);
+                    serde_json::to_string(&result)
+                        .map_err(|e| format!("Failed encoding output: {e}"))
+                }
+                OutputMode::FullEnvelope => {
+                    serde_json::to_string(&resp).map_err(|e| format!("Failed encoding output: {e}"))
+                }
+            }
+        }
+        CliAction::DebugCdpStatus => execute_debug_cdp_status(&inv.socket_path, inv.io_timeout),
+    }
+}
+
+fn execute_debug_cdp_status(socket_path: &Path, timeout: Duration) -> Result<String, String> {
+    let cfg_resp = execute_rpc(socket_path, timeout, methods::CONFIG_GET, None)?;
+    let status_resp = execute_rpc(socket_path, timeout, methods::DAEMON_STATUS, None)?;
+
+    let enabled = cfg_resp
+        .result
+        .as_ref()
+        .and_then(|v| v.pointer("/debug/webviewDebuggingEnabled"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let host_pid = status_resp
+        .result
+        .as_ref()
+        .and_then(|v| v.get("hostPid"))
+        .and_then(Value::as_u64)
+        .and_then(|v| u32::try_from(v).ok());
+    let cdp_socket = if enabled {
+        host_pid.map(|pid| format!("webview_devtools_remote_{pid}"))
+    } else {
+        None
+    };
+
+    let out = json!({
+        "webviewDebuggingEnabled": enabled,
+        "hostPid": host_pid,
+        "cdpSocket": cdp_socket,
+    });
+    serde_json::to_string(&out).map_err(|e| format!("Failed encoding output: {e}"))
+}
+
+fn execute_rpc(
+    socket_path: &Path,
+    timeout: Duration,
+    method: &str,
+    params: Option<Value>,
+) -> Result<RpcResponse, String> {
+    let mut stream = connect_socket(socket_path, timeout)?;
     let hello = serde_json::to_string(&UdsClientHello::Ctl)
         .map_err(|e| format!("Failed encoding handshake: {e}"))?;
     writeln!(stream, "{hello}").map_err(|e| format!("Failed writing handshake: {e}"))?;
@@ -61,7 +119,7 @@ fn execute(inv: &CliInvocation) -> Result<String, String> {
             .unwrap_or_else(|| "Handshake rejected by sideveild".to_owned()));
     }
 
-    let req = RpcRequest::new("ctl", &inv.method, inv.params.clone());
+    let req = RpcRequest::new("ctl", method, params);
     let req_line =
         serde_json::to_string(&req).map_err(|e| format!("Failed encoding RPC request: {e}"))?;
     writeln!(stream, "{req_line}").map_err(|e| format!("Failed sending RPC request: {e}"))?;
@@ -83,15 +141,7 @@ fn execute(inv: &CliInvocation) -> Result<String, String> {
         return Err(format!("RPC error {}: {}", err.code, err.message));
     }
 
-    match inv.output_mode {
-        OutputMode::UnwrapResult => {
-            let result = resp.result.unwrap_or(Value::Null);
-            serde_json::to_string(&result).map_err(|e| format!("Failed encoding output: {e}"))
-        }
-        OutputMode::FullEnvelope => {
-            serde_json::to_string(&resp).map_err(|e| format!("Failed encoding output: {e}"))
-        }
-    }
+    Ok(resp)
 }
 
 fn connect_socket(path: &Path, timeout: Duration) -> Result<UnixStream, String> {

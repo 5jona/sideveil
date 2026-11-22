@@ -1,5 +1,6 @@
 //! CLI argument parser for `sideveil-ctl`.
 
+mod debug_cmd;
 mod hud_cmd;
 mod plugins_cmd;
 
@@ -11,6 +12,13 @@ use sideveil_protocol::paths;
 use sideveil_protocol::rpc::methods;
 
 const DEFAULT_IO_TIMEOUT: Duration = Duration::from_secs(4);
+const DEFAULT_RAW_RPC_TIMEOUT_MS: u64 = 8_000;
+const MIN_RPC_TIMEOUT_MS: u64 = 1_000;
+const MAX_RPC_TIMEOUT_MS: u64 = 60_000;
+
+pub(crate) fn clamp_rpc_timeout_ms(ms: u64) -> u64 {
+    ms.clamp(MIN_RPC_TIMEOUT_MS, MAX_RPC_TIMEOUT_MS)
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum OutputMode {
@@ -18,12 +26,20 @@ pub(crate) enum OutputMode {
     FullEnvelope,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum CliAction {
+    Rpc {
+        method: String,
+        params: Option<Value>,
+        output_mode: OutputMode,
+    },
+    DebugCdpStatus,
+}
+
 #[derive(Debug)]
 pub(crate) struct CliInvocation {
     pub(crate) socket_path: PathBuf,
-    pub(crate) method: String,
-    pub(crate) params: Option<Value>,
-    pub(crate) output_mode: OutputMode,
+    pub(crate) action: CliAction,
     pub(crate) io_timeout: Duration,
 }
 
@@ -46,197 +62,106 @@ pub(crate) fn parse_args(
 
     let cmd = positional.first().map_or("status", String::as_str);
     let mut io_timeout = DEFAULT_IO_TIMEOUT;
-    let (method, params, output_mode) = match cmd {
-        "status" => (
-            methods::DAEMON_STATUS.to_owned(),
-            None,
-            OutputMode::UnwrapResult,
-        ),
-        "health" => (
-            methods::DAEMON_HEALTH.to_owned(),
-            None,
-            OutputMode::UnwrapResult,
-        ),
-        "open" => (
-            methods::PANEL_OPEN.to_owned(),
-            None,
-            OutputMode::FullEnvelope,
-        ),
-        "close" => (
-            methods::PANEL_CLOSE.to_owned(),
-            None,
-            OutputMode::FullEnvelope,
-        ),
-        "toggle" => (
-            methods::PANEL_TOGGLE.to_owned(),
-            None,
-            OutputMode::FullEnvelope,
-        ),
-        "reload" => (
-            methods::CONFIG_RELOAD.to_owned(),
-            None,
-            OutputMode::FullEnvelope,
-        ),
-        "restart-host" => (
-            methods::HOST_RESTART.to_owned(),
-            None,
-            OutputMode::FullEnvelope,
-        ),
-        "ping" => (
-            methods::DAEMON_PING.to_owned(),
-            None,
-            OutputMode::FullEnvelope,
-        ),
-        "logs" => (
-            methods::DAEMON_LOGS.to_owned(),
-            None,
-            OutputMode::FullEnvelope,
-        ),
+    let action = match cmd {
+        "status" => rpc_action(methods::DAEMON_STATUS, None, OutputMode::UnwrapResult),
+        "health" => rpc_action(methods::DAEMON_HEALTH, None, OutputMode::UnwrapResult),
+        "open" => rpc_action(methods::PANEL_OPEN, None, OutputMode::FullEnvelope),
+        "close" => rpc_action(methods::PANEL_CLOSE, None, OutputMode::FullEnvelope),
+        "toggle" => rpc_action(methods::PANEL_TOGGLE, None, OutputMode::FullEnvelope),
+        "reload" => rpc_action(methods::CONFIG_RELOAD, None, OutputMode::FullEnvelope),
+        "restart-host" => rpc_action(methods::HOST_RESTART, None, OutputMode::FullEnvelope),
+        "ping" => rpc_action(methods::DAEMON_PING, None, OutputMode::FullEnvelope),
+        "logs" => rpc_action(methods::DAEMON_LOGS, None, OutputMode::FullEnvelope),
+        "network" => rpc_action(methods::NETWORK_CONTEXT, None, OutputMode::UnwrapResult),
         "plugins" => {
             let parsed = plugins_cmd::parse_plugins_subcommand(&positional[1..])?;
             if let Some(custom_timeout) = parsed.io_timeout {
                 io_timeout = custom_timeout;
             }
-            (parsed.method, parsed.params, parsed.output_mode)
+            CliAction::Rpc {
+                method: parsed.method,
+                params: parsed.params,
+                output_mode: parsed.output_mode,
+            }
         }
-        "hud" => hud_cmd::parse_hud_subcommand(&positional[1..])?,
-        "rpc" => parse_raw_rpc(&positional[1..])?,
+        "hud" => {
+            let (method, params, output_mode) = hud_cmd::parse_hud_subcommand(&positional[1..])?;
+            CliAction::Rpc {
+                method,
+                params,
+                output_mode,
+            }
+        }
+        "debug" => {
+            let parsed = debug_cmd::parse_debug_subcommand(&positional[1..])?;
+            if let Some(custom_timeout) = parsed.io_timeout {
+                io_timeout = custom_timeout;
+            }
+            parsed.action
+        }
+        "rpc" => {
+            let (method, params, custom_timeout) = parse_raw_rpc(&positional[1..])?;
+            io_timeout = custom_timeout;
+            CliAction::Rpc {
+                method,
+                params,
+                output_mode: OutputMode::FullEnvelope,
+            }
+        }
         other => return Err((2, format!("Unknown command: {other}"))),
     };
 
     Ok(CliInvocation {
         socket_path,
-        method,
-        params,
-        output_mode,
+        action,
         io_timeout,
     })
 }
 
-fn parse_raw_rpc(args: &[String]) -> Result<(String, Option<Value>, OutputMode), (u8, String)> {
+fn rpc_action(method: &str, params: Option<Value>, output_mode: OutputMode) -> CliAction {
+    CliAction::Rpc {
+        method: method.to_owned(),
+        params,
+        output_mode,
+    }
+}
+
+fn parse_raw_rpc(args: &[String]) -> Result<(String, Option<Value>, Duration), (u8, String)> {
     let Some(method_name) = args.first() else {
         return Err((
             2,
-            "Usage: sideveil-ctl rpc <method> [json-params]".to_owned(),
+            "Usage: sideveil-ctl rpc <method> [json-params] [--timeout-ms <ms>]".to_owned(),
         ));
     };
-    let parsed_params = match args.get(1) {
-        Some(raw) => Some(
-            serde_json::from_str::<Value>(raw)
-                .map_err(|e| (2, format!("Invalid JSON params: {e}")))?,
-        ),
-        None => None,
-    };
-    Ok((method_name.clone(), parsed_params, OutputMode::FullEnvelope))
+    let mut parsed_params: Option<Value> = None;
+    let mut timeout_ms = DEFAULT_RAW_RPC_TIMEOUT_MS;
+    let mut idx = 1;
+    while idx < args.len() {
+        if args[idx] == "--timeout-ms" {
+            let Some(raw_ms) = args.get(idx + 1) else {
+                return Err((2, "Missing value for --timeout-ms".to_owned()));
+            };
+            let parsed = raw_ms
+                .parse::<u64>()
+                .map_err(|_| (2, format!("Invalid integer for --timeout-ms: {raw_ms}")))?;
+            timeout_ms = clamp_rpc_timeout_ms(parsed);
+            idx += 2;
+        } else if parsed_params.is_none() {
+            parsed_params = Some(
+                serde_json::from_str::<Value>(&args[idx])
+                    .map_err(|e| (2, format!("Invalid JSON params: {e}")))?,
+            );
+            idx += 1;
+        } else {
+            return Err((2, format!("Unexpected extra argument: {}", args[idx])));
+        }
+    }
+    Ok((
+        method_name.clone(),
+        parsed_params,
+        Duration::from_millis(timeout_ms),
+    ))
 }
 
 #[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use super::*;
-
-    #[test]
-    fn parses_default_and_explicit_cli_commands() {
-        let default = parse_args(Vec::<String>::new()).expect("default args");
-        assert_eq!(default.method, methods::DAEMON_STATUS);
-        assert_eq!(default.output_mode, OutputMode::UnwrapResult);
-
-        let rpc = parse_args([
-            "--socket".to_owned(),
-            "/tmp/test.sock".to_owned(),
-            "rpc".to_owned(),
-            "config.patchAppearance".to_owned(),
-            r#"{"colorMode":"dark"}"#.to_owned(),
-        ])
-        .expect("rpc args");
-        assert_eq!(rpc.socket_path, PathBuf::from("/tmp/test.sock"));
-        assert_eq!(rpc.method, "config.patchAppearance");
-        assert_eq!(rpc.params, Some(json!({ "colorMode": "dark" })));
-        assert_eq!(rpc.output_mode, OutputMode::FullEnvelope);
-
-        assert!(parse_args(["nonexistent".to_owned()]).is_err());
-
-        let prio = parse_args([
-            "plugins".to_owned(),
-            "priority".to_owned(),
-            "com.example.alpha".to_owned(),
-            "25".to_owned(),
-        ])
-        .expect("plugins priority");
-        assert_eq!(prio.method, methods::PLUGINS_SET_PRIORITY);
-        assert_eq!(
-            prio.params,
-            Some(json!({ "pluginId": "com.example.alpha", "priority": 25 }))
-        );
-
-        let scope = parse_args([
-            "plugins".to_owned(),
-            "scope".to_owned(),
-            "com.example.alpha".to_owned(),
-            "--global".to_owned(),
-            "false".to_owned(),
-            "--packages".to_owned(),
-            "com.a, com.b".to_owned(),
-        ])
-        .expect("plugins scope");
-        assert_eq!(scope.method, methods::PLUGINS_SET_SCOPE_OVERRIDE);
-        assert_eq!(
-            scope.params,
-            Some(json!({
-                "pluginId": "com.example.alpha",
-                "packages": ["com.a", "com.b"],
-                "global": false,
-                "clear": false,
-            }))
-        );
-
-        let clear = parse_args([
-            "plugins".to_owned(),
-            "scope".to_owned(),
-            "com.example.alpha".to_owned(),
-            "--clear".to_owned(),
-        ])
-        .expect("plugins scope clear");
-        assert_eq!(
-            clear.params,
-            Some(json!({
-                "pluginId": "com.example.alpha",
-                "packages": Value::Null,
-                "global": Value::Null,
-                "clear": true,
-            }))
-        );
-
-        let inv = parse_args([
-            "plugins".to_owned(),
-            "invoke".to_owned(),
-            "com.example.alpha".to_owned(),
-            "daemon.ping".to_owned(),
-            r#"{"verbose":true}"#.to_owned(),
-            "--timeout-ms".to_owned(),
-            "25000".to_owned(),
-        ])
-        .expect("plugins invoke");
-        assert_eq!(inv.method, methods::PLUGIN_INVOKE);
-        assert_eq!(
-            inv.params,
-            Some(json!({
-                "pluginId": "com.example.alpha",
-                "method": "daemon.ping",
-                "params": { "verbose": true },
-                "timeoutMs": 25_000,
-            }))
-        );
-        assert_eq!(inv.io_timeout, Duration::from_millis(27_000));
-
-        let inst = parse_args([
-            "plugins".to_owned(),
-            "install".to_owned(),
-            "/tmp/my-plugin".to_owned(),
-        ])
-        .expect("plugins install");
-        assert_eq!(inst.method, methods::PLUGINS_INSTALL);
-        assert_eq!(inst.params, Some(json!({ "sourceDir": "/tmp/my-plugin" })));
-    }
-}
+mod tests;

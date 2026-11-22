@@ -5,14 +5,26 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use std::time::Duration;
 
+use serde::Serialize;
 use serde_json::Value;
 use sideveil_protocol::rpc::{RpcRequest, RpcResponse, error_codes};
 use tokio::sync::{mpsc, oneshot};
 
+const BACKEND_OUTBOUND_CAPACITY: usize = 128;
+
+/// Outbound NDJSON frame pushed from `sideveild` to a connected plugin backend.
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+pub enum BackendOutboundFrame {
+    Rpc(RpcRequest),
+    SystemEvent { event: String, payload: Value },
+}
+
 #[derive(Debug)]
 struct BackendSession {
     session_id: u64,
-    tx: mpsc::UnboundedSender<RpcRequest>,
+    is_native: bool,
+    tx: mpsc::Sender<BackendOutboundFrame>,
     pending: Mutex<HashMap<String, oneshot::Sender<RpcResponse>>>,
 }
 
@@ -38,11 +50,16 @@ impl PluginBackends {
     }
 
     /// Registers a connected plugin backend stream and returns `(session_id, outbound_rx)`.
-    pub fn register(&self, plugin_id: &str) -> (u64, mpsc::UnboundedReceiver<RpcRequest>) {
+    pub fn register(
+        &self,
+        plugin_id: &str,
+        is_native: bool,
+    ) -> (u64, mpsc::Receiver<BackendOutboundFrame>) {
         let session_id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let (tx, rx) = mpsc::unbounded_channel();
+        let (tx, rx) = mpsc::channel(BACKEND_OUTBOUND_CAPACITY);
         let session = Arc::new(BackendSession {
             session_id,
+            is_native,
             tx,
             pending: Mutex::new(HashMap::new()),
         });
@@ -57,6 +74,21 @@ impl PluginBackends {
             fail_pending(&old, "Superseded by new backend connection");
         }
         (session_id, rx)
+    }
+
+    /// Pushes a Hub system notification to all connected `uds-native` plugin backends using
+    /// non-blocking `try_send` so a stalled backend never blocks the hub.
+    pub fn broadcast_system_event(&self, event: &str, payload: Value) {
+        let targets: Vec<Arc<BackendSession>> = {
+            let guard = self.sessions.read().unwrap_or_else(PoisonError::into_inner);
+            guard.values().filter(|s| s.is_native).cloned().collect()
+        };
+        for session in targets {
+            let _ = session.tx.try_send(BackendOutboundFrame::SystemEvent {
+                event: event.to_owned(),
+                payload: payload.clone(),
+            });
+        }
     }
 
     /// Unregisters a backend session only if `session_id` matches the active connection.
@@ -144,7 +176,7 @@ impl PluginBackends {
         }
 
         let req = RpcRequest::new(req_id.clone(), method, params);
-        if session.tx.send(req).is_err() {
+        if session.tx.try_send(BackendOutboundFrame::Rpc(req)).is_err() {
             let mut pending = session
                 .pending
                 .lock()
@@ -152,7 +184,7 @@ impl PluginBackends {
             pending.remove(&req_id);
             return Err((
                 error_codes::BACKEND_OFFLINE,
-                format!("Plugin backend '{plugin_id}' closed channel"),
+                format!("Plugin backend '{plugin_id}' closed or saturated channel"),
             ));
         }
 
@@ -197,54 +229,4 @@ fn fail_pending(session: &BackendSession, reason: &str) {
 }
 
 #[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use super::*;
-
-    #[tokio::test]
-    async fn invoke_honors_custom_timeout_and_resolves_responses() {
-        let backends = Arc::new(PluginBackends::new());
-        let (session_id, mut rx) = backends.register("demo.backend");
-
-        let b_clone = Arc::clone(&backends);
-        let responder = tokio::spawn(async move {
-            if let Some(req) = rx.recv().await {
-                assert_eq!(req.method, "fast.ping");
-                b_clone.complete_response(
-                    "demo.backend",
-                    session_id,
-                    RpcResponse::ok(req.id, json!({ "pong": true })),
-                );
-            }
-            // Second request intentionally left unanswered to verify custom timeout.
-            let _slow = rx.recv().await;
-            tokio::time::sleep(Duration::from_millis(200)).await;
-        });
-
-        let ok = backends
-            .invoke(
-                "demo.backend",
-                "fast.ping".to_owned(),
-                None,
-                Duration::from_secs(2),
-            )
-            .await
-            .expect("fast rpc succeeds");
-        assert_eq!(ok["pong"], true);
-
-        let timed_out = backends
-            .invoke(
-                "demo.backend",
-                "slow.op".to_owned(),
-                None,
-                Duration::from_millis(40),
-            )
-            .await
-            .expect_err("slow rpc should time out");
-        assert_eq!(timed_out.0, error_codes::BACKEND_TIMEOUT);
-        assert!(timed_out.1.contains("40ms"));
-
-        responder.abort();
-    }
-}
+mod tests;

@@ -1,6 +1,7 @@
 //! Async JSON-RPC 2.0 request dispatcher shared by `hub.sock` CLI and `SideVeilHost` WS.
 
 mod control;
+mod debug;
 mod plugins;
 mod sandbox;
 
@@ -127,6 +128,18 @@ async fn dispatch_inner(
             require_privileged(is_privileged, &req.method)?;
             plugins::handle_set_dev_url(state, req.params)
         }
+        methods::PLUGINS_SET_EMBED_CONFIG => {
+            require_privileged(is_privileged, &req.method)?;
+            plugins::handle_set_embed_config(state, req.params)
+        }
+        methods::PLUGINS_CREATE_WEB_EMBED => {
+            require_privileged(is_privileged, &req.method)?;
+            plugins::handle_create_web_embed(state, req.params)
+        }
+        methods::PLUGINS_UNINSTALL => {
+            require_privileged(is_privileged, &req.method)?;
+            plugins::handle_uninstall_plugin(state, req.params)
+        }
         methods::PLUGINS_AUDIT => {
             require_privileged(is_privileged, &req.method)?;
             plugins::handle_plugins_audit(state)
@@ -134,6 +147,9 @@ async fn dispatch_inner(
         methods::PLUGINS_SELECT => {
             require_privileged(is_privileged, &req.method)?;
             plugins::handle_select_plugin(state, req.params)
+        }
+        methods::NETWORK_CONTEXT => {
+            sandbox::handle_network_context(state, is_privileged, req.plugin_id.as_deref())
         }
         methods::PLUGIN_INVOKE => {
             sandbox::handle_plugin_invoke(
@@ -162,6 +178,14 @@ async fn dispatch_inner(
         }
         methods::HUD_DISMISS => {
             sandbox::handle_hud_dismiss(state, is_privileged, req.plugin_id.as_deref(), req.params)
+        }
+        methods::DEBUG_INSPECT_UI => {
+            require_privileged(is_privileged, &req.method)?;
+            debug::handle_inspect_ui(state, req.params).await
+        }
+        methods::DEBUG_SET_WEBVIEW_DEBUGGING => {
+            require_privileged(is_privileged, &req.method)?;
+            debug::handle_set_webview_debugging(state, req.params)
         }
         other => Err((
             error_codes::METHOD_NOT_FOUND,
@@ -220,93 +244,6 @@ pub(crate) fn serialize_result<T: serde::Serialize>(value: &T) -> Result<Value, 
 }
 
 #[cfg(test)]
-mod tests {
-    use std::fs;
-
-    use sideveil_protocol::DEFAULT_HOST_PACKAGE;
-    use tokio::sync::mpsc;
-
-    use super::*;
-    use crate::config_store::ConfigStore;
-    use crate::log_ring::LogRing;
-    use crate::plugin_registry::PluginRegistry;
-
-    #[tokio::test]
-    async fn dispatches_core_rpc_methods_and_enforces_external_plugin_acl() {
-        let dir = std::env::temp_dir().join(format!("sideveil-rpc-test-{}", std::process::id()));
-        let _ = fs::create_dir_all(&dir);
-        let logs = Arc::new(LogRing::new());
-        let store = ConfigStore::open(dir.join("config.json"), Arc::clone(&logs));
-        let registry = PluginRegistry::open(
-            dir.join("plugins"),
-            dir.join("plugins.json"),
-            Arc::clone(&logs),
-        );
-        let (wake_tx, _wake_rx) = mpsc::unbounded_channel();
-        let state = HubState::new(
-            DEFAULT_HOST_PACKAGE.to_owned(),
-            store,
-            registry,
-            dir.join("data"),
-            logs,
-            wake_tx,
-        );
-
-        let ping = dispatch_rpc_request(
-            &state,
-            RpcRequest::new("1", methods::DAEMON_PING, None),
-            RpcCaller::Ctl,
-        )
-        .await;
-        assert!(ping.error.is_none());
-        assert_eq!(
-            ping.result.as_ref().and_then(|v| v.get("pong")),
-            Some(&json!(true))
-        );
-
-        let patched = dispatch_rpc_request(
-            &state,
-            RpcRequest::new(
-                "2",
-                methods::CONFIG_PATCH_APPEARANCE,
-                Some(json!({ "colorMode": "light", "cornerRadiusDp": 30 })),
-            ),
-            RpcCaller::Ctl,
-        )
-        .await;
-        assert!(patched.error.is_none());
-        assert_eq!(state.config_store().current().panel.color_mode, "light");
-        assert_eq!(state.config_store().current().panel.corner_radius_dp, 30);
-
-        // External plugin cannot call host.restart.
-        let mut ext_req = RpcRequest::new("3", methods::HOST_RESTART, None);
-        ext_req.plugin_id = Some("com.example.external".to_owned());
-        let denied = dispatch_rpc_request(&state, ext_req, RpcCaller::HostWebView).await;
-        assert_eq!(
-            denied.error.as_ref().map(|e| e.code),
-            Some(error_codes::PERMISSION_DENIED)
-        );
-
-        // Unstamped HostWebView request must also be denied privileged methods.
-        let unstamped_req = RpcRequest::new("3b", methods::HOST_RESTART, None);
-        let unstamped_denied =
-            dispatch_rpc_request(&state, unstamped_req, RpcCaller::HostWebView).await;
-        assert_eq!(
-            unstamped_denied.error.as_ref().map(|e| e.code),
-            Some(error_codes::PERMISSION_DENIED)
-        );
-
-        let missing = dispatch_rpc_request(
-            &state,
-            RpcRequest::new("4", "unknown.method", None),
-            RpcCaller::Ctl,
-        )
-        .await;
-        assert_eq!(
-            missing.error.as_ref().map(|e| e.code),
-            Some(error_codes::METHOD_NOT_FOUND)
-        );
-
-        let _ = fs::remove_dir_all(&dir);
-    }
-}
+mod tests;
+#[cfg(test)]
+mod tests_embed;

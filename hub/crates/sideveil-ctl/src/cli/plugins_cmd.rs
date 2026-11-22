@@ -23,6 +23,19 @@ pub(super) fn parse_plugins_subcommand(args: &[String]) -> Result<ParsedPluginCm
         "list" => Ok(cmd(methods::PLUGINS_LIST, None)),
         "reload" => Ok(cmd(methods::PLUGINS_RELOAD, None)),
         "install" => parse_plugins_install(&args[1..]),
+        "uninstall" => {
+            let Some(plugin_id) = args.get(1) else {
+                return Err((
+                    2,
+                    "Usage: sideveil-ctl plugins uninstall <plugin-id>".to_owned(),
+                ));
+            };
+            Ok(cmd(
+                methods::PLUGINS_UNINSTALL,
+                Some(json!({ "pluginId": plugin_id })),
+            ))
+        }
+        "create-embed" => parse_plugins_create_embed(&args[1..]),
         "invoke" => parse_plugins_invoke(&args[1..]),
         "enable" | "disable" => {
             let Some(plugin_id) = args.get(1) else {
@@ -111,6 +124,37 @@ fn parse_plugins_install(args: &[String]) -> Result<ParsedPluginCmd, (u8, String
         output_mode: OutputMode::FullEnvelope,
         io_timeout: Some(Duration::from_secs(15)),
     })
+}
+
+fn parse_plugins_create_embed(args: &[String]) -> Result<ParsedPluginCmd, (u8, String)> {
+    let (Some(id), Some(name), Some(url)) = (args.first(), args.get(1), args.get(2)) else {
+        return Err((
+            2,
+            "Usage: sideveil-ctl plugins create-embed <id> <name> <url> [--allow-cleartext] [--keep-alive]"
+                .to_owned(),
+        ));
+    };
+    let mut allow_cleartext = false;
+    let mut keep_alive = false;
+    for flag in &args[3..] {
+        match flag.as_str() {
+            "--allow-cleartext" => allow_cleartext = true,
+            "--keep-alive" => keep_alive = true,
+            other => {
+                return Err((2, format!("Unknown flag for plugins create-embed: {other}")));
+            }
+        }
+    }
+    Ok(cmd(
+        methods::PLUGINS_CREATE_WEB_EMBED,
+        Some(json!({
+            "id": id,
+            "name": name,
+            "url": url,
+            "allowCleartext": allow_cleartext,
+            "keepAlive": keep_alive,
+        })),
+    ))
 }
 
 fn parse_plugins_invoke(args: &[String]) -> Result<ParsedPluginCmd, (u8, String)> {

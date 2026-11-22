@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
-use sideveil_protocol::rpc::HostEventEnvelope;
+use sideveil_protocol::rpc::{HostEventEnvelope, RpcResponse};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::MissedTickBehavior;
 use tokio_tungstenite::accept_hdr_async;
@@ -166,6 +166,13 @@ fn handle_incoming_text(state: &Arc<HubState>, out_tx: &outbound_queue::Outbound
                 let _ = tx.send_critical(encoded);
             }
         });
+        return;
+    }
+
+    if obj.contains_key("jsonrpc") && obj.contains_key("id") && !obj.contains_key("method") {
+        if let Ok(resp) = serde_json::from_value::<RpcResponse>(val) {
+            let _ = state.resolve_host_rpc_response(resp);
+        }
         return;
     }
 

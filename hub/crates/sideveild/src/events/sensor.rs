@@ -192,6 +192,17 @@ impl HubState {
                     }
                 }
             }
+            SensorToHub::NetworkContextChanged { context } => {
+                {
+                    let mut rt = self.runtime.write().unwrap_or_else(PoisonError::into_inner);
+                    rt.network_context = context.clone();
+                }
+                self.emit_host_event_critical(events::NETWORK_CONTEXT_CHANGED, &context);
+                if let Ok(val) = serde_json::to_value(&context) {
+                    self.plugin_backends()
+                        .broadcast_system_event(events::NETWORK_CONTEXT_CHANGED, val);
+                }
+            }
             SensorToHub::Pong { .. } => {}
         }
     }

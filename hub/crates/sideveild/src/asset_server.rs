@@ -1,22 +1,26 @@
 //! Authenticated loopback HTTP static asset server for isolated plugin bundles (`GET /plugins/<id>/<path>`).
 
+mod http;
 mod icon_cache;
+mod path;
 
-use std::io;
-use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use sideveil_protocol::plugin::validate_plugin_id;
 use tokio::fs;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 
+pub(crate) use self::http::{cache_headers_for, mime_type_for};
+use self::http::{parse_http_headers, write_error};
+pub use self::path::{
+    ResolveAssetError, is_spa_route_path, resolve_asset_file, resolve_asset_file_checked,
+};
 use crate::host_ws::constant_time_eq;
 use crate::state::HubState;
 
 const HEADER_TIMEOUT: Duration = Duration::from_secs(4);
-const MAX_HEADER_LINES: usize = 64;
 const MAX_ASSET_BYTES: u64 = 16 * 1024 * 1024;
 
 /// Serves a single authenticated HTTP/1.1 GET request for `/plugins/<plugin_id>/<relative_path>`.
@@ -94,9 +98,23 @@ pub async fn handle_http_asset(stream: TcpStream, state: Arc<HubState>) {
         return;
     }
 
-    let Ok(file_path) = resolve_asset_file(&plugin_root, raw_rel).await else {
-        let _ = write_error(&mut write_half, 403, "Forbidden").await;
-        return;
+    let (file_path, effective_rel) = match resolve_asset_file_checked(&plugin_root, raw_rel).await {
+        Ok(path) => (path, raw_rel.to_owned()),
+        Err(ResolveAssetError::Forbidden(_)) => {
+            let _ = write_error(&mut write_half, 403, "Forbidden").await;
+            return;
+        }
+        Err(ResolveAssetError::NotFound) => {
+            if is_spa_route_path(raw_rel)
+                && let Some(spa_entry) = state.plugin_registry().plugin_spa_entry(plugin_id)
+                && let Ok(fallback) = resolve_asset_file(&plugin_root, &spa_entry).await
+            {
+                (fallback, spa_entry)
+            } else {
+                let _ = write_error(&mut write_half, 404, "Not Found").await;
+                return;
+            }
+        }
     };
 
     let Ok(meta) = fs::metadata(&file_path).await else {
@@ -114,6 +132,7 @@ pub async fn handle_http_asset(stream: TcpStream, state: Arc<HubState>) {
     };
 
     let mime = mime_type_for(&file_path);
+    let cache_headers = cache_headers_for(&effective_rel, &file_path, &meta);
     let coi_headers = if state
         .plugin_registry()
         .plugin_cross_origin_isolated(plugin_id)
@@ -123,7 +142,7 @@ pub async fn handle_http_asset(stream: TcpStream, state: Arc<HubState>) {
         ""
     };
     let header = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n{coi_headers}Connection: close\r\n\r\n",
+        "HTTP/1.1 200 OK\r\nContent-Type: {mime}\r\nContent-Length: {}\r\n{cache_headers}X-Content-Type-Options: nosniff\r\n{coi_headers}Connection: close\r\n\r\n",
         bytes.len()
     );
     if write_half.write_all(header.as_bytes()).await.is_err() {
@@ -135,174 +154,5 @@ pub async fn handle_http_asset(stream: TcpStream, state: Arc<HubState>) {
     let _ = write_half.flush().await;
 }
 
-struct ParsedHttpRequest {
-    method: String,
-    target: String,
-    authorization: Option<String>,
-    origin: Option<String>,
-}
-
-async fn parse_http_headers(
-    reader: &mut BufReader<tokio::net::tcp::OwnedReadHalf>,
-) -> io::Result<ParsedHttpRequest> {
-    let mut request_line = String::new();
-    let n = reader.read_line(&mut request_line).await?;
-    if n == 0 {
-        return Err(io::Error::new(
-            io::ErrorKind::UnexpectedEof,
-            "empty HTTP request",
-        ));
-    }
-    let mut parts = request_line.split_whitespace();
-    let method = parts
-        .next()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing HTTP method"))?
-        .to_owned();
-    let target = parts
-        .next()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing HTTP target"))?
-        .to_owned();
-
-    let mut authorization = None;
-    let mut origin = None;
-    for _ in 0..MAX_HEADER_LINES {
-        let mut line = String::new();
-        let read = reader.read_line(&mut line).await?;
-        if read == 0 {
-            break;
-        }
-        let trimmed = line.trim_end_matches(['\r', '\n']);
-        if trimmed.is_empty() {
-            break;
-        }
-        if let Some((name, value)) = trimmed.split_once(':') {
-            let lower = name.trim().to_ascii_lowercase();
-            let val = value.trim().to_owned();
-            if lower == "authorization" {
-                authorization = Some(val);
-            } else if lower == "origin" {
-                origin = Some(val);
-            }
-        }
-    }
-
-    Ok(ParsedHttpRequest {
-        method,
-        target,
-        authorization,
-        origin,
-    })
-}
-
-/// Resolves `raw_rel` strictly inside `<plugin_root>/web/`, rejecting `..`, hidden files,
-/// sibling files outside `web/`, and symlink escapes.
-pub async fn resolve_asset_file(
-    plugin_root: &Path,
-    raw_rel: &str,
-) -> Result<PathBuf, &'static str> {
-    let decoded = percent_decode(raw_rel)?;
-    let trimmed = decoded.trim_start_matches('/');
-    if trimmed.is_empty() || trimmed.contains('\\') {
-        return Err("invalid asset path");
-    }
-
-    let mut clean_rel = PathBuf::new();
-    let mut first_segment: Option<String> = None;
-    for comp in Path::new(trimmed).components() {
-        match comp {
-            Component::Normal(seg) => {
-                let s = seg.to_string_lossy();
-                if s.starts_with('.') {
-                    return Err("hidden files are forbidden");
-                }
-                if first_segment.is_none() {
-                    first_segment = Some(s.into_owned());
-                }
-                clean_rel.push(seg);
-            }
-            _ => return Err("directory traversal forbidden"),
-        }
-    }
-
-    if first_segment.as_deref() != Some("web") {
-        return Err("assets must reside under web/");
-    }
-
-    let canonical_web_root = fs::canonicalize(plugin_root.join("web"))
-        .await
-        .map_err(|_| "plugin web root missing")?;
-    let rel_inside_web = clean_rel
-        .strip_prefix("web")
-        .map_err(|_| "invalid web asset path")?;
-    let candidate = canonical_web_root.join(rel_inside_web);
-    let canonical_target = fs::canonicalize(&candidate)
-        .await
-        .map_err(|_| "asset missing")?;
-    if !canonical_target.starts_with(&canonical_web_root) {
-        return Err("symlink escape forbidden");
-    }
-    Ok(canonical_target)
-}
-
-fn percent_decode(input: &str) -> Result<String, &'static str> {
-    let bytes = input.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' {
-            if i + 2 >= bytes.len() {
-                return Err("incomplete percent escape");
-            }
-            let hi = from_hex(bytes[i + 1]).ok_or("invalid percent escape")?;
-            let lo = from_hex(bytes[i + 2]).ok_or("invalid percent escape")?;
-            let decoded = (hi << 4) | lo;
-            if decoded == 0 {
-                return Err("NUL byte forbidden");
-            }
-            out.push(decoded);
-            i += 3;
-        } else {
-            out.push(bytes[i]);
-            i += 1;
-        }
-    }
-    String::from_utf8(out).map_err(|_| "invalid UTF-8 in path")
-}
-
-fn from_hex(b: u8) -> Option<u8> {
-    match b {
-        b'0'..=b'9' => Some(b - b'0'),
-        b'a'..=b'f' => Some(b - b'a' + 10),
-        b'A'..=b'F' => Some(b - b'A' + 10),
-        _ => None,
-    }
-}
-
-pub(crate) fn mime_type_for(path: &Path) -> &'static str {
-    match path.extension().and_then(|e| e.to_str()).unwrap_or("") {
-        "html" | "htm" => "text/html; charset=utf-8",
-        "js" | "mjs" => "application/javascript; charset=utf-8",
-        "css" => "text/css; charset=utf-8",
-        "json" => "application/json; charset=utf-8",
-        "svg" => "image/svg+xml",
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "webp" => "image/webp",
-        "woff2" => "font/woff2",
-        "wasm" => "application/wasm",
-        _ => "application/octet-stream",
-    }
-}
-
-async fn write_error(
-    writer: &mut tokio::net::tcp::OwnedWriteHalf,
-    status: u16,
-    reason: &str,
-) -> io::Result<()> {
-    let resp = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reason}",
-        reason.len()
-    );
-    writer.write_all(resp.as_bytes()).await?;
-    writer.flush().await
-}
+#[cfg(test)]
+mod tests;

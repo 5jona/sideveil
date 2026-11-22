@@ -150,6 +150,32 @@ pub(super) fn handle_telemetry_snapshot(
     serialize_result(&telemetry::sample_snapshot())
 }
 
+pub(super) fn handle_network_context(
+    state: &Arc<HubState>,
+    is_privileged: bool,
+    caller_plugin_id: Option<&str>,
+) -> Result<Value, (i32, String)> {
+    if !is_privileged {
+        let pid = require_plugin_id(caller_plugin_id)?;
+        if !state
+            .plugin_registry()
+            .has_capability(pid, PluginCapability::NetworkContext)
+        {
+            state.audit().record(
+                pid,
+                "network.context",
+                false,
+                "missing network-context capability",
+            );
+            return Err((
+                error_codes::PERMISSION_DENIED,
+                format!("Plugin '{pid}' lacks 'network-context' capability"),
+            ));
+        }
+    }
+    serialize_result(&state.network_context())
+}
+
 pub(super) fn handle_hud_update(
     state: &Arc<HubState>,
     is_privileged: bool,

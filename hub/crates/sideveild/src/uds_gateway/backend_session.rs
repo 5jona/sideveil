@@ -69,18 +69,19 @@ pub(super) async fn handle_plugin_backend_session<R: AsyncRead + Unpin>(
     cred: PeerCred,
     plugin_id: String,
     package_name: Option<String>,
+    is_native: bool,
     state: Arc<HubState>,
 ) {
-    let (session_id, mut out_rx) = state.plugin_backends().register(&plugin_id);
+    let (session_id, mut out_rx) = state.plugin_backends().register(&plugin_id, is_native);
     state.logs().info(format!(
-        "Plugin backend connected: id={plugin_id} session=#{session_id} uid={} pid={:?} pkg={:?}",
+        "Plugin backend connected: id={plugin_id} session=#{session_id} native={is_native} uid={} pid={:?} pkg={:?}",
         cred.uid, cred.pid, package_name
     ));
     state.emit_plugin_backend_state(&plugin_id, PluginBackendState::Online);
 
     let writer_task = tokio::spawn(async move {
-        while let Some(req) = out_rx.recv().await {
-            if write_json_line(&mut write_half, &req).await.is_err() {
+        while let Some(frame) = out_rx.recv().await {
+            if write_json_line(&mut write_half, &frame).await.is_err() {
                 break;
             }
         }

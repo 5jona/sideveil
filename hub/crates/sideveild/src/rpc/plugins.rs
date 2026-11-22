@@ -5,8 +5,9 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 use sideveil_protocol::plugin::{
-    PluginInstallParams, PluginSelectParams, PluginSetDevUrlParams, PluginSetEnabledParams,
-    PluginSetPriorityParams, PluginSetScopeOverrideParams,
+    PluginCreateWebEmbedParams, PluginInstallParams, PluginSelectParams, PluginSetDevUrlParams,
+    PluginSetEmbedConfigParams, PluginSetEnabledParams, PluginSetPriorityParams,
+    PluginSetScopeOverrideParams, PluginUninstallParams,
 };
 use sideveil_protocol::rpc::error_codes;
 
@@ -118,6 +119,72 @@ pub(super) fn handle_set_dev_url(
     );
     state.on_plugins_changed();
     serialize_result(&state.plugins_snapshot())
+}
+
+pub(super) fn handle_set_embed_config(
+    state: &Arc<HubState>,
+    params: Option<Value>,
+) -> Result<Value, (i32, String)> {
+    let parsed: PluginSetEmbedConfigParams = decode_params(params)?;
+    state
+        .plugin_registry()
+        .set_embed_config(&parsed)
+        .map_err(|msg| (error_codes::INVALID_PARAMS, msg))?;
+    state.audit().record(
+        parsed.plugin_id,
+        "plugins.setEmbedConfig",
+        true,
+        if parsed.clear {
+            "cleared embed config overrides".to_owned()
+        } else {
+            parsed.embed_url.unwrap_or_else(|| "updated".to_owned())
+        },
+    );
+    state.on_plugins_changed();
+    serialize_result(&state.plugins_snapshot())
+}
+
+pub(super) fn handle_create_web_embed(
+    state: &Arc<HubState>,
+    params: Option<Value>,
+) -> Result<Value, (i32, String)> {
+    let parsed: PluginCreateWebEmbedParams = decode_params(params)?;
+    let manifest = state
+        .plugin_registry()
+        .create_web_embed(&parsed)
+        .map_err(|msg| (error_codes::INVALID_PARAMS, msg))?;
+    state.audit().record(
+        manifest.id.clone(),
+        "plugins.createWebEmbed",
+        true,
+        parsed.url,
+    );
+    state.on_plugins_changed();
+    Ok(json!({
+        "ok": true,
+        "pluginId": manifest.id,
+        "snapshot": state.plugins_snapshot(),
+    }))
+}
+
+pub(super) fn handle_uninstall_plugin(
+    state: &Arc<HubState>,
+    params: Option<Value>,
+) -> Result<Value, (i32, String)> {
+    let parsed: PluginUninstallParams = decode_params(params)?;
+    state
+        .plugin_registry()
+        .uninstall_plugin(&parsed.plugin_id, state.cache_dir())
+        .map_err(|msg| (error_codes::INVALID_PARAMS, msg))?;
+    state
+        .audit()
+        .record(parsed.plugin_id.clone(), "plugins.uninstall", true, "");
+    state.on_plugins_changed();
+    Ok(json!({
+        "ok": true,
+        "pluginId": parsed.plugin_id,
+        "snapshot": state.plugins_snapshot(),
+    }))
 }
 
 pub(super) fn handle_plugins_audit(state: &Arc<HubState>) -> Result<Value, (i32, String)> {

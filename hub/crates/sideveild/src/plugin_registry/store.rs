@@ -35,6 +35,8 @@ pub(super) fn builtin_diag_manifest() -> PluginManifest {
             backdrop: PluginSurfaceBackdrop::NativeGlass,
             ..PluginSurfacePrefs::default()
         },
+        embed: None,
+        network: None,
     }
 }
 
@@ -74,6 +76,34 @@ pub(super) fn build_descriptor(
         }
     };
 
+    let mut surface = loaded.manifest.surface.clone();
+    if let Some(keep_alive) = ov.and_then(|o| o.keep_alive) {
+        surface.keep_alive = keep_alive;
+    }
+
+    let embed = loaded.manifest.embed.clone().map(|mut e| {
+        if let Some(url) = ov.and_then(|o| o.embed_url.as_ref()) {
+            e.url = url.clone();
+        }
+        if let Some(origins) = ov.and_then(|o| o.allowed_origins.as_ref()) {
+            e.allowed_origins = origins.clone();
+        }
+        if let Some(allow_cleartext) = ov.and_then(|o| o.allow_cleartext) {
+            e.allow_cleartext = allow_cleartext;
+        }
+        e
+    });
+
+    let network = loaded.manifest.network.clone().map(|mut n| {
+        if let Some(origins) = ov.and_then(|o| o.allowed_origins.as_ref()) {
+            n.allowed_origins = origins.clone();
+        }
+        if let Some(allow_cleartext) = ov.and_then(|o| o.allow_cleartext) {
+            n.allow_cleartext = allow_cleartext;
+        }
+        n
+    });
+
     PluginDescriptor {
         id: loaded.manifest.id.clone(),
         name: loaded.manifest.name.clone(),
@@ -91,7 +121,9 @@ pub(super) fn build_descriptor(
         backend: loaded.manifest.backend,
         backend_state,
         capabilities: loaded.manifest.capabilities.clone(),
-        surface: loaded.manifest.surface.clone(),
+        surface,
+        embed,
+        network,
     }
 }
 
