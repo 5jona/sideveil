@@ -8,23 +8,11 @@ import {
   type DaemonStatus,
   DEFAULT_CONFIG,
   normalizeSideVeilConfig,
+  SIDEVEIL_METHODS,
   type SideVeilConfig,
 } from '../../shared/types.ts';
+import { parseDaemonLogLines } from './logParser.ts';
 import { usePluginsControl } from './usePluginsControl.ts';
-
-function parseDaemonLogLines(lines: readonly string[]): LogEntry[] {
-  return lines.map((line, idx) => {
-    const levelMatch = line.match(/\[(I|W|E)\]/);
-    const level = levelMatch?.[1] === 'E' ? 'error' : levelMatch?.[1] === 'W' ? 'warn' : 'info';
-    const timePart = line.slice(0, 12).trim() || '--:--:--';
-    return {
-      id: `dlog-${idx}-${timePart}`,
-      timestamp: timePart,
-      level,
-      message: line.length > 13 ? line.slice(13).trim() : line,
-    };
-  });
-}
 
 export function useSideVeilControl() {
   const bridge = useBridge();
@@ -261,7 +249,16 @@ export function useSideVeilControl() {
     [bridge, loadConfigFromDisk, pushToast, refreshLogs, refreshStatus],
   );
 
-  const clearLogs = useCallback(() => setLogs([]), []);
+  const clearLogs = useCallback(async () => {
+    try {
+      await (bridge.env === 'host'
+        ? bridge.invoke(SIDEVEIL_METHODS.DAEMON_LOGS_CLEAR)
+        : bridge.exec(`${shellQuote(CTL_BIN)} logs --clear`));
+    } catch {
+      // Best-effort remote clear; still clear local log buffer.
+    }
+    setLogs([]);
+  }, [bridge]);
 
   return {
     bridge,

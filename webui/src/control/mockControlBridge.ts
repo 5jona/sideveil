@@ -21,6 +21,7 @@ import {
 interface MockControlState {
   panelState: 'closed' | 'open';
   pingCount: number;
+  logSeq: number;
   logs: string[];
   activePluginId: string;
   plugins: PluginDescriptor[];
@@ -30,6 +31,7 @@ interface MockControlState {
 const mockState: MockControlState = {
   panelState: 'closed',
   pingCount: 0,
+  logSeq: 9,
   logs: [
     '09:00:00.112 [I] Starting SideVeil hub daemon (uid=0, pid=14820)',
     '09:00:00.180 [I] Spawned UID 1000 sideveil-sensor (pid=14842)',
@@ -79,6 +81,7 @@ function readMockStoredConfig(): SideVeilConfig {
 function appendMockLog(msg: string) {
   const now = new Date();
   const ts = `${now.toTimeString().slice(0, 8)}.${String(now.getMilliseconds()).padStart(3, '0')}`;
+  mockState.logSeq += 1;
   mockState.logs.push(`${ts} [I] ${msg}`);
   if (mockState.logs.length > 80) {
     mockState.logs.shift();
@@ -102,6 +105,7 @@ export async function handleMockControlExec(cmd: string): Promise<ExecResult> {
     panelState: mockState.panelState,
     activePluginId: mockState.activePluginId,
     matchedPluginIds: getMockSnapshot().matchedPluginIds,
+    devServerActive: mockState.plugins.some((p) => Boolean(p.devServerUrl)),
     appendLog: appendMockLog,
   });
   if (debugRes) return debugRes;
@@ -136,6 +140,14 @@ export async function handleMockControlExec(cmd: string): Promise<ExecResult> {
       wsPort: 41928,
       sensorConnected: true,
       sensorPid: 14842,
+      gestureStats: {
+        edgeSwipesTriggered: 18,
+        edgeSwipesRejected: 2,
+        hotzoneMisses: 5,
+        pilferInvocations: 18,
+        lastRejectReason: 'fullscreen_single_swipe',
+        lastEventTimestampMs: Date.now() - 12_000,
+      },
     };
     return { errno: 0, stdout: JSON.stringify(status), stderr: '' };
   }
@@ -168,8 +180,12 @@ export async function handleMockControlExec(cmd: string): Promise<ExecResult> {
     appendMockLog('Restarted HostService via supervisor');
     return rpcOk({ ok: true });
   }
+  if (normalized.includes('sideveil-ctl logs --clear')) {
+    mockState.logs = [];
+    return rpcOk({ ok: true, nextSeq: mockState.logSeq });
+  }
   if (normalized.includes('sideveil-ctl logs')) {
-    return rpcOk({ lines: mockState.logs });
+    return rpcOk({ lines: mockState.logs, nextSeq: mockState.logSeq, totalDropped: 0 });
   }
   if (normalized.includes('sideveil-ctl network')) {
     return okJson(mockState.network);

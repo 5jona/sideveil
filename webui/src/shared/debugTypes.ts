@@ -11,9 +11,20 @@ export interface DebugSetWebViewDebuggingParams {
 export interface DebugCdpStatusResult {
   ok: boolean;
   webviewDebuggingEnabled: boolean;
+  effectiveEnabled: boolean;
+  devServerActive: boolean;
   hostPid: number | null;
   cdpSocket: string | null;
   restartRecommended: boolean;
+}
+
+export interface DebugGestureStats {
+  edgeSwipesTriggered: number;
+  edgeSwipesRejected: number;
+  hotzoneMisses: number;
+  pilferInvocations: number;
+  lastRejectReason?: string | null;
+  lastEventTimestampMs: number;
 }
 
 export interface DebugDisplaySnapshot {
@@ -120,6 +131,8 @@ export interface DebugWebViewSnapshot {
   rendererWaivedWhenNotVisible: boolean;
   widthPx: number;
   heightPx: number;
+  dormant?: boolean;
+  crashCount?: number;
 }
 
 export interface DebugFrameMetricsSnapshot {
@@ -153,4 +166,5 @@ export interface DebugInspectUiSnapshot {
   webViews: DebugWebViewSnapshot[];
   frameMetrics: DebugFrameMetricsSnapshot;
   windowFrameMetrics: Record<string, DebugFrameMetricsSnapshot>;
+  gestureStats?: DebugGestureStats;
 }

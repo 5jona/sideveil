@@ -50,12 +50,56 @@ export interface MockDebugContext {
   panelState: 'closed' | 'open';
   activePluginId: string;
   matchedPluginIds: string[];
+  devServerActive?: boolean;
   appendLog: (msg: string) => void;
 }
 
+function mockFrameMetrics(reset: boolean) {
+  return reset
+    ? {
+        sampleCount: 0,
+        p50Ms: 0,
+        p95Ms: 0,
+        p99Ms: 0,
+        maxMs: 0,
+        drawP95Ms: 0,
+        gpuP95Ms: 0,
+        jankCount: 0,
+        deadlineMs: 6.94,
+      }
+    : {
+        sampleCount: 180,
+        p50Ms: 3.4,
+        p95Ms: 5.8,
+        p99Ms: 6.7,
+        maxMs: 8.2,
+        drawP95Ms: 2.1,
+        gpuP95Ms: 2.6,
+        jankCount: 1,
+        deadlineMs: 6.94,
+      };
+}
+
+function rpcOk(result: unknown): ExecResult {
+  return {
+    errno: 0,
+    stdout: JSON.stringify({ jsonrpc: '2.0', id: 'ctl', result }),
+    stderr: '',
+  };
+}
+
+let mockFrameMetricsReset = false;
+
 export function handleMockDebugExec(normalized: string, ctx: MockDebugContext): ExecResult | null {
+  if (normalized.includes('sideveil-ctl debug reset-frames')) {
+    mockFrameMetricsReset = true;
+    ctx.appendLog('RPC debug.resetFrameMetrics cleared frame metrics');
+    return rpcOk({ ok: true });
+  }
+
   if (normalized.includes('sideveil-ctl debug inspect-ui')) {
     const enabled = Boolean(ctx.cfg.debug?.webviewDebuggingEnabled);
+    const effectiveEnabled = enabled || Boolean(ctx.devServerActive);
     const panelWidth = Math.round(ctx.cfg.panel.widthDp * 2.625);
     const panelHeight = Math.round((2400 * ctx.cfg.panel.heightPercent) / 100);
     const agsl: DebugAgslSnapshot = {
@@ -75,7 +119,7 @@ export function handleMockDebugExec(normalized: string, ctx: MockDebugContext): 
     const snapshot: DebugInspectUiSnapshot = {
       hostPid: MOCK_HOST_PID,
       webviewDebuggingEnabled: enabled,
-      cdpSocket: enabled ? `webview_devtools_remote_${MOCK_HOST_PID}` : null,
+      cdpSocket: effectiveEnabled ? `webview_devtools_remote_${MOCK_HOST_PID}` : null,
       activePluginId: ctx.activePluginId,
       pinnedPluginId: null,
       activeHudPluginId: 'com.gamer.hud',
@@ -176,6 +220,8 @@ export function handleMockDebugExec(normalized: string, ctx: MockDebugContext): 
           rendererWaivedWhenNotVisible: true,
           widthPx: 892,
           heightPx: 1728,
+          dormant: false,
+          crashCount: 0,
         },
         {
           pluginId: 'com.gamer.hud',
@@ -195,62 +241,57 @@ export function handleMockDebugExec(normalized: string, ctx: MockDebugContext): 
           rendererWaivedWhenNotVisible: true,
           widthPx: 998,
           heightPx: 1560,
+          dormant: true,
+          crashCount: 0,
         },
       ],
-      frameMetrics: {
-        sampleCount: 180,
-        p50Ms: 3.4,
-        p95Ms: 5.8,
-        p99Ms: 6.7,
-        maxMs: 8.2,
-        drawP95Ms: 2.1,
-        gpuP95Ms: 2.6,
-        jankCount: 1,
-        deadlineMs: 6.94,
-      },
+      frameMetrics: mockFrameMetrics(mockFrameMetricsReset),
       windowFrameMetrics: {},
+      gestureStats: {
+        edgeSwipesTriggered: 18,
+        edgeSwipesRejected: 2,
+        hotzoneMisses: 5,
+        pilferInvocations: 18,
+        lastRejectReason: 'fullscreen_single_swipe',
+        lastEventTimestampMs: Date.now() - 12_000,
+      },
     };
     ctx.appendLog('RPC debug.inspectUi captured snapshot');
-    return {
-      errno: 0,
-      stdout: JSON.stringify({ jsonrpc: '2.0', id: 'ctl', result: snapshot }),
-      stderr: '',
-    };
+    return rpcOk(snapshot);
   }
 
   const cdpMatch = normalized.match(/sideveil-ctl debug cdp (on|off|status)/);
   if (cdpMatch) {
     const mode = cdpMatch[1];
     const prevEnabled = Boolean(ctx.cfg.debug?.webviewDebuggingEnabled);
+    const devServerActive = Boolean(ctx.devServerActive);
     if (mode === 'status') {
-      return {
-        errno: 0,
-        stdout: JSON.stringify({
-          webviewDebuggingEnabled: prevEnabled,
-          hostPid: MOCK_HOST_PID,
-          cdpSocket: prevEnabled ? `webview_devtools_remote_${MOCK_HOST_PID}` : null,
-        }),
-        stderr: '',
+      const effectiveEnabled = prevEnabled || devServerActive;
+      const result: DebugCdpStatusResult = {
+        ok: true,
+        webviewDebuggingEnabled: prevEnabled,
+        effectiveEnabled,
+        devServerActive,
+        hostPid: MOCK_HOST_PID,
+        cdpSocket: effectiveEnabled ? `webview_devtools_remote_${MOCK_HOST_PID}` : null,
+        restartRecommended: false,
       };
+      return rpcOk(result);
     }
     const nextEnabled = mode === 'on';
-    writeMockStoredConfig({
-      ...ctx.cfg,
-      debug: { webviewDebuggingEnabled: nextEnabled },
-    });
+    const effectiveEnabled = nextEnabled || devServerActive;
+    writeMockStoredConfig({ ...ctx.cfg, debug: { webviewDebuggingEnabled: nextEnabled } });
     const result: DebugCdpStatusResult = {
       ok: true,
       webviewDebuggingEnabled: nextEnabled,
+      effectiveEnabled,
+      devServerActive,
       hostPid: MOCK_HOST_PID,
-      cdpSocket: nextEnabled ? `webview_devtools_remote_${MOCK_HOST_PID}` : null,
-      restartRecommended: prevEnabled && !nextEnabled,
+      cdpSocket: effectiveEnabled ? `webview_devtools_remote_${MOCK_HOST_PID}` : null,
+      restartRecommended: prevEnabled && !nextEnabled && !devServerActive,
     };
     ctx.appendLog(`RPC debug.setWebViewDebugging enabled=${String(nextEnabled)}`);
-    return {
-      errno: 0,
-      stdout: JSON.stringify({ jsonrpc: '2.0', id: 'ctl', result }),
-      stderr: '',
-    };
+    return rpcOk(result);
   }
 
   return null;

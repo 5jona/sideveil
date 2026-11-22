@@ -1,5 +1,5 @@
 import type { ColorMode, ThemeId } from '@pochita/ui';
-import type { DebugConfig } from './debugTypes.ts';
+import type { DebugConfig, DebugGestureStats } from './debugTypes.ts';
 
 export type {
   DebugAgslSnapshot,
@@ -7,6 +7,7 @@ export type {
   DebugConfig,
   DebugDisplaySnapshot,
   DebugFrameMetricsSnapshot,
+  DebugGestureStats,
   DebugInspectUiSnapshot,
   DebugOverlayWindowSnapshot,
   DebugPanelWindowSnapshot,
@@ -81,6 +82,7 @@ export interface DaemonStatus {
   wsPort: number;
   sensorConnected?: boolean;
   sensorPid?: number | null;
+  gestureStats?: DebugGestureStats;
 }
 
 export interface PingResult {
@@ -93,6 +95,7 @@ export const SIDEVEIL_METHODS = {
   DAEMON_PING: 'daemon.ping',
   DAEMON_STATUS: 'daemon.status',
   DAEMON_LOGS: 'daemon.logs',
+  DAEMON_LOGS_CLEAR: 'daemon.logsClear',
   CONFIG_GET: 'config.get',
   CONFIG_PATCH_APPEARANCE: 'config.patchAppearance',
   CONFIG_RELOAD: 'config.reload',
@@ -100,7 +103,9 @@ export const SIDEVEIL_METHODS = {
   PANEL_CLOSE: 'panel.close',
   PANEL_TOGGLE: 'panel.toggle',
   HOST_RESTART: 'host.restart',
+  DEBUG_CDP_STATUS: 'debug.cdpStatus',
   DEBUG_INSPECT_UI: 'debug.inspectUi',
+  DEBUG_RESET_FRAME_METRICS: 'debug.resetFrameMetrics',
   DEBUG_SET_WEBVIEW_DEBUGGING: 'debug.setWebViewDebugging',
   PLUGINS_SET_EMBED_CONFIG: 'plugins.setEmbedConfig',
   PLUGINS_CREATE_WEB_EMBED: 'plugins.createWebEmbed',

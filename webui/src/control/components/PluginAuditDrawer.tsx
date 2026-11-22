@@ -1,6 +1,10 @@
-import type { PluginAuditReport } from '@pochita/sideveil-sdk';
+import type { HostPluginDiagnosticsPayload, PluginAuditReport } from '@pochita/sideveil-sdk';
 import { Badge, Button, Card } from '@pochita/ui';
 import { Cpu, RefreshCw, ShieldAlert, ShieldCheck } from 'lucide-react';
+
+type ExtendedAuditDiagnostics = HostPluginDiagnosticsPayload & {
+  webviewCrashCount?: number;
+};
 
 export interface PluginAuditDrawerProps {
   report: PluginAuditReport | null;
@@ -14,17 +18,21 @@ function formatKbToMb(kb: number | null | undefined): string {
 }
 
 export function PluginAuditDrawer({ report, loading, onRefresh }: PluginAuditDrawerProps) {
-  const diag = report?.diagnostics;
+  const diag = report?.diagnostics as ExtendedAuditDiagnostics | undefined;
+  const webviewCrashCount = diag?.webviewCrashCount ?? 0;
   const entries = report?.entries ?? [];
 
   return (
     <Card className="space-y-3 p-3.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Cpu className="size-4 text-[var(--accent)]" />
           <span className="text-xs font-semibold text-[var(--text-primary)]">
             宿主运行时与权限审计
           </span>
+          {webviewCrashCount > 0 ? (
+            <Badge variant="danger">WebView 崩溃 {webviewCrashCount} 次</Badge>
+          ) : null}
         </div>
         <Button size="sm" variant="secondary" disabled={loading} onClick={() => void onRefresh()}>
           <RefreshCw className="size-3.5" />

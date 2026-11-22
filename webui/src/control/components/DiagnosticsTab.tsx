@@ -1,3 +1,4 @@
+import type { BridgeClient } from '@pochita/bridge';
 import type { NetworkContextSnapshot } from '@pochita/sideveil-sdk';
 import {
   Badge,
@@ -9,10 +10,8 @@ import {
   CardTitle,
   LogConsole,
   type LogEntry,
-  SettingRow,
-  Switch,
 } from '@pochita/ui';
-import { AlertTriangle, Bug, RefreshCw, RotateCcw, Terminal, Zap } from 'lucide-react';
+import { RefreshCw, RotateCcw, Terminal, Zap } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type {
   DaemonStatus,
@@ -20,30 +19,26 @@ import type {
   DebugInspectUiSnapshot,
   SideVeilConfig,
 } from '../../shared/types.ts';
+import type { DebugBusyAction } from '../hooks/useDebugControl.ts';
+import { BridgeTraceCard } from './BridgeTraceCard.tsx';
+import { CdpDebugCard } from './CdpDebugCard.tsx';
+import { GestureStatsCard } from './GestureStatsCard.tsx';
 import { NetworkContextCard } from './NetworkContextCard.tsx';
 import { UiInspectorCard } from './UiInspectorCard.tsx';
 
-type LogFilterMode = 'all' | 'webview' | 'warn-error';
+type LogSourceFilter = 'all' | 'webview';
 
-const LOG_FILTER_OPTIONS: readonly { id: LogFilterMode; label: string }[] = [
-  { id: 'all', label: '全部' },
+const LOG_SOURCE_OPTIONS: readonly { id: LogSourceFilter; label: string }[] = [
+  { id: 'all', label: '全部日志' },
   { id: 'webview', label: 'WebView 控制台' },
-  { id: 'warn-error', label: '仅警告与错误' },
 ];
 
 function isWebViewConsoleLog(entry: LogEntry): boolean {
   return entry.message.includes('[WebView:') || entry.message.includes('host.webviewConsole');
 }
 
-function isWarnOrErrorLog(entry: LogEntry): boolean {
-  return (
-    entry.level === 'warn' ||
-    entry.level === 'error' ||
-    /\[(ERROR|WARNING|WARN)\]/i.test(entry.message)
-  );
-}
-
 export interface DiagnosticsTabProps {
+  bridge: BridgeClient;
   config: SideVeilConfig;
   status: DaemonStatus | null;
   logs: readonly LogEntry[];
@@ -52,7 +47,7 @@ export interface DiagnosticsTabProps {
   cdpStatus: DebugCdpStatusResult | null;
   uiSnapshot: DebugInspectUiSnapshot | null;
   inspectCapturedAt: string | null;
-  debugBusy: 'cdp' | 'inspect' | null;
+  debugBusy: DebugBusyAction;
   debugError: string | null;
   networkContext: NetworkContextSnapshot | null;
   networkLoading: boolean;
@@ -64,10 +59,12 @@ export interface DiagnosticsTabProps {
   onClearLogs: () => void;
   onSetWebViewDebugging: (enabled: boolean) => void;
   onInspectUi: () => void;
+  onResetFrameMetrics: () => void;
   onRefreshNetwork: () => void;
 }
 
 export function DiagnosticsTab({
+  bridge,
   config,
   status,
   logs,
@@ -88,23 +85,15 @@ export function DiagnosticsTab({
   onClearLogs,
   onSetWebViewDebugging,
   onInspectUi,
+  onResetFrameMetrics,
   onRefreshNetwork,
 }: DiagnosticsTabProps) {
-  const [logFilter, setLogFilter] = useState<LogFilterMode>('all');
+  const [logSourceFilter, setLogSourceFilter] = useState<LogSourceFilter>('all');
 
-  const webviewDebuggingEnabled = Boolean(
-    cdpStatus?.webviewDebuggingEnabled ?? config.debug?.webviewDebuggingEnabled,
+  const filteredLogs = useMemo(
+    () => (logSourceFilter === 'webview' ? logs.filter(isWebViewConsoleLog) : logs),
+    [logSourceFilter, logs],
   );
-  const activeCdpSocket = webviewDebuggingEnabled
-    ? (cdpStatus?.cdpSocket ??
-      (status?.hostPid ? `webview_devtools_remote_${status.hostPid}` : null))
-    : null;
-
-  const filteredLogs = useMemo(() => {
-    if (logFilter === 'webview') return logs.filter(isWebViewConsoleLog);
-    if (logFilter === 'warn-error') return logs.filter(isWarnOrErrorLog);
-    return logs;
-  }, [logFilter, logs]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -159,11 +148,11 @@ export function DiagnosticsTab({
             </Button>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 pt-1">
+          <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
             <Badge variant={status?.taskListenerActive ? 'success' : 'warning'} dot>
-              ITaskStackListener: {status?.taskListenerActive ? '已挂载' : '轮询兜底'}
+              TaskListener: {status?.taskListenerActive ? '运行中' : '未就绪'}
             </Badge>
-            <Badge variant={status?.gestureMonitorActive ? 'success' : 'danger'} dot>
+            <Badge variant={status?.gestureMonitorActive ? 'success' : 'warning'} dot>
               GestureMonitor: {status?.gestureMonitorActive ? '运行中' : '未就绪'}
             </Badge>
             <Badge variant={status?.overlayPermissionGranted ? 'success' : 'warning'} dot>
@@ -186,66 +175,36 @@ export function DiagnosticsTab({
         onRefresh={onRefreshNetwork}
       />
 
-      <Card>
-        <CardHeader>
-          <div className="flex flex-col gap-0.5">
-            <CardTitle className="flex items-center gap-1.5">
-              <Bug className="size-4 text-[var(--accent)]" />
-              WebView CDP 远程调试
-            </CardTitle>
-            <CardDescription>开启后可通过 Chrome DevTools 附加到 Host WebView 进程</CardDescription>
-          </div>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          <SettingRow
-            variant="plain"
-            title="启用 WebView 调试 (CDP)"
-            description="仅建议在开发排障时开启，关闭后可按需重启 Host 释放调试会话"
-            control={
-              <Switch
-                checked={webviewDebuggingEnabled}
-                disabled={debugBusy === 'cdp'}
-                onCheckedChange={onSetWebViewDebugging}
-                aria-label="启用 WebView CDP 远程调试"
-              />
-            }
-          />
+      <CdpDebugCard
+        config={config}
+        status={status}
+        cdpStatus={cdpStatus}
+        busy={debugBusy === 'cdp'}
+        onSetWebViewDebugging={onSetWebViewDebugging}
+      />
 
-          {activeCdpSocket ? (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius-control)] border border-[var(--border-hairline)] bg-[var(--surface-elevated)] px-3 py-2 text-xs">
-              <span className="text-[var(--text-secondary)]">活跃 CDP Socket</span>
-              <code className="font-mono text-[var(--text-primary)]">{activeCdpSocket}</code>
-            </div>
-          ) : null}
-
-          {cdpStatus?.restartRecommended ? (
-            <div className="flex items-center gap-2 rounded-[var(--radius-control)] border border-[color-mix(in_oklab,var(--warning)_35%,transparent)] bg-[color-mix(in_oklab,var(--warning)_12%,transparent)] px-3 py-2 text-xs text-[var(--text-primary)]">
-              <AlertTriangle className="size-4 shrink-0 text-[var(--warning)]" />
-              <span>
-                已关闭 WebView 调试，建议点击上方「重启 Host 服务」以彻底断开已存在的 DevTools
-                套接字。
-              </span>
-            </div>
-          ) : null}
-        </CardContent>
-      </Card>
+      <GestureStatsCard stats={uiSnapshot?.gestureStats ?? status?.gestureStats} />
 
       <UiInspectorCard
         snapshot={uiSnapshot}
         capturedAt={inspectCapturedAt}
         busy={debugBusy === 'inspect'}
+        resetBusy={debugBusy === 'reset-frames'}
         error={debugError}
         onCapture={onInspectUi}
+        onResetFrameMetrics={onResetFrameMetrics}
       />
+
+      <BridgeTraceCard bridge={bridge} />
 
       <div className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <fieldset
-            aria-label="日志筛选"
+            aria-label="日志来源筛选"
             className="m-0 flex flex-wrap items-center gap-1.5 border-0 p-0"
           >
-            {LOG_FILTER_OPTIONS.map((option) => {
-              const active = logFilter === option.id;
+            {LOG_SOURCE_OPTIONS.map((option) => {
+              const active = logSourceFilter === option.id;
               return (
                 <Button
                   key={option.id}
@@ -253,7 +212,7 @@ export function DiagnosticsTab({
                   variant={active ? 'primary' : 'secondary'}
                   aria-pressed={active}
                   aria-label={`筛选日志：${option.label}`}
-                  onClick={() => setLogFilter(option.id)}
+                  onClick={() => setLogSourceFilter(option.id)}
                 >
                   {option.label}
                 </Button>
@@ -268,6 +227,8 @@ export function DiagnosticsTab({
         <LogConsole
           title="Daemon 运行日志"
           entries={filteredLogs}
+          searchable
+          filterable
           onClear={onClearLogs}
           maxHeightClassName="max-h-72"
         />

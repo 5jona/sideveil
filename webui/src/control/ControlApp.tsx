@@ -73,6 +73,7 @@ function ControlWorkbench() {
     debugError,
     setWebViewDebugging,
     inspectUi,
+    resetFrameMetrics,
   } = useDebugControl({
     bridge,
     pushToast,
@@ -207,6 +208,7 @@ function ControlWorkbench() {
 
         <TabsContent value="diagnostics">
           <DiagnosticsTab
+            bridge={bridge}
             config={config}
             status={status}
             logs={logs}
@@ -224,9 +226,10 @@ function ControlWorkbench() {
             onReloadConfig={() => void runCtl('reload', '重载配置')}
             onRestartHost={() => void runCtl('restart-host', '重启 Host 服务')}
             onRefreshLogs={() => void refreshLogs()}
-            onClearLogs={clearLogs}
+            onClearLogs={() => void clearLogs()}
             onSetWebViewDebugging={(enabled) => void setWebViewDebugging(enabled)}
             onInspectUi={() => void inspectUi()}
+            onResetFrameMetrics={() => void resetFrameMetrics()}
             onRefreshNetwork={() => void refreshNetworkContext()}
           />
         </TabsContent>

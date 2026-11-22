@@ -1,11 +1,13 @@
 import { type BridgeClient, shellQuote } from '@pochita/bridge';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   CTL_BIN,
   type DebugCdpStatusResult,
   type DebugInspectUiSnapshot,
   SIDEVEIL_METHODS,
 } from '../../shared/types.ts';
+
+export type DebugBusyAction = 'cdp' | 'inspect' | 'reset-frames' | null;
 
 type PushToast = (message: string, variant?: 'info' | 'success' | 'warning' | 'danger') => void;
 
@@ -47,8 +49,34 @@ export function useDebugControl({
   const [cdpStatus, setCdpStatus] = useState<DebugCdpStatusResult | null>(null);
   const [uiSnapshot, setUiSnapshot] = useState<DebugInspectUiSnapshot | null>(null);
   const [inspectCapturedAt, setInspectCapturedAt] = useState<string | null>(null);
-  const [debugBusy, setDebugBusy] = useState<'cdp' | 'inspect' | null>(null);
+  const [debugBusy, setDebugBusy] = useState<DebugBusyAction>(null);
   const [debugError, setDebugError] = useState<string | null>(null);
+  const hasSnapshotRef = useRef(false);
+  hasSnapshotRef.current = uiSnapshot !== null;
+
+  const refreshCdpStatus = useCallback(async () => {
+    try {
+      let result: DebugCdpStatusResult | undefined;
+      if (bridge.env === 'host') {
+        result = await bridge.invoke<DebugCdpStatusResult>(SIDEVEIL_METHODS.DEBUG_CDP_STATUS);
+      } else {
+        const res = await bridge.exec(`${shellQuote(CTL_BIN)} debug cdp status`);
+        if (res.errno !== 0) return;
+        const decoded = unwrapRpcOutput<DebugCdpStatusResult>(res.stdout);
+        if (decoded.errorMessage) return;
+        result = decoded.result;
+      }
+      if (result) {
+        setCdpStatus(result);
+      }
+    } catch {
+      // Best-effort initial CDP status fetch; ignore when daemon is offline.
+    }
+  }, [bridge]);
+
+  useEffect(() => {
+    void refreshCdpStatus();
+  }, [refreshCdpStatus]);
 
   const setWebViewDebugging = useCallback(
     async (enabled: boolean) => {
@@ -129,13 +157,47 @@ export function useDebugControl({
     }
   }, [bridge, onRefreshLogs, pushToast]);
 
+  const resetFrameMetrics = useCallback(async () => {
+    setDebugBusy('reset-frames');
+    setDebugError(null);
+    let succeeded = false;
+    try {
+      if (bridge.env === 'host') {
+        await bridge.invoke<{ ok: boolean }>(SIDEVEIL_METHODS.DEBUG_RESET_FRAME_METRICS);
+      } else {
+        const res = await bridge.exec(`${shellQuote(CTL_BIN)} debug reset-frames`);
+        if (res.errno !== 0) {
+          throw new Error(res.stderr.trim() || res.stdout.trim() || `errno ${res.errno}`);
+        }
+        const decoded = unwrapRpcOutput<{ ok?: boolean }>(res.stdout);
+        if (decoded.errorMessage) {
+          throw new Error(decoded.errorMessage);
+        }
+      }
+      succeeded = true;
+      pushToast('已重置帧耗时统计', 'success');
+      await onRefreshLogs();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setDebugError(msg);
+      pushToast(`重置帧耗时失败：${msg}`, 'warning');
+    } finally {
+      setDebugBusy(null);
+    }
+    if (succeeded && hasSnapshotRef.current) {
+      await inspectUi();
+    }
+  }, [bridge, inspectUi, onRefreshLogs, pushToast]);
+
   return {
     cdpStatus,
     uiSnapshot,
     inspectCapturedAt,
     debugBusy,
     debugError,
+    refreshCdpStatus,
     setWebViewDebugging,
     inspectUi,
+    resetFrameMetrics,
   };
 }

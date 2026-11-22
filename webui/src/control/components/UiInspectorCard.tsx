@@ -7,15 +7,17 @@ import {
   CardHeader,
   CardTitle,
 } from '@pochita/ui';
-import { Activity, Cpu, Layers, Monitor, ScanSearch } from 'lucide-react';
+import { Activity, Cpu, Layers, Monitor, RotateCcw, ScanSearch } from 'lucide-react';
 import type { DebugInspectUiSnapshot, DebugWebViewSnapshot } from '../../shared/types.ts';
 
 export interface UiInspectorCardProps {
   snapshot: DebugInspectUiSnapshot | null;
   capturedAt: string | null;
   busy: boolean;
+  resetBusy?: boolean;
   error: string | null;
   onCapture: () => void;
+  onResetFrameMetrics?: () => void;
 }
 
 function formatHz(hz: number): string {
@@ -49,6 +51,10 @@ function WebViewRow({ item }: { item: DebugWebViewSnapshot }) {
         {item.isActive ? <Badge variant="accent">活跃</Badge> : null}
         {item.isPinned ? <Badge variant="warning">固定</Badge> : null}
         {item.keepAlive ? <Badge variant="success">常驻</Badge> : null}
+        {item.dormant ? <Badge variant="neutral">休眠</Badge> : null}
+        {(item.crashCount ?? 0) > 0 ? (
+          <Badge variant="danger">崩溃 {item.crashCount} 次</Badge>
+        ) : null}
         {item.attachedToParent ? (
           <Badge variant="neutral">已挂载</Badge>
         ) : (
@@ -63,8 +69,10 @@ export function UiInspectorCard({
   snapshot,
   capturedAt,
   busy,
+  resetBusy = false,
   error,
   onCapture,
+  onResetFrameMetrics,
 }: UiInspectorCardProps) {
   return (
     <Card>
@@ -75,8 +83,20 @@ export function UiInspectorCard({
             采集 Host 显示刷新率投票、窗口布局、AGSL 渲染状态与帧耗时指标
           </CardDescription>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {capturedAt ? <Badge variant="neutral">采集于 {capturedAt}</Badge> : null}
+          {onResetFrameMetrics ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={resetBusy}
+              aria-label="重置帧耗时"
+              onClick={onResetFrameMetrics}
+            >
+              <RotateCcw className="size-3.5" />
+              {resetBusy ? '重置中...' : '重置帧耗时'}
+            </Button>
+          ) : null}
           <Button
             size="sm"
             variant="primary"
