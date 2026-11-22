@@ -12,6 +12,12 @@ data class PluginSizeOverride(
     val heightPercent: Int? = null,
 )
 
+internal enum class DescriptorUpdateOutcome {
+    UNCHANGED,
+    SURFACE_UPDATED,
+    RECREATE_REQUIRED,
+}
+
 interface PluginContainerCallbacks {
     fun onDismissRequested(pluginId: String)
 
@@ -65,6 +71,8 @@ interface PluginHostSurfaceDelegate {
     fun onDismissPanel()
 
     fun onSetImeFocused(focused: Boolean)
+
+    fun onSetPinnedImeFocused(focused: Boolean)
 
     fun onSyncAppearance(
         themeId: String,

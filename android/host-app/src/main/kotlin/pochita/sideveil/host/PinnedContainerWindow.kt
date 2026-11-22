@@ -1,53 +1,44 @@
 package pochita.sideveil.host
 
 import android.annotation.SuppressLint
-import android.app.Dialog
 import android.content.Context
-import android.graphics.PixelFormat
+import android.os.SystemClock
 import android.util.Log
 import android.view.ContextThemeWrapper
-import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.Window
+import android.view.WindowInsets
 import android.view.WindowManager
 import android.webkit.WebView
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import pochita.sideveil.protocol.DebugOverlayWindowSnapshot
 import pochita.sideveil.protocol.GlassTintOverride
 import pochita.sideveil.protocol.PanelConfig
 import pochita.sideveil.protocol.PluginSurfaceBackdrop
-import java.util.function.Consumer
 import kotlin.math.roundToInt
-
-data class PinnedBoundsSpec(
-    val widthDp: Int? = null,
-    val heightDp: Int? = null,
-    val xPercent: Float? = null,
-    val yPercent: Float? = null,
-    val clickThrough: Boolean? = null,
-)
 
 /**
  * Warm-resident draggable `TYPE_APPLICATION_OVERLAY` Dialog hosting plugins in
- * `PluginPresentationMode.PINNED` mode. Uses `BlurMaskDrawable` + `GlassBackdropDrawable` for
- * real hardware cross-window blur, delegates single-layer bottom drag handle and unlock chip
- * chrome to [PinnedChromeViews], and synchronizes click-through state back to the plugin.
+ * `PluginPresentationMode.PINNED` mode. Uses `BlurMaskDrawable` + `GlassBackdropDrawable` via
+ * [PinnedBackdropController], delegates single-layer bottom drag handle and unlock chip chrome
+ * to [PinnedChromeViews], keeps `FLAG_NOT_FOCUSABLE` by default, and temporarily clears it only
+ * while the pinned plugin actively holds IME focus.
  */
 @SuppressLint("RtlHardcoded")
 internal class PinnedContainerWindow(
     private val context: Context,
-    private val windowManager: WindowManager,
+    windowManager: WindowManager,
     private val onClickThroughChanged: (Boolean) -> Unit,
 ) {
-    private val density: Float
-        get() =
-            context.resources.displayMetrics.density
-                .coerceAtLeast(1f)
     private val themedContext = ContextThemeWrapper(context, R.style.Theme_SideVeil_OverlayDialog)
-    private val backdropDrawable = GlassBackdropDrawable(density)
-    private val dialog = Dialog(themedContext, R.style.Theme_SideVeil_OverlayDialog)
+    private val windowLayout = PinnedWindowLayout(context, windowManager)
+    private val backdropController =
+        PinnedBackdropController(context, windowManager) {
+            if (visible) applyVisualStyle()
+        }
     private val webSlot = FrameLayout(themedContext)
     private val chrome =
         PinnedChromeViews(
@@ -60,63 +51,69 @@ internal class PinnedContainerWindow(
     private val rootContainer =
         LinearLayout(themedContext).apply {
             orientation = LinearLayout.VERTICAL
-            background = backdropDrawable
+            background = backdropController.backdropDrawable
             clipToOutline = true
-            outlineProvider = GlassBackdropDrawable.createContentOutlineProvider { cornerPx() }
+            outlineProvider = GlassBackdropDrawable.createContentOutlineProvider { backdropController.cornerPx() }
         }
 
     private var attached = false
     private var visible = false
     private var clickThrough = false
+    private var imeFocused = false
+    private var lastImeBottomPx = 0
+    private var imeFocusRequestedAtMs = 0L
     private var mountedWebView: WebView? = null
-    private var panelConfig = PanelConfig()
-    private var pluginBackdrop = PluginSurfaceBackdrop.NATIVE_GLASS
-    private var themeId = "coloros-glass"
-    private var isDark = true
-    private var dynamicTint: GlassTintOverride? = null
-    private var systemBlurSupported = runCatching { windowManager.isCrossWindowBlurEnabled }.getOrDefault(false)
-    private var lastAppliedBlur = -1
-    private var lastAppliedCornerPx = -1f
-    private var currentWidthPx = dp(DEFAULT_WIDTH_DP)
-    private var currentHeightPx = dp(DEFAULT_HEIGHT_DP)
-    private var currentX = dp(16f)
-    private var currentY = dp(96f)
     private var dragStartRawX = 0f
     private var dragStartRawY = 0f
     private var dragStartWinX = 0
     private var dragStartWinY = 0
 
-    private val blurEnabledListener =
-        Consumer<Boolean> { enabled ->
-            if (systemBlurSupported != enabled) {
-                systemBlurSupported = enabled
-                if (visible) applyVisualStyle()
-            }
-        }
+    private val dialog =
+        windowLayout.createOverlayDialog(
+            themedContext = themedContext,
+            contentView = rootContainer,
+            initialCornerPx = backdropController.initialCornerPx(),
+            isImeFocused = { imeFocused },
+            onReleaseImeFocus = { setImeFocused(false) },
+            onOutsideTouchWhileFocused = ::handleOutsideTouchWhileFocused,
+        )
 
     val isVisible: Boolean
         get() = visible
 
+    internal val overlayWindow: Window?
+        get() = dialog.window
+
+    fun debugState(activePluginId: String? = null): DebugOverlayWindowSnapshot =
+        buildOverlayWindowDebugSnapshot(
+            name = "pinned",
+            attached = attached,
+            visible = visible,
+            window = dialog.window,
+            alpha = rootContainer.alpha,
+            appliedBlurRadiusPx = backdropController.appliedBlurRadiusPx(),
+            clickThrough = clickThrough,
+            imeFocused = imeFocused,
+            activePluginId = if (visible) activePluginId else null,
+            agsl = backdropController.agslDebugState(),
+        )
+
     init {
-        chrome.updateStyle(isDark, pluginBackdrop, dynamicTint)
+        backdropController.syncChromeStyle(chrome)
         rootContainer.addView(webSlot, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         rootContainer.addView(
             chrome.bottomHandleBar,
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, chrome.handleBarHeightPx()),
         )
-        dialog.setCanceledOnTouchOutside(false)
-        dialog.setCancelable(false)
-        dialog.setContentView(
-            rootContainer,
-            ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
-        )
-        val window = dialog.window ?: error("Pinned overlay dialog window unavailable")
-        window.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
-        window.setFormat(PixelFormat.TRANSLUCENT)
-        window.decorView.setPadding(0, 0, 0, 0)
-        lastAppliedCornerPx = cornerPx()
-        window.setBackgroundDrawable(BlurMaskDrawable(lastAppliedCornerPx))
-        collapseWindow(window)
+        rootContainer.setOnApplyWindowInsetsListener { _, insets ->
+            val nextIme = insets.getInsets(WindowInsets.Type.ime()).bottom
+            val wasImeVisible = lastImeBottomPx > 0
+            lastImeBottomPx = nextIme
+            if (wasImeVisible && nextIme == 0 && imeFocused) {
+                setImeFocused(false)
+            }
+            insets
+        }
     }
 
     fun attachWarm() {
@@ -124,7 +121,7 @@ internal class PinnedContainerWindow(
         runCatching {
             dialog.show()
             attached = true
-            runCatching { windowManager.addCrossWindowBlurEnabledListener(context.mainExecutor, blurEnabledListener) }
+            backdropController.registerBlurListener()
             dialog.window?.let(::collapseWindow)
         }.onFailure { err -> Log.w(TAG, "Failed to attach PinnedContainerWindow", err) }
     }
@@ -136,8 +133,10 @@ internal class PinnedContainerWindow(
     ) {
         if (!attached) attachWarm()
         if (!attached) return
-        pluginBackdrop = backdrop
+        backdropController.setBackdrop(backdrop)
         visible = true
+        imeFocused = false
+        lastImeBottomPx = 0
         (webView.parent as? ViewGroup)?.removeView(webView)
         webSlot.removeAllViews()
         webSlot.addView(
@@ -147,8 +146,8 @@ internal class PinnedContainerWindow(
         webView.alpha = 1f
         mountedWebView = webView
 
-        bounds?.let(::applyBoundsInternal)
-        clampWindowPosition()
+        bounds?.let(windowLayout::applyBounds)
+        windowLayout.clampPosition()
         val desiredClickThrough = bounds?.clickThrough ?: false
         applyClickThroughState(enabled = desiredClickThrough, notify = desiredClickThrough)
         applyVisualStyle()
@@ -160,13 +159,33 @@ internal class PinnedContainerWindow(
         }
     }
 
+    fun setImeFocused(focused: Boolean) {
+        if (focused) {
+            if (!attached || !visible || clickThrough) return
+            imeFocused = true
+            imeFocusRequestedAtMs = SystemClock.uptimeMillis()
+            syncWindowLayout()
+            mountedWebView?.let { wv ->
+                windowLayout.showSoftInput(wv) { imeFocused && visible && !clickThrough }
+            }
+        } else {
+            val wasFocused = imeFocused
+            imeFocused = false
+            lastImeBottomPx = 0
+            mountedWebView?.let { wv -> windowLayout.hideSoftInput(wv, clearFocus = wasFocused) }
+            if (wasFocused && attached && visible) {
+                syncWindowLayout()
+            }
+        }
+    }
+
     fun updateBackdrop(backdrop: PluginSurfaceBackdrop) {
-        pluginBackdrop = backdrop
+        backdropController.setBackdrop(backdrop)
         if (visible) applyVisualStyle()
     }
 
     fun updateBounds(bounds: PinnedBoundsSpec) {
-        applyBoundsInternal(bounds)
+        windowLayout.applyBounds(bounds)
         bounds.clickThrough?.let { applyClickThroughState(enabled = it, notify = false) }
         if (visible) syncWindowLayout()
     }
@@ -177,16 +196,12 @@ internal class PinnedContainerWindow(
         dark: Boolean,
         tint: GlassTintOverride?,
     ) {
-        panelConfig = config
-        themeId = nextThemeId
-        isDark = dark
-        dynamicTint = tint
-        backdropDrawable.updateDensity(density)
-        chrome.updateStyle(isDark, pluginBackdrop, dynamicTint)
+        backdropController.updateStyle(config, nextThemeId, dark, tint, chrome)
         if (visible) applyVisualStyle()
     }
 
     fun hide() {
+        setImeFocused(false)
         visible = false
         applyClickThroughState(enabled = false, notify = false)
         mountedWebView?.let(OverlayWindowFlags::clearHighFrameRate)
@@ -197,11 +212,17 @@ internal class PinnedContainerWindow(
 
     fun detach() {
         hide()
-        runCatching { windowManager.removeCrossWindowBlurEnabledListener(blurEnabledListener) }
+        backdropController.unregisterBlurListener()
         if (attached) {
             runCatching { dialog.dismiss() }
             attached = false
         }
+    }
+
+    private fun handleOutsideTouchWhileFocused() {
+        if (!imeFocused || lastImeBottomPx > 0) return
+        if (SystemClock.uptimeMillis() - imeFocusRequestedAtMs < IME_OPEN_GRACE_MS) return
+        setImeFocused(false)
     }
 
     private fun handleDrag(event: MotionEvent): Boolean {
@@ -210,15 +231,16 @@ internal class PinnedContainerWindow(
             MotionEvent.ACTION_DOWN -> {
                 dragStartRawX = event.rawX
                 dragStartRawY = event.rawY
-                dragStartWinX = currentX
-                dragStartWinY = currentY
+                dragStartWinX = windowLayout.x
+                dragStartWinY = windowLayout.y
                 return true
             }
 
             MotionEvent.ACTION_MOVE, MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                currentX = dragStartWinX + (event.rawX - dragStartRawX).roundToInt()
-                currentY = dragStartWinY + (event.rawY - dragStartRawY).roundToInt()
-                clampWindowPosition()
+                windowLayout.setPositionClamped(
+                    nextX = dragStartWinX + (event.rawX - dragStartRawX).roundToInt(),
+                    nextY = dragStartWinY + (event.rawY - dragStartRawY).roundToInt(),
+                )
                 syncWindowLayout()
                 return true
             }
@@ -230,6 +252,7 @@ internal class PinnedContainerWindow(
         enabled: Boolean,
         notify: Boolean,
     ) {
+        if (enabled && imeFocused) setImeFocused(false)
         val changed = clickThrough != enabled
         clickThrough = enabled
         chrome.setHandleVisible(!enabled)
@@ -237,126 +260,24 @@ internal class PinnedContainerWindow(
         if (notify && changed) onClickThroughChanged(enabled)
     }
 
-    private fun applyBoundsInternal(bounds: PinnedBoundsSpec) {
-        val safe = PanelInsetsCoordinator.resolveBounds(context, windowManager)
-        bounds.widthDp?.let { currentWidthPx = dp(it.coerceIn(180, 420).toFloat()) }
-        bounds.heightDp?.let { currentHeightPx = dp(it.coerceIn(140, 560).toFloat()) }
-        bounds.xPercent?.let {
-            val pct = it.coerceIn(0f, 100f) / 100f
-            currentX = ((safe.screenWidthPx - currentWidthPx).coerceAtLeast(0) * pct).roundToInt()
-        }
-        bounds.yPercent?.let {
-            val pct = it.coerceIn(0f, 100f) / 100f
-            val minY = safe.safeTopPx
-            val maxY = (safe.screenHeightPx - safe.safeBottomPx - currentHeightPx).coerceAtLeast(minY)
-            currentY = (minY + (maxY - minY) * pct).roundToInt()
-        }
-        clampWindowPosition()
-    }
-
-    private fun clampWindowPosition() {
-        val safe = PanelInsetsCoordinator.resolveBounds(context, windowManager)
-        val maxX = (safe.screenWidthPx - currentWidthPx).coerceAtLeast(0)
-        val minY = safe.safeTopPx
-        val maxY = (safe.screenHeightPx - safe.safeBottomPx - currentHeightPx).coerceAtLeast(minY)
-        currentX = currentX.coerceIn(0, maxX)
-        currentY = currentY.coerceIn(minY, maxY)
-    }
-
     private fun applyVisualStyle() {
-        val window = dialog.window ?: return
-        chrome.updateStyle(isDark, pluginBackdrop, dynamicTint)
-        if (pluginBackdrop == PluginSurfaceBackdrop.TRANSPARENT) {
-            rootContainer.background = null
-            rootContainer.clipToOutline = false
-            applyBlur(window, 0)
-            return
-        }
-        if (rootContainer.background !== backdropDrawable) rootContainer.background = backdropDrawable
-        rootContainer.clipToOutline = true
-        val corner = cornerPx()
-        if (lastAppliedCornerPx != corner) {
-            lastAppliedCornerPx = corner
-            window.setBackgroundDrawable(BlurMaskDrawable(corner))
-            rootContainer.invalidateOutline()
-        }
-        val blurAllowed =
-            pluginBackdrop == PluginSurfaceBackdrop.NATIVE_GLASS &&
-                systemBlurSupported &&
-                panelConfig.nativeBlurEnabled
-        val radius = if (blurAllowed) panelConfig.blurRadiusPx.coerceIn(0, 180) else 0
-        backdropDrawable.updateStyle(
-            GlassBackdropStyle(themeId, isDark, blurActive = radius > 0, cornerRadiusPx = corner, dynamicOverride = dynamicTint),
-        )
-        applyBlur(window, radius)
+        dialog.window?.let { backdropController.apply(it, rootContainer, chrome) }
     }
 
     private fun syncWindowLayout() {
         val window = dialog.window ?: return
         if (!attached || !visible) return
-        val lp = window.attributes
-        lp.title = "SideVeilPinnedPlugin"
-        lp.gravity = Gravity.TOP or Gravity.LEFT
-        lp.width = currentWidthPx
-        lp.height = currentHeightPx
-        lp.x = currentX
-        lp.y = currentY
-        lp.flags = if (clickThrough) CLICK_THROUGH_FLAGS else INTERACTIVE_FLAGS
-        OverlayWindowFlags.applyPreferredMaxRefreshRate(context, lp, window.decorView.display)
-        OverlayWindowFlags.disableMoveAnimation(lp)
-        window.attributes = lp
-        chrome.syncUnlockChip(clickThrough, currentX, currentY, currentWidthPx, currentHeightPx)
+        windowLayout.syncWindowAttributes(window, clickThrough = clickThrough, imeFocused = imeFocused)
+        chrome.syncUnlockChip(clickThrough, windowLayout.x, windowLayout.y, windowLayout.widthPx, windowLayout.heightPx)
     }
 
     private fun collapseWindow(window: Window) {
-        applyBlur(window, 0)
-        OverlayWindowFlags.clearHighFrameRate(rootContainer)
-        window.decorView.visibility = View.INVISIBLE
-        val lp = window.attributes
-        lp.title = "SideVeilPinnedPlugin"
-        lp.gravity = Gravity.TOP or Gravity.LEFT
-        lp.width = 1
-        lp.height = 1
-        lp.x = 0
-        lp.y = 0
-        lp.flags = INVISIBLE_FLAGS
-        OverlayWindowFlags.clearPreferredRefreshRate(lp)
-        OverlayWindowFlags.disableMoveAnimation(lp)
-        window.attributes = lp
+        backdropController.clearBlur(window)
+        windowLayout.collapse(window, rootContainer)
     }
-
-    private fun applyBlur(
-        window: Window,
-        radius: Int,
-    ) {
-        if (lastAppliedBlur != radius) {
-            lastAppliedBlur = radius
-            window.setBackgroundBlurRadius(radius)
-        }
-    }
-
-    private fun cornerPx(): Float = dp(panelConfig.cornerRadiusDp.coerceIn(12, 24).toFloat()).toFloat()
-
-    private fun dp(value: Float): Int = OverlayWindowFlags.dp(density, value)
 
     companion object {
         private const val TAG = "SideVeilPinnedWindow"
-        private const val DEFAULT_WIDTH_DP = 316f
-        private const val DEFAULT_HEIGHT_DP = 348f
-
-        private const val INVISIBLE_FLAGS =
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
-
-        private const val INTERACTIVE_FLAGS =
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
-
-        private const val CLICK_THROUGH_FLAGS =
-            INTERACTIVE_FLAGS or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        private const val IME_OPEN_GRACE_MS = 350L
     }
 }

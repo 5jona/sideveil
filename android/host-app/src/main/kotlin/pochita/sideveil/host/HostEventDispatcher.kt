@@ -66,6 +66,8 @@ internal interface HostEventCallbacks {
 
     fun onPluginScopedEvent(decoded: PluginScopedEventPayload)
 
+    fun onNetworkContextChanged(rawEnvelope: HostEventEnvelope)
+
     fun onPanelCommand(command: PanelCommand)
 
     fun onFallbackGlobalEvent(envelope: HostEventEnvelope)
@@ -101,6 +103,9 @@ internal class HostEventDispatcher(
             },
             SideVeilEvents.PLUGIN_EVENT to { env ->
                 decode(env, PluginScopedEventPayload.serializer())?.let(callbacks::onPluginScopedEvent)
+            },
+            SideVeilEvents.NETWORK_CONTEXT_CHANGED to { env ->
+                callbacks.onNetworkContextChanged(env)
             },
             SideVeilEvents.THEME_PALETTE_UPDATED to { env ->
                 decode(env, DynamicThemePalette.serializer())?.let { overlayCallbacks.onThemePaletteUpdated(it, env) }

@@ -10,27 +10,15 @@ import android.util.Log
 import android.view.WindowManager
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
-import kotlinx.serialization.json.encodeToJsonElement
-import pochita.sideveil.protocol.ConfigUpdatedPayload
-import pochita.sideveil.protocol.HostEventEnvelope
-import pochita.sideveil.protocol.HostFullscreenChangedPayload
-import pochita.sideveil.protocol.HostHelloPayload
-import pochita.sideveil.protocol.PanelCommand
-import pochita.sideveil.protocol.PanelState
-import pochita.sideveil.protocol.PanelStateChangedPayload
-import pochita.sideveil.protocol.PluginBackendStatePayload
-import pochita.sideveil.protocol.PluginScopedEventPayload
-import pochita.sideveil.protocol.PluginSelectEventPayload
-import pochita.sideveil.protocol.PluginsSnapshotPayload
-import pochita.sideveil.protocol.ScopeChangedPayload
-import pochita.sideveil.protocol.SideVeilConfig
-import pochita.sideveil.protocol.SideVeilEvents
-import pochita.sideveil.protocol.SideVeilWireJson
+import pochita.sideveil.protocol.RpcError
+import pochita.sideveil.protocol.RpcRequest
+import pochita.sideveil.protocol.RpcResponse
+import pochita.sideveil.protocol.SideVeilErrorCodes
 
 /**
  * Headless foreground service running inside the AMS-managed SideVeilHost priv-app process.
- * Hosts warm overlay windows (edge handle, multi-plugin Rail, sidebar panel) and manages
- * isolated per-plugin WebView sandboxes bridged to `sideveild`.
+ * Hosts warm overlay windows (edge handle, multi-plugin Rail, sidebar panel, pinned container,
+ * native HUD) and wires them to `sideveild` via [HostServiceBridge].
  */
 class HostService : LifecycleService() {
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -46,24 +34,19 @@ class HostService : LifecycleService() {
     private lateinit var nativeHudWindow: NativeHudWindow
     private lateinit var dynamicThemeExtractor: DynamicThemeExtractor
     private lateinit var pluginManager: PluginWebViewManager
+    private lateinit var frameMetricsTracker: WindowFrameMetricsTracker
+    private lateinit var debugInspector: HostDebugInspector
     private lateinit var gestureCoordinator: HostGestureCoordinator
     private lateinit var overlayCoordinator: HostOverlayCoordinator
+    private lateinit var serviceBridge: HostServiceBridge
     private lateinit var eventDispatcher: HostEventDispatcher
-
-    private var latestConfig: SideVeilConfig = SideVeilConfig.DEFAULT
-    private var latestScopeActive: Boolean = false
-    private var latestDarkSurface: Boolean = true
-    private var latestThemeId: String = "coloros-glass"
-    private var latestForegroundPackage: String = ""
-    private var latestPluginIconSignature: String = ""
 
     override fun onCreate() {
         super.onCreate()
         windowManager = getSystemService(WindowManager::class.java)
-        latestDarkSurface = HostServiceSupport.resolveDarkSurface(latestConfig, resources.configuration)
-        latestThemeId = latestConfig.panel.themeId
         HostServiceSupport.promoteForeground(this)
-        initializeRuntimeComponents()
+        initializeWindows()
+        initializeCoordinators()
         attachWarmWindows()
         syncEndpointFromDisk()
         Log.i(TAG, "HostService created (pid=${Process.myPid()}, uid=${Process.myUid()})")
@@ -83,14 +66,18 @@ class HostService : LifecycleService() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        latestDarkSurface = HostServiceSupport.resolveDarkSurface(latestConfig, newConfig)
-        panelWindow.onSystemConfigurationChanged()
-        overlayCoordinator.refreshOverlayStyles()
-        refreshEdgeIndicator()
-        dynamicThemeExtractor.refresh(latestDarkSurface)
+        serviceBridge.onConfigurationChanged(newConfig)
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (::pluginManager.isInitialized) {
+            pluginManager.onTrimMemory(level)
+        }
     }
 
     override fun onDestroy() {
+        frameMetricsTracker.destroy()
         dynamicThemeExtractor.stop()
         daemonClient.close()
         iconLoader.clear()
@@ -103,22 +90,30 @@ class HostService : LifecycleService() {
         super.onDestroy()
     }
 
-    private fun initializeRuntimeComponents() {
-        initializeWindows()
-        initializeCoordinators()
-    }
-
     private fun initializeWindows() {
-        daemonClient = createDaemonClient()
+        frameMetricsTracker = WindowFrameMetricsTracker()
+        daemonClient =
+            DaemonClient(
+                scope = lifecycleScope,
+                onConnected = { mainHandler.post { serviceBridge.onDaemonConnected() } },
+                onDisconnected = { mainHandler.post { serviceBridge.onDaemonDisconnected() } },
+                onEvent = { env -> mainHandler.post { eventDispatcher.dispatch(env) } },
+                onHostRpcRequest = ::handleHostRpcRequest,
+            )
         haptics = EdgeHapticsController(this)
         iconLoader = RailIconLoader(lifecycleScope) { daemonClient.currentEndpoint() }
-        edgeIndicator = EdgeIndicatorWindow(this, windowManager, ::handleFullscreenChanged)
+        edgeIndicator =
+            EdgeIndicatorWindow(this, windowManager) { fullscreen ->
+                if (::serviceBridge.isInitialized) {
+                    serviceBridge.onFullscreenChanged(fullscreen)
+                }
+            }
         pluginRail =
             PluginRailWindow(
                 context = this,
                 windowManager = windowManager,
                 iconLoader = iconLoader,
-                onSelectPlugin = ::handleRailPluginSelected,
+                onSelectPlugin = { pluginId -> serviceBridge.onRailPluginSelected(pluginId) },
                 onQuickAction = { pluginId, action ->
                     gestureCoordinator.executeRailQuickAction(pluginId, action)
                 },
@@ -132,7 +127,7 @@ class HostService : LifecycleService() {
             SidebarPanelWindow(
                 context = this,
                 windowManager = windowManager,
-                onPanelStateChanged = ::handlePanelStateChanged,
+                onPanelStateChanged = { state -> serviceBridge.onPanelStateChanged(state) },
                 onBackPressedIntercept = { pluginManager.dispatchBackPress() },
                 isBackIntercepted = { pluginManager.isBackIntercepted() },
                 onRailMotionProgress = { progress -> pluginRail.updateMotionProgress(progress) },
@@ -166,9 +161,9 @@ class HostService : LifecycleService() {
                 pinnedWindow = pinnedWindow,
                 nativeHudWindow = nativeHudWindow,
                 pluginManagerProvider = { pluginManager },
-                configProvider = { latestConfig },
-                themeIdProvider = { latestThemeId },
-                darkSurfaceProvider = { latestDarkSurface },
+                configProvider = { serviceBridge.latestConfig },
+                themeIdProvider = { serviceBridge.latestThemeId },
+                darkSurfaceProvider = { serviceBridge.latestDarkSurface },
             )
         dynamicThemeExtractor =
             DynamicThemeExtractor(this) { colors ->
@@ -182,13 +177,21 @@ class HostService : LifecycleService() {
                 haptics = haptics,
                 surfaceDelegate =
                     overlayCoordinator.createSurfaceDelegate { themeId, colorScheme ->
-                        latestThemeId = themeId
-                        latestDarkSurface = colorScheme != "light"
-                        panelWindow.syncRuntimeAppearance(themeId, colorScheme)
-                        overlayCoordinator.refreshOverlayStyles()
-                        refreshEdgeIndicator()
-                        dynamicThemeExtractor.refresh(latestDarkSurface)
+                        serviceBridge.onSyncAppearance(themeId, colorScheme)
                     },
+            )
+        serviceBridge =
+            HostServiceBridge(
+                context = this,
+                daemonClient = daemonClient,
+                haptics = haptics,
+                iconLoader = iconLoader,
+                edgeIndicator = edgeIndicator,
+                pluginRail = pluginRail,
+                panelWindow = panelWindow,
+                dynamicThemeExtractor = dynamicThemeExtractor,
+                pluginManager = pluginManager,
+                overlayCoordinator = overlayCoordinator,
             )
         gestureCoordinator =
             HostGestureCoordinator(
@@ -201,11 +204,24 @@ class HostService : LifecycleService() {
                 panelWindow = panelWindow,
                 daemonClient = daemonClient,
                 pluginManager = pluginManager,
-                configProvider = { latestConfig },
-                onSelectPlugin = ::handleRailPluginSelected,
+                configProvider = { serviceBridge.latestConfig },
+                onSelectPlugin = { pluginId -> serviceBridge.onRailPluginSelected(pluginId) },
                 onBeforeGestureOpen = { overlayCoordinator.ensureDrawerMountedBeforeOpen() },
             )
-        eventDispatcher = HostEventDispatcher(createEventCallbacks(), gestureCoordinator, overlayCoordinator)
+        eventDispatcher = HostEventDispatcher(serviceBridge, gestureCoordinator, overlayCoordinator)
+        debugInspector =
+            HostDebugInspector(
+                context = this,
+                windowManager = windowManager,
+                mainHandler = mainHandler,
+                panelWindow = panelWindow,
+                pinnedWindow = pinnedWindow,
+                nativeHudWindow = nativeHudWindow,
+                pluginRail = pluginRail,
+                edgeIndicator = edgeIndicator,
+                pluginManager = pluginManager,
+                frameMetricsTracker = frameMetricsTracker,
+            )
     }
 
     private fun attachWarmWindows() {
@@ -214,174 +230,22 @@ class HostService : LifecycleService() {
         pinnedWindow.attachWarm()
         nativeHudWindow.attachWarm()
         panelWindow.attachWarm()
+        panelWindow.overlayWindow?.let { frameMetricsTracker.attach("panel", it) }
+        pinnedWindow.overlayWindow?.let { frameMetricsTracker.attach("pinned", it) }
+        nativeHudWindow.overlayWindow?.let { frameMetricsTracker.attach("hud", it) }
         pluginManager.warmStartDefault()
-        dynamicThemeExtractor.start(latestDarkSurface)
+        dynamicThemeExtractor.start(serviceBridge.latestDarkSurface)
     }
 
-    private fun handleRailPluginSelected(pluginId: String) {
-        if (!pluginManager.selectPlugin(pluginId)) return
-        haptics.onRailSwitch()
-        daemonClient.sendEvent(
-            SideVeilEvents.HOST_SELECT_PLUGIN,
-            SideVeilWireJson.encodeToJsonElement(
-                PluginSelectEventPayload(
-                    pluginId = pluginId,
-                    packageName = latestForegroundPackage.ifBlank { null },
-                ),
-            ),
-        )
-    }
-
-    private fun handleFullscreenChanged(fullscreen: Boolean) {
-        daemonClient.sendEvent(
-            SideVeilEvents.HOST_FULLSCREEN_CHANGED,
-            SideVeilWireJson.encodeToJsonElement(HostFullscreenChangedPayload(fullscreen)),
-        )
-    }
-
-    private fun createDaemonClient(): DaemonClient =
-        DaemonClient(
-            scope = lifecycleScope,
-            onConnected = {
-                mainHandler.post { sendHostConnectedState() }
-            },
-            onDisconnected = {
-                mainHandler.post { handleDaemonDisconnected() }
-            },
-            onEvent = { env ->
-                mainHandler.post { eventDispatcher.dispatch(env) }
-            },
-        )
-
-    private fun sendHostConnectedState() {
-        daemonClient.sendEvent(
-            SideVeilEvents.HOST_HELLO,
-            SideVeilWireJson.encodeToJsonElement(
-                HostHelloPayload(
-                    pid = Process.myPid(),
-                    version = BuildConfig.VERSION_NAME,
-                    crossWindowBlurSupported = panelWindow.isSystemBlurSupported,
-                ),
-            ),
-        )
-        val currentState = panelWindow.currentState
-        if (currentState != PanelState.CLOSED) {
-            daemonClient.sendEvent(
-                SideVeilEvents.PANEL_STATE_CHANGED,
-                SideVeilWireJson.encodeToJsonElement(PanelStateChangedPayload(currentState)),
+    private suspend fun handleHostRpcRequest(req: RpcRequest): RpcResponse =
+        if (::debugInspector.isInitialized) {
+            debugInspector.handleRpcRequest(req)
+        } else {
+            RpcResponse(
+                id = req.id,
+                error = RpcError(SideVeilErrorCodes.INTERNAL_ERROR, "Host inspector not ready"),
             )
         }
-        handleFullscreenChanged(edgeIndicator.isFullscreenActive())
-        dynamicThemeExtractor.refresh(latestDarkSurface, force = true)
-    }
-
-    private fun handleDaemonDisconnected() {
-        latestScopeActive = false
-        pluginRail.setPanelOpen(false)
-        overlayCoordinator.hideTransientOverlays()
-        if (panelWindow.currentState != PanelState.CLOSED) {
-            panelWindow.close()
-        }
-        refreshEdgeIndicator()
-    }
-
-    private fun createEventCallbacks(): HostEventCallbacks =
-        object : HostEventCallbacks {
-            override fun onConfigUpdated(
-                decoded: ConfigUpdatedPayload,
-                rawEnvelope: HostEventEnvelope,
-            ) {
-                latestConfig = decoded.config
-                latestScopeActive = decoded.scopeActive
-                latestForegroundPackage = decoded.foregroundPackage
-                latestThemeId = decoded.config.panel.themeId
-                latestDarkSurface = HostServiceSupport.resolveDarkSurface(decoded.config, resources.configuration)
-                panelWindow.updateConfig(decoded.config.edge.side, decoded.config.panel)
-                overlayCoordinator.refreshOverlayStyles()
-                refreshEdgeIndicator()
-                dynamicThemeExtractor.refresh(latestDarkSurface)
-                pluginManager.broadcastGlobalEvent(rawEnvelope)
-            }
-
-            override fun onScopeChanged(
-                decoded: ScopeChangedPayload,
-                rawEnvelope: HostEventEnvelope,
-            ) {
-                latestScopeActive = decoded.active
-                latestForegroundPackage = decoded.foregroundPackage
-                if (!decoded.active) {
-                    overlayCoordinator.ensureDrawerMountedBeforeOpen()
-                    edgeIndicator.setEdgeStatus(null)
-                }
-                refreshEdgeIndicator()
-                pluginManager.broadcastGlobalEvent(rawEnvelope)
-            }
-
-            override fun onPluginsUpdated(decoded: PluginsSnapshotPayload) {
-                latestForegroundPackage = decoded.foregroundPackage
-                latestScopeActive = decoded.matchedPluginIds.isNotEmpty()
-                val iconSig =
-                    decoded.plugins.joinToString("|") { p -> "${p.id}:${p.version}:${p.icon.orEmpty()}" }
-                if (iconSig != latestPluginIconSignature) {
-                    latestPluginIconSignature = iconSig
-                    iconLoader.clear()
-                }
-                pluginManager.onPluginsSnapshot(decoded)
-                overlayCoordinator.refreshOverlayStyles()
-                refreshEdgeIndicator()
-            }
-
-            override fun onPluginActiveChanged(pluginId: String) {
-                pluginManager.selectPlugin(pluginId)
-            }
-
-            override fun onPluginBackendState(decoded: PluginBackendStatePayload) = pluginManager.routeBackendState(decoded)
-
-            override fun onPluginScopedEvent(decoded: PluginScopedEventPayload) = pluginManager.routePluginScopedEvent(decoded)
-
-            override fun onPanelCommand(command: PanelCommand) {
-                when (command) {
-                    PanelCommand.OPEN -> {
-                        overlayCoordinator.ensureDrawerMountedBeforeOpen()
-                        panelWindow.open()
-                    }
-
-                    PanelCommand.CLOSE -> {
-                        panelWindow.close()
-                    }
-
-                    PanelCommand.TOGGLE -> {
-                        if (panelWindow.currentState == PanelState.CLOSED) {
-                            overlayCoordinator.ensureDrawerMountedBeforeOpen()
-                        }
-                        panelWindow.toggle()
-                    }
-                }
-            }
-
-            override fun onFallbackGlobalEvent(envelope: HostEventEnvelope) = pluginManager.broadcastGlobalEvent(envelope)
-        }
-
-    private fun handlePanelStateChanged(state: PanelState) {
-        daemonClient.sendEvent(
-            SideVeilEvents.PANEL_STATE_CHANGED,
-            SideVeilWireJson.encodeToJsonElement(PanelStateChangedPayload(state)),
-        )
-        if (state == PanelState.CLOSED) {
-            pluginRail.setPanelOpen(false)
-        }
-        refreshEdgeIndicator()
-        pluginManager.onPanelStateChanged(state)
-    }
-
-    private fun refreshEdgeIndicator() {
-        edgeIndicator.update(
-            latestConfig.edge,
-            latestScopeActive,
-            panelWindow.currentState,
-            latestDarkSurface,
-        )
-    }
 
     private fun syncEndpointFromDisk() {
         HostServiceSupport.readEndpointFromDisk(this)?.let { endpoint ->

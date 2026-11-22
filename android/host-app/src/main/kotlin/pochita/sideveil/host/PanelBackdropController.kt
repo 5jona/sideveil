@@ -128,6 +128,17 @@ internal class PanelBackdropController(
         return if (panelConfig.nativeBlurEnabled) panelConfig.blurRadiusPx.coerceAtLeast(0) else 0
     }
 
+    fun debugState(): PanelBackdropDebugState =
+        PanelBackdropDebugState(
+            themeId = themeId,
+            colorScheme = colorScheme,
+            pluginBackdrop = pluginBackdrop,
+            systemBlurSupported = systemBlurSupported,
+            appliedBlurRadiusPx = lastAppliedBlurRadius.coerceAtLeast(0),
+            targetBlurRadiusPx = targetBlurRadiusPx(),
+            agsl = backdropDrawable.debugState(),
+        )
+
     /**
      * Applies per-frame progressive cross-window blur, optical glass alpha, and AGSL specular
      * motion shift without re-creating [BlurMaskDrawable].

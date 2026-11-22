@@ -177,6 +177,8 @@ internal class HostOverlayCoordinator(
 
             override fun onSetImeFocused(focused: Boolean) = panelWindow.setImeFocused(focused)
 
+            override fun onSetPinnedImeFocused(focused: Boolean) = pinnedWindow.setImeFocused(focused)
+
             override fun onSyncAppearance(
                 themeId: String,
                 colorScheme: String,

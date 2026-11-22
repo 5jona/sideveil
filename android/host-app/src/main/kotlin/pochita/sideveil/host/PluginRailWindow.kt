@@ -3,7 +3,6 @@ package pochita.sideveil.host
 import android.annotation.SuppressLint
 import android.app.Dialog
 import android.content.Context
-import android.graphics.PixelFormat
 import android.os.SystemClock
 import android.util.Log
 import android.view.ContextThemeWrapper
@@ -15,28 +14,22 @@ import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import pochita.sideveil.protocol.DebugOverlayWindowSnapshot
 import pochita.sideveil.protocol.EdgeSide
 import pochita.sideveil.protocol.GlassTintOverride
 import pochita.sideveil.protocol.PanelConfig
 import pochita.sideveil.protocol.PluginDescriptor
-import kotlin.math.roundToInt
-
-enum class RailQuickAction {
-    PIN_TOP,
-    DISABLE,
-    RELOAD,
-}
 
 /**
  * Compact native glass Plugin Rail (`50dp` wide) rendered beside the panel on the screen-edge side
  * ONLY when >= 2 plugins match the current foreground app. Synchronizes entry/exit with
- * [SidebarPanelWindow] via shared `railProgress`, delegates slot creation to [RailSlotFactory],
- * and supports one-stroke blind scrubbing.
+ * [SidebarPanelWindow] via shared `railProgress`, delegates slot creation to [RailSlotFactory]
+ * and window/backdrop layout to [PluginRailSurfaceController], and supports one-stroke blind scrubbing.
  */
 @SuppressLint("RtlHardcoded", "ClickableViewAccessibility")
 internal class PluginRailWindow(
     private val context: Context,
-    private val windowManager: WindowManager,
+    windowManager: WindowManager,
     iconLoader: RailIconLoader,
     private val onSelectPlugin: (String) -> Unit,
     onQuickAction: (String, RailQuickAction) -> Unit = { _, _ -> },
@@ -47,7 +40,7 @@ internal class PluginRailWindow(
             context.resources.displayMetrics.density
                 .coerceAtLeast(1f)
     private val themedContext = ContextThemeWrapper(context, R.style.Theme_SideVeil_OverlayDialog)
-    private val backdropDrawable = GlassBackdropDrawable(density)
+    private val surfaceController = PluginRailSurfaceController(context, windowManager) { density }
     private val slotFactory =
         RailSlotFactory(
             themedContext = themedContext,
@@ -66,17 +59,9 @@ internal class PluginRailWindow(
 
     private var attached = false
     private var motionProgress = 0f
-    private var edgeSide = EdgeSide.RIGHT
-    private var panelConfig = PanelConfig()
-    private var syncedThemeId = "coloros-glass"
-    private var isDark = true
-    private var dynamicTint: GlassTintOverride? = null
-    private var systemBlurSupported = runCatching { windowManager.isCrossWindowBlurEnabled }.getOrDefault(false)
-    private var lastAppliedBlurRadius = -1
     private var matchedPlugins: List<PluginDescriptor> = emptyList()
     private var activePluginId: String = ""
     private var scrubbedPluginId: String? = null
-    private var lastDesiredHeightPx: Int = dp(120f)
     private var touchInProgress: Boolean = false
     private var lastTouchUptimeMs: Long = 0L
 
@@ -96,9 +81,9 @@ internal class PluginRailWindow(
                 addView(itemColumn, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             }
 
-        railContainer.background = backdropDrawable
+        railContainer.background = surfaceController.backdropDrawable
         railContainer.clipToOutline = true
-        railContainer.outlineProvider = GlassBackdropDrawable.createContentOutlineProvider { cornerPx() }
+        railContainer.outlineProvider = GlassBackdropDrawable.createContentOutlineProvider { surfaceController.cornerPx() }
         railContainer.setPadding(dp(2f), dp(6f), dp(2f), dp(6f))
         railContainer.isClickable = true
         railContainer.setOnTouchListener { _, ev ->
@@ -119,20 +104,22 @@ internal class PluginRailWindow(
         )
 
         val window = dialog.window ?: error("Rail overlay dialog window unavailable")
-        window.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
-        window.setFormat(PixelFormat.TRANSLUCENT)
-        window.decorView.setPadding(0, 0, 0, 0)
-        window.setBackgroundDrawable(BlurMaskDrawable(cornerPx()))
-        window.attributes =
-            window.attributes.apply {
-                title = "SideVeilPluginRail"
-                gravity = Gravity.TOP or Gravity.LEFT
-                width = 1
-                height = 1
-                flags = INVISIBLE_FLAGS
-                OverlayWindowFlags.disableMoveAnimation(this)
-            }
+        surfaceController.configureWindow(window)
     }
+
+    fun debugState(): DebugOverlayWindowSnapshot =
+        buildOverlayWindowDebugSnapshot(
+            name = "rail",
+            attached = attached,
+            visible = motionProgress > 0.01f && shouldShowRail(),
+            window = dialog.window,
+            alpha = railContainer.alpha,
+            appliedBlurRadiusPx = surfaceController.appliedBlurRadiusPx(),
+            clickThrough = false,
+            imeFocused = false,
+            activePluginId = activePluginId.ifBlank { null },
+            agsl = surfaceController.agslDebugState(),
+        )
 
     fun attachWarm() {
         if (attached) return
@@ -160,7 +147,7 @@ internal class PluginRailWindow(
         val loc = IntArray(2)
         railContainer.getLocationOnScreen(loc)
         val w = railContainer.width.takeIf { it > 1 } ?: dp(RAIL_WIDTH_DP.toFloat())
-        val h = railContainer.height.takeIf { it > 1 } ?: lastDesiredHeightPx
+        val h = railContainer.height.takeIf { it > 1 } ?: surfaceController.lastDesiredHeightPx
         return rawX >= (loc[0] - slop) &&
             rawX <= (loc[0] + w + slop) &&
             rawY >= (loc[1] - slop) &&
@@ -201,15 +188,9 @@ internal class PluginRailWindow(
         themeId: String,
         dark: Boolean,
         blurSupported: Boolean,
-        tint: GlassTintOverride? = dynamicTint,
+        tint: GlassTintOverride? = null,
     ) {
-        edgeSide = side
-        panelConfig = config
-        syncedThemeId = themeId
-        isDark = dark
-        systemBlurSupported = blurSupported
-        dynamicTint = tint
-        backdropDrawable.updateDensity(density)
+        surfaceController.updateStyle(side, config, themeId, dark, blurSupported, tint)
         rebuildItems()
         refreshVisibility()
     }
@@ -240,7 +221,7 @@ internal class PluginRailWindow(
         screenWidthPx: Int,
         screenHeightPx: Int,
     ): String? {
-        val distFromEdge = if (edgeSide == EdgeSide.LEFT) rawX else (screenWidthPx - rawX)
+        val distFromEdge = if (surfaceController.edgeSide == EdgeSide.LEFT) rawX else (screenWidthPx - rawX)
         if (!shouldShowRail() || progress < SCRUB_MIN_PROGRESS || distFromEdge > dp(RAIL_SCRUB_ZONE_DP.toFloat())) {
             if (scrubbedPluginId != null) {
                 scrubbedPluginId = null
@@ -248,7 +229,7 @@ internal class PluginRailWindow(
             }
             return null
         }
-        val railTop = (screenHeightPx - lastDesiredHeightPx) * 0.5f + dp(6f)
+        val railTop = (screenHeightPx - surfaceController.lastDesiredHeightPx) * 0.5f + dp(6f)
         val idx = ((rawY - railTop) / dp(SLOT_PITCH_DP.toFloat()).toFloat().coerceAtLeast(1f)).toInt().coerceIn(0, matchedPlugins.lastIndex)
         val candidate = matchedPlugins[idx].id
         if (candidate != scrubbedPluginId) {
@@ -282,70 +263,13 @@ internal class PluginRailWindow(
             return
         }
         val window = dialog.window ?: return
-        val safe = PanelInsetsCoordinator.resolveBounds(context, windowManager)
-        val maxHeight = (safe.screenHeightPx * 0.65f).toInt().coerceAtLeast(dp(120f))
-        val desiredHeight = (dp(12f) + matchedPlugins.size * dp(SLOT_PITCH_DP.toFloat())).coerceAtMost(maxHeight)
-        lastDesiredHeightPx = desiredHeight
-
-        val hiddenX = -dp((RAIL_WIDTH_DP + 16).toFloat())
-        val openX = dp(EDGE_MARGIN_DP.toFloat()) + PanelInsetsCoordinator.edgeCutoutInsetPx(safe, edgeSide)
-        val currentX = (hiddenX + (openX - hiddenX) * motionProgress).roundToInt()
-
-        val lp = window.attributes
-        val horiz = if (edgeSide == EdgeSide.LEFT) Gravity.LEFT else Gravity.RIGHT
-        lp.gravity = Gravity.CENTER_VERTICAL or horiz
-        lp.width = dp(RAIL_WIDTH_DP.toFloat())
-        lp.height = desiredHeight
-        lp.x = currentX
-        lp.y = 0
-        lp.flags = if (motionProgress >= 0.45f) VISIBLE_FLAGS else ANIMATING_FLAGS
-        OverlayWindowFlags.applyPreferredMaxRefreshRate(context, lp, window.decorView.display)
-        OverlayWindowFlags.disableMoveAnimation(lp)
-        window.attributes = lp
-        window.decorView.visibility = View.VISIBLE
-        OverlayWindowFlags.applyHighFrameRate(railContainer, context, window.decorView.display)
-        railContainer.alpha = motionProgress
-        applyBackdrop(window, progress = motionProgress)
+        surfaceController.showAnimated(window, railContainer, motionProgress, matchedPlugins.size)
     }
 
     private fun collapseHidden() {
         touchInProgress = false
         val window = dialog.window ?: return
-        applyBackdrop(window, progress = 0f)
-        OverlayWindowFlags.clearHighFrameRate(railContainer)
-        window.decorView.visibility = View.INVISIBLE
-        railContainer.alpha = 0f
-        val lp = window.attributes
-        lp.gravity = Gravity.TOP or Gravity.LEFT
-        lp.width = 1
-        lp.height = 1
-        lp.x = 0
-        lp.y = 0
-        lp.flags = INVISIBLE_FLAGS
-        OverlayWindowFlags.clearPreferredRefreshRate(lp)
-        window.attributes = lp
-    }
-
-    private fun applyBackdrop(
-        window: android.view.Window,
-        progress: Float,
-    ) {
-        val configBlur = if (panelConfig.nativeBlurEnabled && systemBlurSupported) panelConfig.blurRadiusPx else 0
-        val radius = PanelMotionChoreographer.computeProgressiveBlur(progress, configBlur)
-        backdropDrawable.updateStyle(
-            GlassBackdropStyle(
-                themeId = syncedThemeId,
-                isDark = isDark,
-                blurActive = radius > 0,
-                cornerRadiusPx = cornerPx(),
-                dynamicOverride = dynamicTint,
-            ),
-        )
-        backdropDrawable.updateMotion(progress, 0f)
-        if (lastAppliedBlurRadius != radius) {
-            lastAppliedBlurRadius = radius
-            window.setBackgroundBlurRadius(radius)
-        }
+        surfaceController.collapseHidden(window, railContainer)
     }
 
     private fun rebuildItems() {
@@ -354,11 +278,9 @@ internal class PluginRailWindow(
         for (plugin in matchedPlugins) {
             val active = plugin.id == highlightedId
             val scrubbed = plugin.id == scrubbedPluginId
-            itemColumn.addView(slotFactory.createButton(plugin, active, scrubbed, isDark))
+            itemColumn.addView(slotFactory.createButton(plugin, active, scrubbed, surfaceController.isDark))
         }
     }
-
-    private fun cornerPx(): Float = dp(20f).toFloat()
 
     private fun dp(value: Float): Int = OverlayWindowFlags.dp(density, value)
 
@@ -366,29 +288,9 @@ internal class PluginRailWindow(
         private const val TAG = "SideVeilPluginRail"
         const val RAIL_WIDTH_DP = 50
         const val RAIL_GAP_DP = 6
-        private const val EDGE_MARGIN_DP = 12
-        private const val SLOT_PITCH_DP = 48
+        internal const val SLOT_PITCH_DP = 48
         private const val RAIL_SCRUB_ZONE_DP = 86
         private const val SCRUB_MIN_PROGRESS = 0.35f
         private const val RAIL_TOUCH_GRACE_MS = 280L
-
-        private const val INVISIBLE_FLAGS =
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
-
-        private const val ANIMATING_FLAGS =
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-                WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
-
-        private const val VISIBLE_FLAGS =
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
     }
 }

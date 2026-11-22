@@ -10,19 +10,20 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.Window
 import android.view.WindowManager
 import android.widget.FrameLayout
+import pochita.sideveil.protocol.DebugOverlayWindowSnapshot
 import pochita.sideveil.protocol.GlassTintOverride
-import pochita.sideveil.protocol.HudBackdropKind
 import pochita.sideveil.protocol.NativeHudSceneHeader
 import pochita.sideveil.protocol.PanelConfig
 import kotlin.math.roundToInt
 
 /**
  * Zero-WebView `TYPE_APPLICATION_OVERLAY` Dialog window hosting [NativeHudView] on top of
- * optional SurfaceFlinger cross-window blur + [GlassBackdropDrawable].
- * Supports native display refresh-rate `vello_cpu` NEON vector updates, direct dragging, and
- * `clickThrough` mode without spawning any Chromium renderer process.
+ * optional SurfaceFlinger cross-window blur + [GlassBackdropDrawable] via
+ * [NativeHudBackdropController]. Supports native display refresh-rate `vello_cpu` NEON vector
+ * updates, direct dragging, and `clickThrough` mode without spawning any Chromium renderer.
  */
 @SuppressLint("RtlHardcoded", "ClickableViewAccessibility")
 internal class NativeHudWindow(
@@ -35,11 +36,15 @@ internal class NativeHudWindow(
             context.resources.displayMetrics.density
                 .coerceAtLeast(1f)
     private val themedContext = ContextThemeWrapper(context, R.style.Theme_SideVeil_OverlayDialog)
-    private val backdropDrawable = GlassBackdropDrawable(density)
+    private val backdropController =
+        NativeHudBackdropController(
+            densityProvider = { density },
+            initialBlurSupported = runCatching { windowManager.isCrossWindowBlurEnabled }.getOrDefault(false),
+        )
     private val hudView = NativeHudView(themedContext)
     private val container =
         FrameLayout(themedContext).apply {
-            background = backdropDrawable
+            background = backdropController.backdropDrawable
             clipToOutline = true
             outlineProvider = GlassBackdropDrawable.createContentOutlineProvider { cornerPx() }
             addView(
@@ -55,18 +60,28 @@ internal class NativeHudWindow(
     var activePluginId: String? = null
         private set
     private var currentHeader = NativeHudSceneHeader()
-    private var panelConfig = PanelConfig()
-    private var themeId = "coloros-glass"
-    private var isDark = true
-    private var systemBlurSupported = runCatching { windowManager.isCrossWindowBlurEnabled }.getOrDefault(false)
-    private var dynamicTint: GlassTintOverride? = null
-    private var lastAppliedBlur = -1
-    private var lastCornerPx = -1f
     private var userDragged = false
     private var dragStartRawX = 0f
     private var dragStartRawY = 0f
     private var dragStartWinX = 0
     private var dragStartWinY = 0
+
+    internal val overlayWindow: Window?
+        get() = dialog.window
+
+    fun debugState(): DebugOverlayWindowSnapshot =
+        buildOverlayWindowDebugSnapshot(
+            name = "hud",
+            attached = attached,
+            visible = visible,
+            window = dialog.window,
+            alpha = container.alpha,
+            appliedBlurRadiusPx = backdropController.appliedBlurRadiusPx(),
+            clickThrough = currentHeader.clickThrough,
+            imeFocused = false,
+            activePluginId = activePluginId,
+            agsl = backdropController.agslDebugState(),
+        )
 
     init {
         dialog.setCanceledOnTouchOutside(false)
@@ -84,8 +99,7 @@ internal class NativeHudWindow(
         window.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
         window.setFormat(PixelFormat.TRANSLUCENT)
         window.decorView.setPadding(0, 0, 0, 0)
-        window.setBackgroundDrawable(BlurMaskDrawable(cornerPx()))
-        lastCornerPx = cornerPx()
+        backdropController.attachInitialMask(window, cornerPx())
 
         val lp = window.attributes
         lp.title = "SideVeilNativeHud"
@@ -147,12 +161,7 @@ internal class NativeHudWindow(
         blurSupported: Boolean,
         tint: GlassTintOverride?,
     ) {
-        panelConfig = config
-        themeId = nextThemeId
-        isDark = dark
-        systemBlurSupported = blurSupported
-        dynamicTint = tint
-        backdropDrawable.updateDensity(density)
+        backdropController.updateStyle(config, nextThemeId, dark, blurSupported, tint)
         if (visible) {
             applyLayoutAndBackdrop()
         }
@@ -235,44 +244,12 @@ internal class NativeHudWindow(
         }
         window.decorView.visibility = View.VISIBLE
         OverlayWindowFlags.applyHighFrameRate(hudView, context, window.decorView.display)
-
-        if (currentHeader.backdrop == HudBackdropKind.TRANSPARENT) {
-            container.background = null
-            container.clipToOutline = false
-            applyBlur(window, 0)
-            return
-        }
-
-        if (container.background !== backdropDrawable) {
-            container.background = backdropDrawable
-        }
-        container.clipToOutline = true
-        val corner = cornerPx()
-        if (lastCornerPx != corner) {
-            lastCornerPx = corner
-            window.setBackgroundDrawable(BlurMaskDrawable(corner))
-            container.invalidateOutline()
-        }
-        val blurAllowed =
-            currentHeader.backdrop == HudBackdropKind.NATIVE_GLASS &&
-                systemBlurSupported &&
-                panelConfig.nativeBlurEnabled
-        val radius = if (blurAllowed) panelConfig.blurRadiusPx.coerceIn(0, 180) else 0
-        backdropDrawable.updateStyle(
-            GlassBackdropStyle(
-                themeId = themeId,
-                isDark = isDark,
-                blurActive = radius > 0,
-                cornerRadiusPx = corner,
-                dynamicOverride = dynamicTint,
-            ),
-        )
-        applyBlur(window, radius)
+        backdropController.apply(window, container, currentHeader.backdrop, cornerPx())
     }
 
     private fun collapseHidden() {
         val window = dialog.window ?: return
-        applyBlur(window, 0)
+        backdropController.clearBlur(window)
         OverlayWindowFlags.clearHighFrameRate(hudView)
         window.decorView.visibility = View.INVISIBLE
         val lp = window.attributes
@@ -284,16 +261,6 @@ internal class NativeHudWindow(
         lp.flags = INVISIBLE_FLAGS
         OverlayWindowFlags.clearPreferredRefreshRate(lp)
         window.attributes = lp
-    }
-
-    private fun applyBlur(
-        window: android.view.Window,
-        radius: Int,
-    ) {
-        if (lastAppliedBlur != radius) {
-            lastAppliedBlur = radius
-            window.setBackgroundBlurRadius(radius)
-        }
     }
 
     private fun cornerPx(): Float = dp(currentHeader.cornerRadiusDp.coerceIn(0f, 40f)).toFloat()

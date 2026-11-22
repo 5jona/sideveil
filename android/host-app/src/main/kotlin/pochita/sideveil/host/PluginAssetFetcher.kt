@@ -8,6 +8,7 @@ import java.io.ByteArrayInputStream
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URI
+import java.util.Locale
 
 /**
  * Resolves isolated per-plugin virtual HTTPS origins (`https://<pluginId>.plugins.sideveil.local/`),
@@ -98,8 +99,22 @@ class PluginAssetFetcher(
         val (port, token) = endpointProvider() ?: return errorResponse(503, "Hub Unavailable")
         val normalized = relativePath.trimStart('/')
         val url = "http://127.0.0.1:$port/plugins/${descriptor.id}/$normalized"
-        return fetchLoopbackUrl(url, authToken = token, fallbackPath = normalized, coi = coi)
+        val response = fetchLoopbackUrl(url, authToken = token, fallbackPath = normalized, coi = coi)
+        val entryPath = descriptor.entry.trimStart('/').ifEmpty { "index.html" }
+        val isSpaRoute =
+            descriptor.network?.spaFallback == true &&
+                response.statusCode == 404 &&
+                normalized != entryPath &&
+                !normalized.substringAfterLast('/').contains('.')
+        return if (isSpaRoute) {
+            val entryUrl = "http://127.0.0.1:$port/plugins/${descriptor.id}/$entryPath"
+            fetchLoopbackUrl(entryUrl, authToken = token, fallbackPath = entryPath, coi = coi)
+        } else {
+            response
+        }
     }
+
+    fun forbiddenResponse(): WebResourceResponse = errorResponse(403, "Forbidden")
 
     private fun fetchLoopbackUrl(
         targetUrl: String,
@@ -128,12 +143,7 @@ class PluginAssetFetcher(
                     }
                 val contentType = conn.contentType ?: mimeTypeFor(fallbackPath)
                 val mime = contentType.substringBefore(';').trim().ifEmpty { mimeTypeFor(fallbackPath) }
-                val encoding =
-                    if (mime.startsWith("text/") || mime.contains("javascript") || mime.contains("json")) {
-                        "UTF-8"
-                    } else {
-                        null
-                    }
+                val encoding = if (isUtf8Mime(mime)) "UTF-8" else null
                 WebResourceResponse(
                     mime,
                     encoding,
@@ -149,6 +159,8 @@ class PluginAssetFetcher(
             errorResponse(502, "Asset Fetch Failed")
         }
 
+    private fun isUtf8Mime(mime: String): Boolean = mime.startsWith("text/") || UTF8_MIME_SUBSTRINGS.any { mime.contains(it) }
+
     private fun errorResponse(
         status: Int,
         reason: String,
@@ -162,24 +174,45 @@ class PluginAssetFetcher(
             ByteArrayInputStream(reason.toByteArray(Charsets.UTF_8)),
         )
 
-    private fun mimeTypeFor(path: String): String =
-        when {
-            path.endsWith(".html") || path.endsWith(".htm") -> "text/html"
-            path.endsWith(".js") || path.endsWith(".mjs") -> "application/javascript"
-            path.endsWith(".css") -> "text/css"
-            path.endsWith(".svg") -> "image/svg+xml"
-            path.endsWith(".json") -> "application/json"
-            path.endsWith(".png") -> "image/png"
-            path.endsWith(".webp") -> "image/webp"
-            path.endsWith(".woff2") -> "font/woff2"
-            path.endsWith(".wasm") -> "application/wasm"
-            else -> "application/octet-stream"
-        }
-
     companion object {
         const val PLUGIN_ORIGIN_SUFFIX = "plugins.sideveil.local"
         private const val CONNECT_TIMEOUT_MS = 2_000
         private const val READ_TIMEOUT_MS = 4_000
+        private val UTF8_MIME_SUBSTRINGS = listOf("javascript", "json", "xml")
+
+        private val MIME_TYPES_BY_EXT: Map<String, String> =
+            mapOf(
+                "html" to "text/html",
+                "htm" to "text/html",
+                "js" to "application/javascript",
+                "mjs" to "application/javascript",
+                "css" to "text/css",
+                "svg" to "image/svg+xml",
+                "json" to "application/json",
+                "map" to "application/json",
+                "webmanifest" to "application/manifest+json",
+                "png" to "image/png",
+                "jpg" to "image/jpeg",
+                "jpeg" to "image/jpeg",
+                "gif" to "image/gif",
+                "webp" to "image/webp",
+                "avif" to "image/avif",
+                "ico" to "image/x-icon",
+                "woff2" to "font/woff2",
+                "woff" to "font/woff",
+                "ttf" to "font/ttf",
+                "otf" to "font/otf",
+                "wasm" to "application/wasm",
+                "txt" to "text/plain",
+                "xml" to "application/xml",
+            )
+
+        fun mimeTypeFor(path: String): String {
+            val clean = path.substringBefore('?').substringBefore('#')
+            val fileName = clean.substringAfterLast('/')
+            val ext = fileName.substringAfterLast('.', missingDelimiterValue = "").lowercase(Locale.ROOT)
+            return MIME_TYPES_BY_EXT[ext] ?: "application/octet-stream"
+        }
 
         fun buildResponseHeaders(crossOriginIsolated: Boolean): Map<String, String> =
             if (crossOriginIsolated) {

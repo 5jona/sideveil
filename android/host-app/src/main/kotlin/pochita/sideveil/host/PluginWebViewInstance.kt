@@ -1,15 +1,13 @@
 package pochita.sideveil.host
 
-import android.annotation.SuppressLint
 import android.content.Context
-import android.graphics.Color
+import android.graphics.Bitmap
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
-import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.core.net.toUri
@@ -19,7 +17,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
 import pochita.sideveil.protocol.ContainerActionPayload
-import pochita.sideveil.protocol.EdgeStatusPayload
+import pochita.sideveil.protocol.DebugWebViewSnapshot
 import pochita.sideveil.protocol.HostEventEnvelope
 import pochita.sideveil.protocol.PluginBackendKind
 import pochita.sideveil.protocol.PluginBackendStatePayload
@@ -34,7 +32,6 @@ import pochita.sideveil.protocol.SideVeilWireJson
  * `https://<pluginId>.plugins.sideveil.local/` with `onRenderProcessGone` crash recovery,
  * per-plugin container preferences, and [PluginWebMessageBridge] IPC routing.
  */
-@SuppressLint("SetJavaScriptEnabled")
 internal class PluginWebViewInstance(
     context: Context,
     scope: CoroutineScope,
@@ -46,6 +43,7 @@ internal class PluginWebViewInstance(
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
     val webView: WebView = WebView(context)
+    private val dormancy = WebViewDormancyController.forWebView(webView, mainHandler)
 
     @Volatile
     var descriptor: PluginDescriptor = initialDescriptor
@@ -71,71 +69,64 @@ internal class PluginWebViewInstance(
         )
         private set
 
-    private val messageBridge =
-        PluginWebMessageBridge(
-            scope = scope,
-            daemonClient = daemonClient,
-            localRpcHandler = localRpcHandler,
-            webView = webView,
-            pluginOrigin = assetFetcher.originFor(initialDescriptor.id),
-            descriptorProvider = { descriptor },
-            onContainerAction = ::applyContainerAction,
-        )
+    @Volatile
+    var foregroundPriority: Boolean = false
+        private set
+
+    val isUntrustedEmbed: Boolean = PluginNetworkPolicy.isUntrustedEmbed(initialDescriptor)
+
+    // Untrusted web-embeds receive zero JS bridge or WebMessagePort privileges by construction.
+    private val messageBridge: PluginWebMessageBridge? =
+        if (isUntrustedEmbed) {
+            null
+        } else {
+            PluginWebMessageBridge(
+                scope = scope,
+                daemonClient = daemonClient,
+                localRpcHandler = localRpcHandler,
+                webView = webView,
+                pluginOrigin = assetFetcher.originFor(initialDescriptor.id),
+                descriptorProvider = { descriptor },
+                onContainerAction = ::applyContainerAction,
+            )
+        }
 
     init {
-        webView.setBackgroundColor(Color.TRANSPARENT)
-        webView.isFocusable = true
-        webView.isFocusableInTouchMode = true
-        webView.overScrollMode = WebView.OVER_SCROLL_NEVER
-        webView.isVerticalScrollBarEnabled = false
-        webView.isHorizontalScrollBarEnabled = false
-
-        webView.settings.apply {
-            javaScriptEnabled = true
-            domStorageEnabled = true
-            allowFileAccess = false
-            allowContentAccess = false
-            cacheMode = WebSettings.LOAD_DEFAULT
-            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-            useWideViewPort = false
-            loadWithOverviewMode = false
-            textZoom = 100
-            setSupportZoom(false)
-            builtInZoomControls = false
-            displayZoomControls = false
+        PluginWebViewSettings.configureBaseView(context, webView, initialDescriptor, isUntrustedEmbed)
+        messageBridge?.let { bridge ->
+            webView.addJavascriptInterface(bridge.createJsHostObject(), "__POCHITA_HOST__")
         }
-        webView.setInitialScale(0)
-
-        val dm = context.resources.displayMetrics
-        val initW = ((initialDescriptor.surface.widthDp ?: 340) * dm.density).toInt().coerceAtLeast(320)
-        val initH = (dm.heightPixels * ((initialDescriptor.surface.heightPercent ?: 68) / 100f)).toInt().coerceAtLeast(360)
-        webView.measure(
-            android.view.View.MeasureSpec
-                .makeMeasureSpec(initW, android.view.View.MeasureSpec.EXACTLY),
-            android.view.View.MeasureSpec
-                .makeMeasureSpec(initH, android.view.View.MeasureSpec.EXACTLY),
-        )
-        webView.layout(0, 0, initW, initH)
-
-        webView.addJavascriptInterface(messageBridge.createJsHostObject(), "__POCHITA_HOST__")
         webView.webViewClient = createWebViewClient()
         webView.webChromeClient = PluginWebChromeClient({ descriptor.id }, daemonClient)
     }
 
-    fun updateDescriptor(next: PluginDescriptor) {
-        val devUrlChanged = descriptor.devServerUrl != next.devServerUrl
-        val backendStateChanged = descriptor.backendState != next.backendState
+    fun updateDescriptor(next: PluginDescriptor): DescriptorUpdateOutcome {
+        if (isUntrustedEmbed != PluginNetworkPolicy.isUntrustedEmbed(next)) {
+            return DescriptorUpdateOutcome.RECREATE_REQUIRED
+        }
+        val prev = descriptor
         descriptor = next
-        if (devUrlChanged) {
+        if (prev.embed != next.embed || prev.network != next.network || prev.capabilities != next.capabilities) {
+            PluginWebViewSettings.applyWebSettings(webView, next)
+        }
+        val surfaceChanged = syncSurfaceDefaults(prev, next)
+        val needsReload =
+            prev.entry != next.entry ||
+                prev.devServerUrl != next.devServerUrl ||
+                prev.embed != next.embed ||
+                prev.network != next.network ||
+                prev.surface.crossOriginIsolated != next.surface.crossOriginIsolated
+        if (needsReload) {
             loadEntry()
         }
-        if (backendStateChanged || devUrlChanged) {
+        if (prev.backendState != next.backendState || needsReload) {
             pushBackendState()
         }
+        return if (surfaceChanged) DescriptorUpdateOutcome.SURFACE_UPDATED else DescriptorUpdateOutcome.UNCHANGED
     }
 
     fun pushBackendState() {
-        if (descriptor.backend == PluginBackendKind.NONE) return
+        if (isUntrustedEmbed || descriptor.backend == PluginBackendKind.NONE) return
         pushEvent(
             SideVeilEvents.PLUGIN_BACKEND_STATE,
             SideVeilWireJson.encodeToJsonElement(
@@ -145,25 +136,82 @@ internal class PluginWebViewInstance(
     }
 
     fun setForegroundPriority(foreground: Boolean) {
+        foregroundPriority = foreground
         val priority = if (foreground) WebView.RENDERER_PRIORITY_IMPORTANT else WebView.RENDERER_PRIORITY_BOUND
         webView.setRendererPriorityPolicy(priority, !foreground)
+        dormancy.setForeground(foreground)
     }
 
+    fun canConsumeBack(): Boolean = backInterceptEnabled || (descriptor.embed?.webHistoryBack == true && webView.canGoBack())
+
+    fun consumeBackPress(): Boolean {
+        if (backInterceptEnabled) {
+            val payload = buildJsonObject { put("timestampMs", JsonPrimitive(System.currentTimeMillis())) }
+            pushEvent(SideVeilEvents.PANEL_BACK_PRESSED, payload)
+            return true
+        }
+        if (descriptor.embed?.webHistoryBack == true && webView.canGoBack()) {
+            webView.goBack()
+            return true
+        }
+        return false
+    }
+
+    fun flushCookies() = PluginWebViewSettings.flushCookies(descriptor.id)
+
+    fun debugState(
+        isActive: Boolean,
+        isPinned: Boolean,
+        keepAlive: Boolean,
+    ): DebugWebViewSnapshot =
+        DebugWebViewSnapshot(
+            pluginId = descriptor.id,
+            url = webView.url,
+            title = webView.title,
+            canGoBack = webView.canGoBack(),
+            attachedToParent = webView.parent != null,
+            isActive = isActive,
+            isPinned = isPinned,
+            keepAlive = keepAlive,
+            trustMode = if (isUntrustedEmbed) "untrusted-embed" else "trusted",
+            crossOriginIsolated = descriptor.surface.crossOriginIsolated,
+            devServerUrl = descriptor.devServerUrl,
+            backdrop = surfaceBackdrop,
+            presentationMode = presentationMode,
+            backInterceptEnabled = backInterceptEnabled,
+            rendererPriority = if (foregroundPriority) "important" else "bound",
+            rendererWaivedWhenNotVisible = !foregroundPriority,
+            widthPx = webView.width,
+            heightPx = webView.height,
+        )
+
     fun loadEntry() {
-        messageBridge.resetBeforeLoad()
-        webView.loadUrl(assetFetcher.entryUrlFor(descriptor))
+        dormancy.onLoadStarted()
+        messageBridge?.resetBeforeLoad()
+        val embed = descriptor.embed
+        if (embed != null) {
+            if (PluginNetworkPolicy.shouldAllowNativeNetwork(descriptor, embed.url, isMainFrame = true)) {
+                webView.loadUrl(embed.url)
+            } else {
+                Log.w(TAG, "Blocked disallowed embed entry URL for plugin=${descriptor.id}: ${embed.url}")
+                webView.loadUrl("about:blank")
+            }
+        } else {
+            webView.loadUrl(assetFetcher.entryUrlFor(descriptor))
+        }
     }
 
     fun pushEvent(
         event: String,
         payload: JsonElement?,
     ) {
+        val bridge = messageBridge ?: return
         val raw = SideVeilWireJson.encodeToString(HostEventEnvelope(event = event, payload = payload))
-        messageBridge.postRawAsync(raw)
+        bridge.postRawAsync(raw)
     }
 
     fun pushEnvelope(envelope: HostEventEnvelope) {
-        messageBridge.postRawAsync(SideVeilWireJson.encodeToString(envelope))
+        messageBridge?.postRawAsync(SideVeilWireJson.encodeToString(envelope))
     }
 
     fun resetPresentationToDrawer() {
@@ -183,9 +231,31 @@ internal class PluginWebViewInstance(
     }
 
     fun destroy() {
-        messageBridge.closeActivePort()
+        dormancy.destroy()
+        flushCookies()
+        messageBridge?.closeActivePort()
         webView.stopLoading()
         webView.destroy()
+    }
+
+    private fun syncSurfaceDefaults(
+        prev: PluginDescriptor,
+        next: PluginDescriptor,
+    ): Boolean {
+        var changed = false
+        if (prev.surface.backdrop != next.surface.backdrop) {
+            surfaceBackdrop = next.surface.backdrop
+            changed = true
+        }
+        if (prev.surface.presentation != next.surface.presentation) {
+            presentationMode = next.surface.presentation
+            changed = true
+        }
+        if (prev.surface.widthDp != next.surface.widthDp || prev.surface.heightPercent != next.surface.heightPercent) {
+            sizeOverride = PluginSizeOverride(widthDp = next.surface.widthDp, heightPercent = next.surface.heightPercent)
+            changed = true
+        }
+        return changed
     }
 
     private fun createWebViewClient(): WebViewClient =
@@ -193,21 +263,52 @@ internal class PluginWebViewInstance(
             override fun shouldOverrideUrlLoading(
                 view: WebView,
                 request: WebResourceRequest,
-            ): Boolean = !assetFetcher.isAllowedPluginUri(request.url, descriptor.id)
+            ): Boolean {
+                val allowed =
+                    (!isUntrustedEmbed && assetFetcher.isAllowedPluginUri(request.url, descriptor.id)) ||
+                        PluginNetworkPolicy.shouldAllowNativeNetwork(descriptor, request.url, isMainFrame = true)
+                return !allowed
+            }
 
             override fun shouldInterceptRequest(
                 view: WebView,
                 request: WebResourceRequest,
-            ): WebResourceResponse = assetFetcher.fetch(descriptor, request.url)
+            ): WebResourceResponse? =
+                when {
+                    !isUntrustedEmbed && assetFetcher.isAllowedPluginUri(request.url, descriptor.id) -> {
+                        assetFetcher.fetch(descriptor, request.url)
+                    }
+
+                    PluginNetworkPolicy.shouldAllowNativeNetwork(descriptor, request.url, request.isForMainFrame) -> {
+                        null
+                    }
+
+                    else -> {
+                        assetFetcher.forbiddenResponse()
+                    }
+                }
+
+            override fun onPageStarted(
+                view: WebView,
+                url: String?,
+                favicon: Bitmap?,
+            ) {
+                super.onPageStarted(view, url, favicon)
+                messageBridge?.onNavigationCommitted(url)
+            }
 
             override fun onPageFinished(
                 view: WebView,
                 url: String?,
             ) {
                 super.onPageFinished(view, url)
-                if (url != null && assetFetcher.isAllowedPluginUri(url.toUri(), descriptor.id)) {
-                    messageBridge.installChannel()
+                messageBridge?.let { bridge ->
+                    bridge.onNavigationCommitted(url)
+                    if (url != null && assetFetcher.isAllowedPluginUri(url.toUri(), descriptor.id)) {
+                        bridge.installChannel()
+                    }
                 }
+                dormancy.onPageFinished()
             }
 
             override fun onRenderProcessGone(
@@ -224,89 +325,16 @@ internal class PluginWebViewInstance(
             }
         }
 
-    private fun applyContainerAction(action: ContainerActionPayload?) {
-        val pluginId = descriptor.id
-        when (action?.type) {
-            "dismiss" -> {
-                callbacks.onDismissRequested(pluginId)
-            }
-
-            "requestImeFocus" -> {
-                callbacks.onImeFocusRequested(pluginId, action.focused == true)
-            }
-
-            "syncTheme" -> {
-                val payload = action.payload ?: return
-                callbacks.onAppearanceSynced(pluginId, payload.themeId, payload.colorScheme)
-            }
-
-            "setPreferredSize" -> {
-                val next =
-                    PluginSizeOverride(
-                        widthDp = action.widthDp,
-                        heightDp = action.heightDp,
-                        heightPercent = action.heightPercent,
-                    )
-                sizeOverride = next
-                callbacks.onPreferredSizeChanged(pluginId, next)
-            }
-
-            "setBackIntercept" -> {
-                backInterceptEnabled = action.enabled == true
-            }
-
-            "setSurfaceBackdrop" -> {
-                val parsed = parseBackdrop(action.backdrop) ?: return
-                surfaceBackdrop = parsed
-                callbacks.onBackdropChanged(pluginId, parsed)
-            }
-
-            "setPresentationMode" -> {
-                val parsed = parsePresentationMode(action.mode) ?: return
-                presentationMode = parsed
-                callbacks.onPresentationModeChanged(pluginId, parsed)
-            }
-
-            "setPinnedBounds" -> {
-                callbacks.onPinnedBoundsChanged(
-                    pluginId,
-                    PinnedBoundsSpec(
-                        widthDp = action.widthDp,
-                        heightDp = action.heightDp,
-                        xPercent = action.xPercent,
-                        yPercent = action.yPercent,
-                        clickThrough = action.clickThrough,
-                    ),
-                )
-            }
-
-            "setEdgeStatus" -> {
-                callbacks.onEdgeStatusChanged(pluginId, action.status)
-            }
-
-            else -> {
-                Log.d(TAG, "Ignored unknown container.action type=${action?.type}")
-            }
-        }
-    }
-
-    private fun parseBackdrop(raw: String?): PluginSurfaceBackdrop? =
-        when (raw) {
-            "native-glass" -> PluginSurfaceBackdrop.NATIVE_GLASS
-            "transparent" -> PluginSurfaceBackdrop.TRANSPARENT
-            "opaque" -> PluginSurfaceBackdrop.OPAQUE
-            else -> null
-        }
-
-    private fun parsePresentationMode(raw: String?): PluginPresentationMode? =
-        when (raw) {
-            "drawer" -> PluginPresentationMode.DRAWER
-            "peek" -> PluginPresentationMode.PEEK
-            "pinned" -> PluginPresentationMode.PINNED
-            "wide" -> PluginPresentationMode.WIDE
-            "native-hud" -> PluginPresentationMode.NATIVE_HUD
-            else -> null
-        }
+    private fun applyContainerAction(action: ContainerActionPayload?) =
+        PluginContainerActionRouter.dispatch(
+            pluginId = descriptor.id,
+            action = action,
+            callbacks = callbacks,
+            onSizeOverride = { sizeOverride = it },
+            onBackIntercept = { backInterceptEnabled = it },
+            onBackdrop = { surfaceBackdrop = it },
+            onPresentationMode = { presentationMode = it },
+        )
 
     companion object {
         private const val TAG = "SideVeilPluginWebView"

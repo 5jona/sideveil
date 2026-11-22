@@ -27,4 +27,17 @@ class PluginAssetFetcherTest {
         assertFalse(PluginAssetFetcher.isValidLoopbackDevUrl("https://evil.example.com"))
         assertFalse(PluginAssetFetcher.isValidLoopbackDevUrl("file:///etc/passwd"))
     }
+
+    @Test
+    fun `resolves extended static web asset MIME types accurately`() {
+        assertEquals("image/x-icon", PluginAssetFetcher.mimeTypeFor("favicon.ico"))
+        assertEquals("font/woff", PluginAssetFetcher.mimeTypeFor("fonts/inter.woff"))
+        assertEquals("font/ttf", PluginAssetFetcher.mimeTypeFor("fonts/mono.ttf"))
+        assertEquals("font/otf", PluginAssetFetcher.mimeTypeFor("fonts/display.otf"))
+        assertEquals("application/manifest+json", PluginAssetFetcher.mimeTypeFor("site.webmanifest"))
+        assertEquals("image/avif", PluginAssetFetcher.mimeTypeFor("hero.avif?v=2"))
+        assertEquals("application/json", PluginAssetFetcher.mimeTypeFor("assets/app.js.map"))
+        assertEquals("text/plain", PluginAssetFetcher.mimeTypeFor("robots.txt"))
+        assertEquals("application/xml", PluginAssetFetcher.mimeTypeFor("feed.xml"))
+    }
 }

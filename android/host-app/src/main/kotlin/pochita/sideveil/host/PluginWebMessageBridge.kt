@@ -46,11 +46,23 @@ internal class PluginWebMessageBridge(
     @Volatile
     private var pageReady: Boolean = false
 
+    @Volatile
+    private var lastCommittedUrl: String? = null
+
     fun createJsHostObject(): JsHostObject = JsHostObject()
 
     fun resetBeforeLoad() {
         pageReady = false
+        lastCommittedUrl = null
         closeActivePort()
+    }
+
+    fun onNavigationCommitted(url: String?) {
+        lastCommittedUrl = url
+        if (!PluginNetworkPolicy.isSameTrustedOrigin(url, pluginOrigin)) {
+            pageReady = false
+            closeActivePort()
+        }
     }
 
     fun installChannel() {
@@ -188,7 +200,22 @@ internal class PluginWebMessageBridge(
     inner class JsHostObject {
         @JavascriptInterface
         fun postMessage(message: String) {
-            handleMessageFromWebView(message)
+            if (PluginNetworkPolicy.isUntrustedEmbed(descriptorProvider())) return
+            mainHandler.post {
+                val liveUrl = webView.url
+                val committed = lastCommittedUrl
+                val liveAllowed = PluginNetworkPolicy.isSameTrustedOrigin(liveUrl, pluginOrigin)
+                val committedAllowed = committed == null || PluginNetworkPolicy.isSameTrustedOrigin(committed, pluginOrigin)
+                if (!liveAllowed || !committedAllowed) {
+                    Log.w(
+                        TAG,
+                        "Blocked JS bridge message for ${descriptorProvider().id} from untrusted origin: " +
+                            "live=$liveUrl committed=$committed",
+                    )
+                    return@post
+                }
+                handleMessageFromWebView(message)
+            }
         }
 
         @JavascriptInterface

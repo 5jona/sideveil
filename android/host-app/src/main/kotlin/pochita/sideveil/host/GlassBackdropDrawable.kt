@@ -11,6 +11,7 @@ import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.view.View
 import android.view.ViewOutlineProvider
+import pochita.sideveil.protocol.DebugAgslSnapshot
 import kotlin.math.abs
 
 /**
@@ -134,6 +135,22 @@ class GlassBackdropDrawable(
 
     @Suppress("OVERRIDE_DEPRECATION")
     override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+
+    fun debugState(): DebugAgslSnapshot =
+        DebugAgslSnapshot(
+            shaderCompiled = runtimeShader != null,
+            fallbackActive = runtimeShader == null,
+            themeId = style.themeId,
+            isDark = style.isDark,
+            blurActive = style.blurActive,
+            cornerRadiusPx = style.cornerRadiusPx,
+            drawableAlpha = drawableAlpha,
+            motionProgress = motionProgress,
+            velocityShift = velocityShift,
+            hasDynamicOverride = style.dynamicOverride != null,
+            boundsWidthPx = bounds.width(),
+            boundsHeightPx = bounds.height(),
+        )
 
     private fun syncVisuals() {
         val shader = runtimeShader
