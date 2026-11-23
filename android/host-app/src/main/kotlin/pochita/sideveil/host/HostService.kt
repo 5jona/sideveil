@@ -1,9 +1,6 @@
 package pochita.sideveil.host
 
-import android.content.BroadcastReceiver
-import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.content.res.Configuration
 import android.os.Handler
 import android.os.IBinder
@@ -13,6 +10,23 @@ import android.util.Log
 import android.view.WindowManager
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
+import pochita.sideveil.host.debug.HostDebugInspector
+import pochita.sideveil.host.debug.WindowFrameMetricsTracker
+import pochita.sideveil.host.edge.EdgeIndicatorWindow
+import pochita.sideveil.host.hud.NativeHudWindow
+import pochita.sideveil.host.overlay.DynamicThemeExtractor
+import pochita.sideveil.host.overlay.EdgeHapticsController
+import pochita.sideveil.host.panel.SidebarPanelWindow
+import pochita.sideveil.host.pinned.PinnedContainerWindow
+import pochita.sideveil.host.plugin.PluginWebViewManager
+import pochita.sideveil.host.rail.PluginRailWindow
+import pochita.sideveil.host.rail.RailIconLoader
+import pochita.sideveil.host.service.DaemonClient
+import pochita.sideveil.host.service.HostEventDispatcher
+import pochita.sideveil.host.service.HostGestureCoordinator
+import pochita.sideveil.host.service.HostOverlayCoordinator
+import pochita.sideveil.host.service.HostServiceBridge
+import pochita.sideveil.host.service.HostServiceSupport
 import pochita.sideveil.protocol.RpcError
 import pochita.sideveil.protocol.RpcRequest
 import pochita.sideveil.protocol.RpcResponse
@@ -22,6 +36,8 @@ import pochita.sideveil.protocol.SideVeilErrorCodes
  * Headless foreground service running inside the AMS-managed SideVeilHost priv-app process.
  * Hosts warm overlay windows (edge handle, multi-plugin Rail, sidebar panel, pinned container,
  * native HUD) and wires them to `sideveild` via [HostServiceBridge].
+ *
+ * Kept at root package `pochita.sideveil.host` as the manifest and `sideveild` wake entrypoint.
  */
 class HostService : LifecycleService() {
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -45,17 +61,9 @@ class HostService : LifecycleService() {
     private lateinit var eventDispatcher: HostEventDispatcher
     private var systemDialogsReceiverRegistered = false
     private val systemDialogsReceiver =
-        object : BroadcastReceiver() {
-            override fun onReceive(
-                context: Context?,
-                intent: Intent?,
-            ) {
-                @Suppress("DEPRECATION")
-                if (intent?.action != Intent.ACTION_CLOSE_SYSTEM_DIALOGS) return
-                val reason = intent.getStringExtra(SYSTEM_DIALOG_REASON_KEY)
-                if (reason in DISMISS_SYSTEM_DIALOG_REASONS && ::serviceBridge.isInitialized) {
-                    serviceBridge.onSystemDialogCloseRequested()
-                }
+        HostServiceSupport.createSystemDialogsReceiver {
+            if (::serviceBridge.isInitialized) {
+                serviceBridge.onSystemDialogCloseRequested()
             }
         }
 
@@ -66,7 +74,10 @@ class HostService : LifecycleService() {
         initializeWindows()
         initializeCoordinators()
         attachWarmWindows()
-        registerSystemDialogsReceiver()
+        if (!systemDialogsReceiverRegistered) {
+            systemDialogsReceiverRegistered =
+                HostServiceSupport.registerSystemDialogsReceiver(this, systemDialogsReceiver)
+        }
         syncEndpointFromDisk()
         Log.i(TAG, "HostService created (pid=${Process.myPid()}, uid=${Process.myUid()})")
     }
@@ -96,7 +107,10 @@ class HostService : LifecycleService() {
     }
 
     override fun onDestroy() {
-        unregisterSystemDialogsReceiver()
+        if (systemDialogsReceiverRegistered) {
+            systemDialogsReceiverRegistered = false
+            HostServiceSupport.unregisterSystemDialogsReceiver(this, systemDialogsReceiver)
+        }
         frameMetricsTracker.destroy()
         dynamicThemeExtractor.stop()
         daemonClient.close()
@@ -124,9 +138,7 @@ class HostService : LifecycleService() {
         iconLoader = RailIconLoader(lifecycleScope) { daemonClient.currentEndpoint() }
         edgeIndicator =
             EdgeIndicatorWindow(this, windowManager) { fullscreen ->
-                if (::serviceBridge.isInitialized) {
-                    serviceBridge.onFullscreenChanged(fullscreen)
-                }
+                if (::serviceBridge.isInitialized) serviceBridge.onFullscreenChanged(fullscreen)
             }
         pluginRail =
             PluginRailWindow(
@@ -134,13 +146,9 @@ class HostService : LifecycleService() {
                 windowManager = windowManager,
                 iconLoader = iconLoader,
                 onSelectPlugin = { pluginId -> serviceBridge.onRailPluginSelected(pluginId) },
-                onQuickAction = { pluginId, action ->
-                    gestureCoordinator.executeRailQuickAction(pluginId, action)
-                },
+                onQuickAction = { pluginId, action -> gestureCoordinator.executeRailQuickAction(pluginId, action) },
                 onTouchActivity = {
-                    if (::panelWindow.isInitialized) {
-                        panelWindow.cancelPendingTimers(includeCollapse = false)
-                    }
+                    if (::panelWindow.isInitialized) panelWindow.cancelPendingTimers(includeCollapse = false)
                 },
             )
         panelWindow =
@@ -165,9 +173,7 @@ class HostService : LifecycleService() {
             )
         nativeHudWindow =
             NativeHudWindow(this, windowManager) { activeHudId ->
-                if (::pluginManager.isInitialized) {
-                    pluginManager.setActiveHudPlugin(activeHudId)
-                }
+                if (::pluginManager.isInitialized) pluginManager.setActiveHudPlugin(activeHudId)
             }
     }
 
@@ -267,21 +273,6 @@ class HostService : LifecycleService() {
             )
         }
 
-    @Suppress("DEPRECATION")
-    private fun registerSystemDialogsReceiver() {
-        if (systemDialogsReceiverRegistered) return
-        runCatching {
-            registerReceiver(systemDialogsReceiver, IntentFilter(Intent.ACTION_CLOSE_SYSTEM_DIALOGS), RECEIVER_EXPORTED)
-            systemDialogsReceiverRegistered = true
-        }.onFailure { Log.w(TAG, "Failed to register ACTION_CLOSE_SYSTEM_DIALOGS receiver", it) }
-    }
-
-    private fun unregisterSystemDialogsReceiver() {
-        if (!systemDialogsReceiverRegistered) return
-        systemDialogsReceiverRegistered = false
-        runCatching { unregisterReceiver(systemDialogsReceiver) }
-    }
-
     private fun syncEndpointFromDisk() {
         HostServiceSupport.readEndpointFromDisk(this)?.let { endpoint ->
             daemonClient.updateEndpoint(endpoint.port, endpoint.token)
@@ -290,8 +281,5 @@ class HostService : LifecycleService() {
 
     companion object {
         private const val TAG = "SideVeilHostService"
-        private const val SYSTEM_DIALOG_REASON_KEY = "reason"
-        private val DISMISS_SYSTEM_DIALOG_REASONS =
-            setOf("notification_shade", "status_bar", "homekey", "recentapps")
     }
 }
