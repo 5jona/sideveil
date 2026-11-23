@@ -11,6 +11,7 @@ use sideveil_protocol::plugin::{
     PluginManifest, PluginSurfacePrefs, PluginTriggers, validate_plugin_id,
 };
 
+use super::error::PluginRegistryError;
 use super::installer::try_chown_root_system;
 
 static EMBED_SEQ: AtomicU64 = AtomicU64::new(1);
@@ -19,23 +20,29 @@ static EMBED_SEQ: AtomicU64 = AtomicU64::new(1);
 pub(super) fn create_web_embed_plugin(
     plugins_dir: &Path,
     params: &PluginCreateWebEmbedParams,
-) -> Result<PluginManifest, String> {
+) -> Result<PluginManifest, PluginRegistryError> {
     let id = params.id.trim().to_owned();
     if id == BUILTIN_DIAG_PLUGIN_ID {
-        return Err(format!(
-            "cannot overwrite built-in plugin '{BUILTIN_DIAG_PLUGIN_ID}'"
+        return Err(PluginRegistryError::BuiltinProtected(
+            BUILTIN_DIAG_PLUGIN_ID.to_owned(),
         ));
     }
 
     if let Some(w) = params.width_dp
         && !(240..=720).contains(&w)
     {
-        return Err("invalid widthDp: must be within 240..=720".to_owned());
+        return Err(PluginRegistryError::InvalidParameter {
+            field: "widthDp",
+            reason: "must be within 240..=720",
+        });
     }
     if let Some(h) = params.height_percent
         && !(30..=100).contains(&h)
     {
-        return Err("invalid heightPercent: must be within 30..=100".to_owned());
+        return Err(PluginRegistryError::InvalidParameter {
+            field: "heightPercent",
+            reason: "must be within 30..=100",
+        });
     }
 
     let remote_url = params
@@ -95,29 +102,26 @@ pub(super) fn create_web_embed_plugin(
         }),
         network: None,
     };
-    manifest
-        .validate()
-        .map_err(|e| format!("invalid web-embed manifest: {e}"))?;
+    manifest.validate()?;
 
-    fs::create_dir_all(plugins_dir).map_err(|e| {
-        format!(
-            "failed to create plugins dir '{}': {e}",
-            plugins_dir.display()
-        )
+    fs::create_dir_all(plugins_dir).map_err(|source| PluginRegistryError::Io {
+        context: format!("failed to create plugins dir '{}'", plugins_dir.display()),
+        source,
     })?;
 
     let plugin_dir = plugins_dir.join(&id);
-    fs::create_dir_all(&plugin_dir).map_err(|e| {
-        format!(
-            "failed to create plugin dir '{}': {e}",
-            plugin_dir.display()
-        )
+    fs::create_dir_all(&plugin_dir).map_err(|source| PluginRegistryError::Io {
+        context: format!("failed to create plugin dir '{}'", plugin_dir.display()),
+        source,
     })?;
     let _ = fs::set_permissions(&plugin_dir, fs::Permissions::from_mode(0o755));
     try_chown_root_system(&plugin_dir);
 
-    let json = serde_json::to_string_pretty(&manifest)
-        .map_err(|e| format!("failed to serialize manifest: {e}"))?;
+    let json =
+        serde_json::to_string_pretty(&manifest).map_err(|source| PluginRegistryError::Json {
+            context: "failed to serialize manifest".to_owned(),
+            source,
+        })?;
     let manifest_path = plugin_dir.join("manifest.json");
     let seq = EMBED_SEQ.fetch_add(1, Ordering::Relaxed);
     let tmp_path = plugin_dir.join(format!(".manifest.json.tmp.{}.{seq}", std::process::id()));
@@ -140,35 +144,50 @@ pub(super) fn create_web_embed_plugin(
         }
         Ok(())
     })();
-    if let Err(err) = write_res {
+    if let Err(source) = write_res {
         let _ = fs::remove_file(&tmp_path);
-        return Err(format!("failed to write manifest.json atomically: {err}"));
+        return Err(PluginRegistryError::Io {
+            context: "failed to write manifest.json atomically".to_owned(),
+            source,
+        });
     }
 
     Ok(manifest)
 }
 
 /// Removes an installed external plugin directory after canonicalization checks.
-pub(super) fn uninstall_plugin_dir(plugins_dir: &Path, plugin_id: &str) -> Result<(), String> {
+pub(super) fn uninstall_plugin_dir(
+    plugins_dir: &Path,
+    plugin_id: &str,
+) -> Result<(), PluginRegistryError> {
     let id = plugin_id.trim();
-    validate_plugin_id(id).map_err(|e| e.to_string())?;
+    validate_plugin_id(id)?;
     if id == BUILTIN_DIAG_PLUGIN_ID {
-        return Err(format!(
-            "cannot uninstall built-in plugin '{BUILTIN_DIAG_PLUGIN_ID}'"
+        return Err(PluginRegistryError::BuiltinProtected(
+            BUILTIN_DIAG_PLUGIN_ID.to_owned(),
         ));
     }
 
-    let plugins_canon = fs::canonicalize(plugins_dir)
-        .map_err(|e| format!("failed to canonicalize plugins dir: {e}"))?;
+    let plugins_canon =
+        fs::canonicalize(plugins_dir).map_err(|source| PluginRegistryError::Io {
+            context: "failed to canonicalize plugins dir".to_owned(),
+            source,
+        })?;
     let target = plugins_dir.join(id);
     if !target.exists() {
-        return Err(format!("plugin '{id}' is not installed"));
+        return Err(PluginRegistryError::NotInstalled(id.to_owned()));
     }
-    let target_canon =
-        fs::canonicalize(&target).map_err(|e| format!("failed to canonicalize plugin dir: {e}"))?;
+    let target_canon = fs::canonicalize(&target).map_err(|source| PluginRegistryError::Io {
+        context: "failed to canonicalize plugin dir".to_owned(),
+        source,
+    })?;
     if !target_canon.starts_with(&plugins_canon) || target_canon == plugins_canon {
-        return Err("refusing to remove path outside plugins directory".to_owned());
+        return Err(PluginRegistryError::InstallConstraint(
+            "refusing to remove path outside plugins directory".to_owned(),
+        ));
     }
-    fs::remove_dir_all(&target_canon)
-        .map_err(|e| format!("failed to remove plugin directory '{id}': {e}"))
+    fs::remove_dir_all(&target_canon).map_err(|source| PluginRegistryError::Io {
+        context: format!("failed to remove plugin directory '{id}'"),
+        source,
+    })
 }

@@ -34,7 +34,7 @@ pub(super) fn handle_panel_open(
         // is already open so `sideveil-ctl open <plugin_id>` switches immediately.
         state
             .select_active_plugin(plugin_id, None)
-            .map_err(|msg| (error_codes::INVALID_PARAMS, msg))?;
+            .map_err(|err| (error_codes::INVALID_PARAMS, err.to_string()))?;
         selected_plugin_id = Some(plugin_id.to_owned());
     }
 

@@ -6,6 +6,7 @@ pub mod hud;
 pub mod plugin;
 pub mod rpc;
 pub mod sensor;
+pub mod telemetry;
 pub mod theme;
 pub mod uds;
 

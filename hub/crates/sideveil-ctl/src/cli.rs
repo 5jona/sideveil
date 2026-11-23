@@ -4,6 +4,7 @@ mod debug_cmd;
 mod hud_cmd;
 mod logs_cmd;
 mod plugins_cmd;
+mod plugins_embed_cmd;
 
 use std::path::PathBuf;
 use std::time::Duration;

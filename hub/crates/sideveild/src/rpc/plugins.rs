@@ -23,7 +23,7 @@ pub(super) fn handle_install_plugin(
     let manifest = state
         .plugin_registry()
         .install_from_dir(src)
-        .map_err(|msg| (error_codes::INVALID_PARAMS, msg))?;
+        .map_err(|err| (error_codes::INVALID_PARAMS, err.to_string()))?;
     state.audit().record(
         manifest.id.clone(),
         "plugins.install",
@@ -47,7 +47,7 @@ pub(super) fn handle_set_enabled(
     state
         .plugin_registry()
         .set_enabled(&parsed.plugin_id, parsed.enabled)
-        .map_err(|msg| (error_codes::INVALID_PARAMS, msg))?;
+        .map_err(|err| (error_codes::INVALID_PARAMS, err.to_string()))?;
     state.on_plugins_changed();
     serialize_result(&state.plugins_snapshot())
 }
@@ -60,7 +60,7 @@ pub(super) fn handle_set_priority(
     state
         .plugin_registry()
         .set_priority(&parsed.plugin_id, parsed.priority)
-        .map_err(|msg| (error_codes::INVALID_PARAMS, msg))?;
+        .map_err(|err| (error_codes::INVALID_PARAMS, err.to_string()))?;
     state.on_plugins_changed();
     serialize_result(&state.plugins_snapshot())
 }
@@ -78,7 +78,7 @@ pub(super) fn handle_set_scope_override(
             parsed.global,
             parsed.clear,
         )
-        .map_err(|msg| (error_codes::INVALID_PARAMS, msg))?;
+        .map_err(|err| (error_codes::INVALID_PARAMS, err.to_string()))?;
     state.on_plugins_changed();
     serialize_result(&state.plugins_snapshot())
 }
@@ -90,7 +90,7 @@ pub(super) fn handle_select_plugin(
     let parsed: PluginSelectParams = decode_params(params)?;
     let active = state
         .select_active_plugin(&parsed.plugin_id, parsed.package_name.as_deref())
-        .map_err(|msg| (error_codes::INVALID_PARAMS, msg))?;
+        .map_err(|err| (error_codes::INVALID_PARAMS, err.to_string()))?;
     serialize_result(&active)
 }
 
@@ -106,7 +106,7 @@ pub(super) fn handle_set_dev_url(
             parsed.dev_server_url.as_deref(),
             parsed.clear,
         )
-        .map_err(|msg| (error_codes::INVALID_PARAMS, msg))?;
+        .map_err(|err| (error_codes::INVALID_PARAMS, err.to_string()))?;
     state.audit().record(
         parsed.plugin_id,
         "plugins.setDevUrl",
@@ -129,7 +129,7 @@ pub(super) fn handle_set_embed_config(
     state
         .plugin_registry()
         .set_embed_config(&parsed)
-        .map_err(|msg| (error_codes::INVALID_PARAMS, msg))?;
+        .map_err(|err| (error_codes::INVALID_PARAMS, err.to_string()))?;
     state.audit().record(
         parsed.plugin_id,
         "plugins.setEmbedConfig",
@@ -152,7 +152,7 @@ pub(super) fn handle_create_web_embed(
     let manifest = state
         .plugin_registry()
         .create_web_embed(&parsed)
-        .map_err(|msg| (error_codes::INVALID_PARAMS, msg))?;
+        .map_err(|err| (error_codes::INVALID_PARAMS, err.to_string()))?;
     state.audit().record(
         manifest.id.clone(),
         "plugins.createWebEmbed",
@@ -175,7 +175,7 @@ pub(super) fn handle_uninstall_plugin(
     state
         .plugin_registry()
         .uninstall_plugin(&parsed.plugin_id, state.cache_dir())
-        .map_err(|msg| (error_codes::INVALID_PARAMS, msg))?;
+        .map_err(|err| (error_codes::INVALID_PARAMS, err.to_string()))?;
     state
         .audit()
         .record(parsed.plugin_id.clone(), "plugins.uninstall", true, "");

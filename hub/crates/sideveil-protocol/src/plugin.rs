@@ -1,6 +1,7 @@
 //! Open plugin manifest schema, trigger rules, overrides, and capability ACL definitions.
 
 mod rpc_params;
+mod url_validation;
 mod validation;
 
 use std::collections::BTreeMap;
@@ -9,9 +10,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub use rpc_params::*;
-pub use validation::{
-    ManifestValidationError, is_private_or_lan_host, validate_network_url, validate_plugin_id,
-};
+pub use url_validation::{is_private_or_lan_host, validate_network_url};
+pub use validation::{ManifestValidationError, validate_plugin_id};
 
 fn default_true() -> bool {
     true

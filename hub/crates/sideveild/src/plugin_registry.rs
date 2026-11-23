@@ -1,5 +1,8 @@
 //! Open plugin registry with `inotify` discovery, atomic overrides/MRU persistence, and scope routing.
 
+mod dev_url;
+mod embed_override;
+mod error;
 mod installer;
 mod overrides;
 mod query;
@@ -18,6 +21,7 @@ use std::time::Duration;
 use sideveil_protocol::plugin::{PluginCreateWebEmbedParams, PluginManifest, PluginOverridesFile};
 use tokio::sync::broadcast;
 
+pub use self::error::PluginRegistryError;
 use self::store::{load_overrides, scan_plugins_dir};
 use crate::inotify::{DIR_CHANGE_MASK, InotifyDirWatcher};
 use crate::log_ring::LogRing;
@@ -35,6 +39,7 @@ pub(super) struct RegistryInner {
     pub(super) overrides: PluginOverridesFile,
 }
 
+/// Authoritative in-memory and on-disk registry of built-in and installed SideVeil plugins.
 #[derive(Debug)]
 pub struct PluginRegistry {
     plugins_dir: PathBuf,
@@ -45,6 +50,7 @@ pub struct PluginRegistry {
 }
 
 impl PluginRegistry {
+    /// Opens the plugin registry, loads persisted overrides, and performs an initial scan.
     pub fn open(plugins_dir: PathBuf, overrides_path: PathBuf, logs: Arc<LogRing>) -> Arc<Self> {
         let _ = fs::create_dir_all(&plugins_dir);
         let overrides = load_overrides(&overrides_path, &logs);
@@ -63,6 +69,7 @@ impl PluginRegistry {
         registry
     }
 
+    /// Subscribes to broadcast notifications fired whenever discovered plugins or overrides change.
     #[must_use]
     pub fn subscribe(&self) -> broadcast::Receiver<()> {
         self.updates_tx.subscribe()
@@ -96,7 +103,10 @@ impl PluginRegistry {
     }
 
     /// Validates and atomically installs a plugin package directory, then rescans immediately.
-    pub fn install_from_dir(&self, source_dir: &Path) -> Result<PluginManifest, String> {
+    pub fn install_from_dir(
+        &self,
+        source_dir: &Path,
+    ) -> Result<PluginManifest, PluginRegistryError> {
         let manifest = installer::install_plugin_dir(&self.plugins_dir, source_dir)?;
         let _ = self.rescan();
         Ok(manifest)
@@ -106,7 +116,7 @@ impl PluginRegistry {
     pub fn create_web_embed(
         &self,
         params: &PluginCreateWebEmbedParams,
-    ) -> Result<PluginManifest, String> {
+    ) -> Result<PluginManifest, PluginRegistryError> {
         let manifest = web_embed::create_web_embed_plugin(&self.plugins_dir, params)?;
         let _ = self.rescan();
         Ok(manifest)
@@ -114,7 +124,11 @@ impl PluginRegistry {
 
     /// Removes an external plugin directory, clears its persisted overrides/MRU and icon cache,
     /// and rescans the registry immediately.
-    pub fn uninstall_plugin(&self, plugin_id: &str, cache_dir: &Path) -> Result<(), String> {
+    pub fn uninstall_plugin(
+        &self,
+        plugin_id: &str,
+        cache_dir: &Path,
+    ) -> Result<(), PluginRegistryError> {
         web_embed::uninstall_plugin_dir(&self.plugins_dir, plugin_id)?;
         self.purge_plugin_overrides(plugin_id);
         prune_plugin_icon_cache(cache_dir, plugin_id);
@@ -122,6 +136,7 @@ impl PluginRegistry {
         Ok(())
     }
 
+    /// Spawns a zero-polling Linux `inotify` watcher monitoring the plugins directory tree.
     pub fn spawn_watcher(self: &Arc<Self>) -> io::Result<tokio::task::JoinHandle<()>> {
         fs::create_dir_all(&self.plugins_dir)?;
         let watcher = InotifyDirWatcher::new(&self.plugins_dir, DIR_CHANGE_MASK)?;

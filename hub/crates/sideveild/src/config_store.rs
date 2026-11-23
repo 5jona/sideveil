@@ -15,6 +15,7 @@ use crate::fs_util::write_file_atomic;
 use crate::inotify::{DIR_CHANGE_MASK, InotifyDirWatcher};
 use crate::log_ring::LogRing;
 
+/// Thread-safe authoritative store for `/data/system/sideveil/config.json`.
 #[derive(Debug)]
 pub struct ConfigStore {
     path: PathBuf,
@@ -24,6 +25,7 @@ pub struct ConfigStore {
 }
 
 impl ConfigStore {
+    /// Opens `path`, loading and sanitizing existing JSON or seeding defaults on disk.
     pub fn open(path: PathBuf, logs: Arc<LogRing>) -> Arc<Self> {
         let (updates_tx, _) = broadcast::channel(16);
         let initial = load_from_disk(&path, &logs).unwrap_or_default();

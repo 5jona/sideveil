@@ -8,12 +8,14 @@ use sideveil_protocol::plugin::PluginAuditEntry;
 
 const MAX_AUDIT_ENTRIES: usize = 120;
 
+/// Thread-safe bounded ring buffer retaining recent plugin ACL and lifecycle audit entries.
 #[derive(Debug, Default)]
 pub struct AuditRing {
     entries: Mutex<VecDeque<PluginAuditEntry>>,
 }
 
 impl AuditRing {
+    /// Creates an empty audit ring buffer with default bounded capacity.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -21,6 +23,7 @@ impl AuditRing {
         }
     }
 
+    /// Appends a timestamped audit entry, evicting the oldest entry if full.
     pub fn record(
         &self,
         plugin_id: impl Into<String>,
@@ -42,6 +45,7 @@ impl AuditRing {
         guard.push_back(entry);
     }
 
+    /// Returns a chronological snapshot of retained audit entries.
     #[must_use]
     pub fn recent(&self) -> Vec<PluginAuditEntry> {
         self.entries

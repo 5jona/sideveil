@@ -5,20 +5,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use std::time::Duration;
 
-use serde::Serialize;
 use serde_json::Value;
 use sideveil_protocol::rpc::{RpcRequest, RpcResponse, error_codes};
+pub use sideveil_protocol::uds::BackendOutboundFrame;
 use tokio::sync::{mpsc, oneshot};
 
 const BACKEND_OUTBOUND_CAPACITY: usize = 128;
-
-/// Outbound NDJSON frame pushed from `sideveild` to a connected plugin backend.
-#[derive(Debug, Clone, Serialize)]
-#[serde(untagged)]
-pub enum BackendOutboundFrame {
-    Rpc(RpcRequest),
-    SystemEvent { event: String, payload: Value },
-}
 
 #[derive(Debug)]
 struct BackendSession {
@@ -28,6 +20,7 @@ struct BackendSession {
     pending: Mutex<HashMap<String, oneshot::Sender<RpcResponse>>>,
 }
 
+/// Concurrent registry of connected UDS plugin backend sessions and pending RPC waiters.
 #[derive(Debug)]
 pub struct PluginBackends {
     next_id: AtomicU64,
@@ -41,6 +34,7 @@ impl Default for PluginBackends {
 }
 
 impl PluginBackends {
+    /// Creates an empty plugin backend session registry.
     #[must_use]
     pub fn new() -> Self {
         Self {

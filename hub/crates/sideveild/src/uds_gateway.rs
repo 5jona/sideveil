@@ -21,6 +21,7 @@ use crate::state::HubState;
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Bound dual-channel UDS gateway serving privileged `hub.sock` and restricted `app.sock`.
 #[derive(Debug)]
 pub struct UdsGateway {
     hub_listener: UnixListener,
@@ -31,6 +32,7 @@ pub struct UdsGateway {
 }
 
 impl UdsGateway {
+    /// Binds `hub.sock` (`0660 0:1000`) and `app.sock` (`0666`) for peer connections.
     pub fn bind(hub_path: PathBuf, app_path: PathBuf, auth: PeerAuthConfig) -> io::Result<Self> {
         let hub_listener = bind_socket(&hub_path, 0o660, Some((0, 1000)))?;
         let app_listener = bind_socket(&app_path, 0o666, None)?;
@@ -43,6 +45,7 @@ impl UdsGateway {
         })
     }
 
+    /// Runs the accept loops for both `hub.sock` and `app.sock` concurrently.
     pub async fn serve(self, state: Arc<HubState>) {
         state.logs().info(format!(
             "UDS gateway listening on {} and {}",
@@ -109,9 +112,13 @@ async fn handle_peer(
 
     let (read_half, mut write_half) = stream.into_split();
     let mut reader = BufReader::new(read_half);
+    let mut line_buf = Vec::new();
 
-    let Ok(Ok(Some(hello_line))) =
-        tokio::time::timeout(HANDSHAKE_TIMEOUT, read_bounded_line(&mut reader)).await
+    let Ok(Ok(Some(hello_line))) = tokio::time::timeout(
+        HANDSHAKE_TIMEOUT,
+        read_bounded_line(&mut reader, &mut line_buf),
+    )
+    .await
     else {
         return;
     };
@@ -128,7 +135,8 @@ async fn handle_peer(
         }
     };
 
-    if let Err(reason) = authorize_peer(channel, cred, &hello, &auth) {
+    if let Err(err) = authorize_peer(channel, cred, &hello, &auth) {
+        let reason = err.to_string();
         state.logs().warn(format!(
             "Rejected UDS peer on {channel:?} (uid={}, pid={:?}): {reason}",
             cred.uid, cred.pid
@@ -141,12 +149,13 @@ async fn handle_peer(
         ref plugin_id,
         ref package_name,
     } = hello
-        && let Err(reason) = state.plugin_registry().authorize_backend(
+        && let Err(err) = state.plugin_registry().authorize_backend(
             plugin_id,
             channel == SocketChannel::App,
             package_name.as_deref(),
         )
     {
+        let reason = err.to_string();
         state.logs().warn(format!(
             "Rejected plugin backend '{plugin_id}' on {channel:?} (uid={}): {reason}",
             cred.uid
@@ -163,9 +172,9 @@ async fn handle_peer(
     }
 
     match hello {
-        UdsClientHello::Ctl => handle_ctl_session(reader, write_half, state).await,
+        UdsClientHello::Ctl => handle_ctl_session(reader, line_buf, write_half, state).await,
         UdsClientHello::Sensor { .. } => {
-            handle_sensor_session(reader, write_half, state).await;
+            handle_sensor_session(reader, line_buf, write_half, state).await;
         }
         UdsClientHello::PluginBackend {
             plugin_id,
@@ -173,6 +182,7 @@ async fn handle_peer(
         } => {
             backend_session::handle_plugin_backend_session(
                 reader,
+                line_buf,
                 write_half,
                 cred,
                 plugin_id,
@@ -187,10 +197,11 @@ async fn handle_peer(
 
 async fn handle_ctl_session<R: AsyncRead + Unpin>(
     mut reader: BufReader<R>,
+    mut line_buf: Vec<u8>,
     mut write_half: tokio::net::unix::OwnedWriteHalf,
     state: Arc<HubState>,
 ) {
-    while let Ok(Some(line)) = read_bounded_line(&mut reader).await {
+    while let Ok(Some(line)) = read_bounded_line(&mut reader, &mut line_buf).await {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
@@ -204,6 +215,7 @@ async fn handle_ctl_session<R: AsyncRead + Unpin>(
 
 async fn handle_sensor_session<R: AsyncRead + Unpin>(
     mut reader: BufReader<R>,
+    mut line_buf: Vec<u8>,
     mut write_half: tokio::net::unix::OwnedWriteHalf,
     state: Arc<HubState>,
 ) {
@@ -218,7 +230,7 @@ async fn handle_sensor_session<R: AsyncRead + Unpin>(
         }
     });
 
-    while let Ok(Some(line)) = read_bounded_line(&mut reader).await {
+    while let Ok(Some(line)) = read_bounded_line(&mut reader, &mut line_buf).await {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;

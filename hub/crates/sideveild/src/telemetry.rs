@@ -5,17 +5,7 @@ mod thermal;
 use std::fs;
 use std::sync::Mutex;
 
-use serde::Serialize;
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TelemetrySnapshot {
-    pub cpu_percent: f32,
-    pub mem_used_mb: u64,
-    pub mem_total_mb: u64,
-    pub soc_temp_c: Option<f32>,
-    pub uptime_sec: f64,
-}
+pub use sideveil_protocol::telemetry::TelemetrySnapshot;
 
 #[derive(Debug, Default)]
 struct CpuTotals {
@@ -25,6 +15,7 @@ struct CpuTotals {
 
 static PREV_CPU: Mutex<Option<CpuTotals>> = Mutex::new(None);
 
+/// Samples CPU usage, RAM consumption, SoC temperature, and uptime without spawning subprocesses.
 #[must_use]
 pub fn sample_snapshot() -> TelemetrySnapshot {
     let cpu_percent = sample_cpu_percent();

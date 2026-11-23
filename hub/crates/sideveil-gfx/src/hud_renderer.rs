@@ -4,6 +4,7 @@
 //! `RadialGauge`, `Crosshair`, `Path`) directly into caller-owned premultiplied RGBA8 buffers
 //! matching Android `Bitmap.Config.ARGB_8888` with reusable `RenderContext`/`Pixmap` buffers.
 
+mod gauges;
 mod path_parser;
 mod primitives;
 mod sparkline;

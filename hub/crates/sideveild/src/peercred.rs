@@ -2,23 +2,35 @@
 
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use sideveil_protocol::plugin::ManifestValidationError;
 use sideveil_protocol::uds::UdsClientHello;
+use thiserror::Error;
 use tokio::net::UnixStream;
 
+/// Linux root user ID (`uid 0`).
 pub const ROOT_UID: u32 = 0;
+/// Android `system_server` / `:sensor` user ID (`uid 1000`).
 pub const SYSTEM_UID: u32 = 1000;
+/// First Android application ID (`Process.FIRST_APPLICATION_UID`).
 pub const FIRST_APP_UID: u32 = 10_000;
+/// Android per-user UID stride (`UserHandle.PER_USER_RANGE`: `uid = userId * 100_000 + appId`).
+pub const PER_USER_RANGE: u32 = 100_000;
 const ANDROID_PACKAGES_LIST: &str = "/data/system/packages.list";
 
+/// Kernel-verified `SO_PEERCRED` identity for a connected Unix domain socket peer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PeerCred {
+    /// Effective peer user ID.
     pub uid: u32,
+    /// Effective peer group ID.
     pub gid: u32,
+    /// Optional peer process ID.
     pub pid: Option<u32>,
 }
 
+/// Logical UDS listener channel distinguishing privileged hub clients from app backends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SocketChannel {
     /// Privileged `hub.sock` for CLI, `:sensor`, and native KernelSU daemon plugins.
@@ -27,12 +39,69 @@ pub enum SocketChannel {
     App,
 }
 
+/// Configuration knobs for `SO_PEERCRED` peer authorization (primarily test overrides).
 #[derive(Debug, Clone, Default)]
 pub struct PeerAuthConfig {
     /// Extra UIDs permitted on `hub.sock` (used exclusively in non-root host tests).
     pub extra_privileged_uids: Vec<u32>,
     /// Optional override path for Android `packages.list` (used in tests).
-    pub packages_list_path: Option<std::path::PathBuf>,
+    pub packages_list_path: Option<PathBuf>,
+}
+
+/// Authorization failure returned by [`authorize_peer`].
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum PeerAuthError {
+    /// Non-root caller attempted to claim the `ctl` role on `hub.sock`.
+    #[error("ctl role requires uid 0 on hub.sock (got uid {uid})")]
+    CtlRequiresRoot {
+        /// Connecting peer UID.
+        uid: u32,
+    },
+    /// Unprivileged caller attempted to claim `:sensor` or native backend role on `hub.sock`.
+    #[error("privileged role requires uid 0 or 1000 on hub.sock (got uid {uid})")]
+    PrivilegedRoleRequired {
+        /// Connecting peer UID.
+        uid: u32,
+    },
+    /// Non-backend role attempted to connect on `app.sock`.
+    #[error("only pluginBackend role is allowed on app.sock")]
+    AppSocketRoleForbidden,
+    /// Invalid plugin identifier supplied in `app.sock` handshake.
+    #[error(transparent)]
+    InvalidPluginId(#[from] ManifestValidationError),
+    /// `app.sock` plugin backend omitted or left `packageName` blank.
+    #[error("app.sock pluginBackend requires non-empty packageName")]
+    MissingPackageName,
+    /// Connecting peer `appId` is below [`FIRST_APP_UID`].
+    #[error("unexpected non-app uid {uid} (appId {app_id}) on app.sock")]
+    NonAppUid {
+        /// Raw kernel peer UID.
+        uid: u32,
+        /// Extracted Android application ID (`uid % PER_USER_RANGE`).
+        app_id: u32,
+    },
+    /// Declared package name was not found in `packages.list`.
+    #[error("package '{package}' not found in {}", path.display())]
+    PackageNotFound {
+        /// Claimed Android package name.
+        package: String,
+        /// Path to `packages.list` consulted.
+        path: PathBuf,
+    },
+    /// Connecting peer `appId` did not match the UID recorded for the declared package.
+    #[error(
+        "peer uid {uid} (appId {app_id}) does not match package '{package}' appId {expected_app_id}"
+    )]
+    UidMismatch {
+        /// Raw kernel peer UID.
+        uid: u32,
+        /// Extracted Android application ID (`uid % PER_USER_RANGE`).
+        app_id: u32,
+        /// Claimed Android package name.
+        package: String,
+        /// Expected application ID from `packages.list`.
+        expected_app_id: u32,
+    },
 }
 
 /// Reads kernel-verified `SO_PEERCRED` credentials from a connected Unix stream socket.
@@ -52,7 +121,7 @@ pub fn authorize_peer(
     cred: PeerCred,
     hello: &UdsClientHello,
     auth: &PeerAuthConfig,
-) -> Result<(), String> {
+) -> Result<(), PeerAuthError> {
     let is_extra = auth.extra_privileged_uids.contains(&cred.uid);
 
     match channel {
@@ -61,20 +130,14 @@ pub fn authorize_peer(
                 if cred.uid == ROOT_UID || is_extra {
                     Ok(())
                 } else {
-                    Err(format!(
-                        "ctl role requires uid 0 on hub.sock (got uid {})",
-                        cred.uid
-                    ))
+                    Err(PeerAuthError::CtlRequiresRoot { uid: cred.uid })
                 }
             }
             UdsClientHello::Sensor { .. } | UdsClientHello::PluginBackend { .. } => {
                 if cred.uid == ROOT_UID || cred.uid == SYSTEM_UID || is_extra {
                     Ok(())
                 } else {
-                    Err(format!(
-                        "privileged role requires uid 0 or 1000 on hub.sock (got uid {})",
-                        cred.uid
-                    ))
+                    Err(PeerAuthError::PrivilegedRoleRequired { uid: cred.uid })
                 }
             }
         },
@@ -83,37 +146,46 @@ pub fn authorize_peer(
                 plugin_id,
                 package_name,
             } => {
-                sideveil_protocol::plugin::validate_plugin_id(plugin_id)
-                    .map_err(|e| e.to_string())?;
+                sideveil_protocol::plugin::validate_plugin_id(plugin_id)?;
                 let Some(pkg) = package_name
                     .as_deref()
                     .map(str::trim)
                     .filter(|s| !s.is_empty())
                 else {
-                    return Err("app.sock pluginBackend requires non-empty packageName".to_owned());
+                    return Err(PeerAuthError::MissingPackageName);
                 };
                 if cred.uid == ROOT_UID || is_extra {
                     return Ok(());
                 }
-                if cred.uid < FIRST_APP_UID {
-                    return Err(format!("unexpected non-app uid {} on app.sock", cred.uid));
+                let app_id = cred.uid % PER_USER_RANGE;
+                if app_id < FIRST_APP_UID {
+                    return Err(PeerAuthError::NonAppUid {
+                        uid: cred.uid,
+                        app_id,
+                    });
                 }
                 let packages_path = auth
                     .packages_list_path
                     .as_deref()
                     .unwrap_or_else(|| Path::new(ANDROID_PACKAGES_LIST));
                 let expected_uid = lookup_package_uid(packages_path, pkg).ok_or_else(|| {
-                    format!("package '{pkg}' not found in {}", packages_path.display())
+                    PeerAuthError::PackageNotFound {
+                        package: pkg.to_owned(),
+                        path: packages_path.to_path_buf(),
+                    }
                 })?;
-                if expected_uid != cred.uid {
-                    return Err(format!(
-                        "peer uid {} does not match package '{pkg}' uid {expected_uid}",
-                        cred.uid
-                    ));
+                let expected_app_id = expected_uid % PER_USER_RANGE;
+                if expected_app_id != app_id {
+                    return Err(PeerAuthError::UidMismatch {
+                        uid: cred.uid,
+                        app_id,
+                        package: pkg.to_owned(),
+                        expected_app_id,
+                    });
                 }
                 Ok(())
             }
-            _ => Err("only pluginBackend role is allowed on app.sock".to_owned()),
+            _ => Err(PeerAuthError::AppSocketRoleForbidden),
         },
     }
 }
@@ -125,6 +197,7 @@ pub fn lookup_package_uid(packages_list: &Path, package_name: &str) -> Option<u3
     parse_package_uid(&content, package_name)
 }
 
+/// Parses an Android `packages.list` snapshot and returns the numeric UID for `package_name`.
 #[must_use]
 pub fn parse_package_uid(content: &str, package_name: &str) -> Option<u32> {
     for line in content.lines() {
@@ -139,92 +212,4 @@ pub fn parse_package_uid(content: &str, package_name: &str) -> Option<u32> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn enforces_uid_boundaries_on_hub_and_app_sockets() {
-        let auth = PeerAuthConfig::default();
-        let root = PeerCred {
-            uid: 0,
-            gid: 0,
-            pid: Some(10),
-        };
-        let system = PeerCred {
-            uid: 1000,
-            gid: 1000,
-            pid: Some(11),
-        };
-        let app = PeerCred {
-            uid: 10234,
-            gid: 10234,
-            pid: Some(12),
-        };
-
-        assert!(authorize_peer(SocketChannel::Hub, root, &UdsClientHello::Ctl, &auth).is_ok());
-        assert!(authorize_peer(SocketChannel::Hub, system, &UdsClientHello::Ctl, &auth).is_err());
-        assert!(
-            authorize_peer(
-                SocketChannel::Hub,
-                system,
-                &UdsClientHello::Sensor {
-                    pid: 11,
-                    version: "0.1.0".to_owned()
-                },
-                &auth
-            )
-            .is_ok()
-        );
-        assert!(
-            authorize_peer(
-                SocketChannel::Hub,
-                app,
-                &UdsClientHello::Sensor {
-                    pid: 12,
-                    version: "0.1.0".to_owned()
-                },
-                &auth
-            )
-            .is_err()
-        );
-        assert!(authorize_peer(SocketChannel::App, app, &UdsClientHello::Ctl, &auth).is_err());
-    }
-
-    #[test]
-    fn parses_packages_list_and_verifies_app_uid() {
-        let sample = "\
-me.weishu.kernelsu 10112 0 /data/user/0/me.weishu.kernelsu default:targetSdkVersion=35 none 0 1\n\
-com.example.target 10234 0 /data/user/0/com.example.target default:targetSdkVersion=36 none 0 1\n";
-        assert_eq!(parse_package_uid(sample, "com.example.target"), Some(10234));
-        assert_eq!(parse_package_uid(sample, "com.missing.app"), None);
-
-        let dir = std::env::temp_dir().join(format!("sideveil-peercred-{}", std::process::id()));
-        let _ = fs::create_dir_all(&dir);
-        let list_file = dir.join("packages.list");
-        fs::write(&list_file, sample).expect("write packages.list");
-
-        let auth = PeerAuthConfig {
-            extra_privileged_uids: Vec::new(),
-            packages_list_path: Some(list_file.clone()),
-        };
-        let hello = UdsClientHello::PluginBackend {
-            plugin_id: "com.example.plugin".to_owned(),
-            package_name: Some("com.example.target".to_owned()),
-        };
-
-        let matching = PeerCred {
-            uid: 10234,
-            gid: 10234,
-            pid: Some(42),
-        };
-        let mismatched = PeerCred {
-            uid: 10999,
-            gid: 10999,
-            pid: Some(43),
-        };
-        assert!(authorize_peer(SocketChannel::App, matching, &hello, &auth).is_ok());
-        assert!(authorize_peer(SocketChannel::App, mismatched, &hello, &auth).is_err());
-
-        let _ = fs::remove_dir_all(&dir);
-    }
-}
+mod tests;

@@ -63,8 +63,10 @@ impl PluginEventRateLimiter {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn handle_plugin_backend_session<R: AsyncRead + Unpin>(
     mut reader: BufReader<R>,
+    mut line_buf: Vec<u8>,
     mut write_half: tokio::net::unix::OwnedWriteHalf,
     cred: PeerCred,
     plugin_id: String,
@@ -90,7 +92,7 @@ pub(super) async fn handle_plugin_backend_session<R: AsyncRead + Unpin>(
     let mut limiter =
         PluginEventRateLimiter::new(RELIABLE_EVENTS_PER_WINDOW, RATE_WINDOW, Instant::now());
 
-    while let Ok(Some(line)) = read_bounded_line(&mut reader).await {
+    while let Ok(Some(line)) = read_bounded_line(&mut reader, &mut line_buf).await {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;

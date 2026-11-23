@@ -2,25 +2,34 @@
 
 use sideveil_protocol::plugin::{BUILTIN_DIAG_PLUGIN_ID, PluginCapability};
 
-use super::store::{builtin_diag_manifest, validate_loopback_dev_url};
+use super::dev_url::validate_loopback_dev_url;
+use super::store::builtin_diag_manifest;
 
 #[test]
 fn validate_loopback_dev_url_accepts_valid_loopback_and_rejects_ssrf() {
     assert_eq!(
-        validate_loopback_dev_url("http://127.0.0.1:5173/").as_deref(),
-        Ok("http://127.0.0.1:5173")
+        validate_loopback_dev_url("http://127.0.0.1:5173/")
+            .ok()
+            .as_deref(),
+        Some("http://127.0.0.1:5173")
     );
     assert_eq!(
-        validate_loopback_dev_url("https://localhost:8443/app").as_deref(),
-        Ok("https://localhost:8443/app")
+        validate_loopback_dev_url("https://localhost:8443/app")
+            .ok()
+            .as_deref(),
+        Some("https://localhost:8443/app")
     );
     assert_eq!(
-        validate_loopback_dev_url("http://[::1]:3000").as_deref(),
-        Ok("http://[::1]:3000")
+        validate_loopback_dev_url("http://[::1]:3000")
+            .ok()
+            .as_deref(),
+        Some("http://[::1]:3000")
     );
     assert_eq!(
-        validate_loopback_dev_url("http://localhost").as_deref(),
-        Ok("http://localhost")
+        validate_loopback_dev_url("http://localhost")
+            .ok()
+            .as_deref(),
+        Some("http://localhost")
     );
 
     for bad in [

@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use sideveil_protocol::plugin::{BUILTIN_DIAG_PLUGIN_ID, PluginManifest};
 
+use super::error::PluginRegistryError;
 use crate::fs_util::chown_path;
 
 static INSTALL_SEQ: AtomicU64 = AtomicU64::new(1);
@@ -17,63 +18,67 @@ static INSTALL_SEQ: AtomicU64 = AtomicU64::new(1);
 pub(super) fn install_plugin_dir(
     plugins_dir: &Path,
     source_dir: &Path,
-) -> Result<PluginManifest, String> {
+) -> Result<PluginManifest, PluginRegistryError> {
     if !source_dir.is_dir() {
-        return Err(format!(
-            "source directory '{}' does not exist or is not a directory",
-            source_dir.display()
+        return Err(PluginRegistryError::InvalidSourceDir(
+            source_dir.to_path_buf(),
         ));
     }
 
-    fs::create_dir_all(plugins_dir).map_err(|e| {
-        format!(
-            "failed to create plugins dir '{}': {e}",
-            plugins_dir.display()
-        )
+    fs::create_dir_all(plugins_dir).map_err(|source| PluginRegistryError::Io {
+        context: format!("failed to create plugins dir '{}'", plugins_dir.display()),
+        source,
     })?;
 
-    let src_canon = fs::canonicalize(source_dir)
-        .map_err(|e| format!("failed to canonicalize '{}': {e}", source_dir.display()))?;
-    let plugins_canon = fs::canonicalize(plugins_dir)
-        .map_err(|e| format!("failed to canonicalize '{}': {e}", plugins_dir.display()))?;
+    let src_canon = fs::canonicalize(source_dir).map_err(|source| PluginRegistryError::Io {
+        context: format!("failed to canonicalize '{}'", source_dir.display()),
+        source,
+    })?;
+    let plugins_canon =
+        fs::canonicalize(plugins_dir).map_err(|source| PluginRegistryError::Io {
+            context: format!("failed to canonicalize '{}'", plugins_dir.display()),
+            source,
+        })?;
     if src_canon.starts_with(&plugins_canon) {
-        return Err(
+        return Err(PluginRegistryError::InstallConstraint(
             "source directory must lie outside the live SideVeil plugins directory".to_owned(),
-        );
+        ));
     }
 
     let manifest_path = src_canon.join("manifest.json");
-    let manifest_raw = fs::read_to_string(&manifest_path)
-        .map_err(|e| format!("failed to read '{}': {e}", manifest_path.display()))?;
-    let manifest: PluginManifest = serde_json::from_str(&manifest_raw).map_err(|e| {
-        format!(
-            "invalid manifest JSON in '{}': {e}",
-            manifest_path.display()
-        )
-    })?;
-    manifest
-        .validate()
-        .map_err(|e| format!("invalid plugin manifest: {e}"))?;
+    let manifest_raw =
+        fs::read_to_string(&manifest_path).map_err(|source| PluginRegistryError::Io {
+            context: format!("failed to read '{}'", manifest_path.display()),
+            source,
+        })?;
+    let manifest: PluginManifest =
+        serde_json::from_str(&manifest_raw).map_err(|source| PluginRegistryError::Json {
+            context: format!("invalid manifest JSON in '{}'", manifest_path.display()),
+            source,
+        })?;
+    manifest.validate()?;
 
     if manifest.id == BUILTIN_DIAG_PLUGIN_ID {
-        return Err(format!(
-            "cannot overwrite built-in plugin '{BUILTIN_DIAG_PLUGIN_ID}'"
+        return Err(PluginRegistryError::BuiltinProtected(
+            BUILTIN_DIAG_PLUGIN_ID.to_owned(),
         ));
     }
 
     if manifest.embed.is_none() {
         let entry_path = src_canon.join(&manifest.entry);
-        let entry_meta = fs::symlink_metadata(&entry_path).map_err(|e| {
-            format!(
-                "manifest entry '{}' missing in source directory: {e}",
-                manifest.entry
-            )
-        })?;
+        let entry_meta =
+            fs::symlink_metadata(&entry_path).map_err(|source| PluginRegistryError::Io {
+                context: format!(
+                    "manifest entry '{}' missing in source directory",
+                    manifest.entry
+                ),
+                source,
+            })?;
         if !entry_meta.file_type().is_file() {
-            return Err(format!(
+            return Err(PluginRegistryError::InstallConstraint(format!(
                 "manifest entry '{}' must be a regular file",
                 manifest.entry
-            ));
+            )));
         }
     }
 
@@ -86,23 +91,32 @@ pub(super) fn install_plugin_dir(
     let _ = fs::remove_dir_all(&staging_dir);
     let _ = fs::remove_dir_all(&backup_dir);
 
-    if let Err(err) = copy_dir_no_symlinks(&src_canon, &staging_dir) {
+    if let Err(source) = copy_dir_no_symlinks(&src_canon, &staging_dir) {
         let _ = fs::remove_dir_all(&staging_dir);
-        return Err(format!("failed staging plugin files: {err}"));
+        return Err(PluginRegistryError::Io {
+            context: "failed staging plugin files".to_owned(),
+            source,
+        });
     }
 
     let had_existing = target_dir.exists();
-    if had_existing && let Err(err) = fs::rename(&target_dir, &backup_dir) {
+    if had_existing && let Err(source) = fs::rename(&target_dir, &backup_dir) {
         let _ = fs::remove_dir_all(&staging_dir);
-        return Err(format!("failed moving previous plugin dir aside: {err}"));
+        return Err(PluginRegistryError::Io {
+            context: "failed moving previous plugin dir aside".to_owned(),
+            source,
+        });
     }
 
-    if let Err(err) = fs::rename(&staging_dir, &target_dir) {
+    if let Err(source) = fs::rename(&staging_dir, &target_dir) {
         let _ = fs::remove_dir_all(&staging_dir);
         if had_existing {
             let _ = fs::rename(&backup_dir, &target_dir);
         }
-        return Err(format!("failed activating staged plugin dir: {err}"));
+        return Err(PluginRegistryError::Io {
+            context: "failed activating staged plugin dir".to_owned(),
+            source,
+        });
     }
 
     let _ = fs::remove_dir_all(&backup_dir);

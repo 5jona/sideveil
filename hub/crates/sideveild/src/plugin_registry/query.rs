@@ -10,6 +10,7 @@ use sideveil_protocol::plugin::{
 };
 
 use super::PluginRegistry;
+use super::error::PluginRegistryError;
 use super::store::{build_descriptor, matches_activity};
 
 impl PluginRegistry {
@@ -92,22 +93,28 @@ impl PluginRegistry {
         plugin_id: &str,
         from_app_sock: bool,
         package_name: Option<&str>,
-    ) -> Result<(), String> {
+    ) -> Result<(), PluginRegistryError> {
         let guard = self.inner.read().unwrap_or_else(PoisonError::into_inner);
         let Some(plugin) = guard.plugins.get(plugin_id) else {
-            return Err(format!("plugin '{plugin_id}' is not registered"));
+            return Err(PluginRegistryError::BackendUnauthorized(format!(
+                "plugin '{plugin_id}' is not registered"
+            )));
         };
         if plugin.builtin {
-            return Err("built-in plugin does not accept external backend".to_owned());
+            return Err(PluginRegistryError::BackendUnauthorized(
+                "built-in plugin does not accept external backend".to_owned(),
+            ));
         }
         if from_app_sock {
             if plugin.manifest.backend != PluginBackendKind::UdsApp {
-                return Err(format!(
+                return Err(PluginRegistryError::BackendUnauthorized(format!(
                     "plugin '{plugin_id}' does not declare uds-app backend"
-                ));
+                )));
             }
             let Some(pkg) = package_name.map(str::trim).filter(|s| !s.is_empty()) else {
-                return Err("missing packageName for uds-app backend".to_owned());
+                return Err(PluginRegistryError::BackendUnauthorized(
+                    "missing packageName for uds-app backend".to_owned(),
+                ));
             };
             let ov = guard.overrides.overrides.get(plugin_id);
             let global = ov
@@ -117,14 +124,14 @@ impl PluginRegistry {
                 .and_then(|o| o.packages_override.as_ref())
                 .unwrap_or(&plugin.manifest.triggers.packages);
             if !global && !packages.iter().any(|p| p == pkg) {
-                return Err(format!(
+                return Err(PluginRegistryError::BackendUnauthorized(format!(
                     "package '{pkg}' is not authorized by plugin '{plugin_id}' triggers"
-                ));
+                )));
             }
         } else if plugin.manifest.backend == PluginBackendKind::None {
-            return Err(format!(
+            return Err(PluginRegistryError::BackendUnauthorized(format!(
                 "plugin '{plugin_id}' declares backend=none and cannot attach a backend"
-            ));
+            )));
         }
         Ok(())
     }

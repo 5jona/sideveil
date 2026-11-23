@@ -6,12 +6,14 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use tokio::sync::{Notify, mpsc};
 
+/// Sender half of the dual-priority host outbound channel.
 #[derive(Debug, Clone)]
 pub struct OutboundSender {
     critical_tx: mpsc::UnboundedSender<String>,
     ephemeral: Arc<EphemeralSlot>,
 }
 
+/// Receiver half draining critical frames ahead of coalesced ephemeral frames.
 #[derive(Debug)]
 pub struct OutboundReceiver {
     critical_rx: mpsc::UnboundedReceiver<String>,

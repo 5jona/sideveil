@@ -12,12 +12,16 @@ pub use self::debug::*;
 pub use self::payloads::*;
 pub use crate::sensor::DebugGestureStats;
 
+/// JSON-RPC 2.0 error object returned in a failed [`RpcResponse`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RpcError {
+    /// Numeric JSON-RPC or SideVeil-specific error code.
     pub code: i32,
+    /// Human-readable diagnostic message.
     pub message: String,
 }
 
+/// JSON-RPC 2.0 request frame exchanged across `hub.sock`, `app.sock`, and Host WebSocket.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RpcRequest {
     #[serde(default = "default_jsonrpc")]
@@ -32,6 +36,7 @@ pub struct RpcRequest {
 }
 
 impl RpcRequest {
+    /// Constructs a JSON-RPC 2.0 request frame with the given correlation ID, method, and params.
     #[must_use]
     pub fn new(id: impl Into<String>, method: impl Into<String>, params: Option<Value>) -> Self {
         Self {
@@ -44,6 +49,7 @@ impl RpcRequest {
     }
 }
 
+/// JSON-RPC 2.0 response frame carrying either a `result` value or an [`RpcError`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RpcResponse {
     #[serde(default = "default_jsonrpc")]
@@ -56,6 +62,7 @@ pub struct RpcResponse {
 }
 
 impl RpcResponse {
+    /// Constructs a successful JSON-RPC 2.0 response for `id`.
     #[must_use]
     pub fn ok(id: impl Into<String>, result: Value) -> Self {
         Self {
@@ -66,6 +73,7 @@ impl RpcResponse {
         }
     }
 
+    /// Constructs a JSON-RPC 2.0 error response for `id`.
     #[must_use]
     pub fn err(id: impl Into<String>, code: i32, message: impl Into<String>) -> Self {
         Self {
@@ -80,6 +88,7 @@ impl RpcResponse {
     }
 }
 
+/// Server-pushed event envelope transmitted between `sideveild` and `SideVeilHost`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HostEventEnvelope {
     pub event: String,

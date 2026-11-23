@@ -20,6 +20,7 @@ use crate::state::HubState;
 
 const PING_INTERVAL: Duration = Duration::from_secs(15);
 
+/// Authenticated loopback WebSocket and HTTP asset listener for `SideVeilHost`.
 #[derive(Debug)]
 pub struct HostWsServer {
     listener: TcpListener,
@@ -27,17 +28,20 @@ pub struct HostWsServer {
 }
 
 impl HostWsServer {
+    /// Binds an ephemeral `127.0.0.1:0` TCP listener for Host WebSocket and asset traffic.
     pub async fn bind() -> io::Result<Self> {
         let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
         let port = listener.local_addr()?.port();
         Ok(Self { listener, port })
     }
 
+    /// Returns the OS-assigned local loopback port.
     #[must_use]
     pub fn port(&self) -> u16 {
         self.port
     }
 
+    /// Accepts incoming loopback connections and routes them to WebSocket or HTTP asset handlers.
     pub async fn serve(self, state: Arc<HubState>) {
         state.set_ws_port(self.port);
         state.logs().info(format!(

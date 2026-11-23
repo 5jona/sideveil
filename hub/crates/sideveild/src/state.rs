@@ -23,6 +23,7 @@ use crate::log_ring::LogRing;
 use crate::plugin_backends::PluginBackends;
 use crate::plugin_registry::PluginRegistry;
 
+/// Central shared state coordinating configuration, plugins, UDS/WS sessions, and events.
 #[derive(Debug)]
 pub struct HubState {
     started_at: Instant,

@@ -1,13 +1,16 @@
-//! HTTP/1.1 header parsing, error responses, and MIME mapping for the plugin asset server.
+//! Bounded HTTP/1.1 header parsing, error responses, and MIME mapping for the plugin asset server.
 
 use std::fs::Metadata;
 use std::io;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
 
 const MAX_HEADER_LINES: usize = 64;
+const MAX_REQUEST_LINE_BYTES: usize = 8 * 1024;
+const MAX_HEADER_LINE_BYTES: usize = 8 * 1024;
+const MAX_TOTAL_HEADER_BYTES: usize = 64 * 1024;
 
 pub(super) struct ParsedHttpRequest {
     pub(super) method: String,
@@ -16,17 +19,59 @@ pub(super) struct ParsedHttpRequest {
     pub(super) origin: Option<String>,
 }
 
-pub(super) async fn parse_http_headers(
-    reader: &mut BufReader<tokio::net::tcp::OwnedReadHalf>,
+/// Reads a single `\n`-terminated HTTP line while enforcing `max_bytes` before allocating.
+async fn read_bounded_http_line<R: AsyncRead + Unpin>(
+    reader: &mut BufReader<R>,
+    max_bytes: usize,
+) -> io::Result<Option<String>> {
+    let mut buf = Vec::new();
+    loop {
+        let available = reader.fill_buf().await?;
+        if available.is_empty() {
+            if buf.is_empty() {
+                return Ok(None);
+            }
+            break;
+        }
+        if let Some(pos) = available.iter().position(|&b| b == b'\n') {
+            if buf.len() + pos > max_bytes {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "HTTP line exceeds maximum length",
+                ));
+            }
+            buf.extend_from_slice(&available[..pos]);
+            reader.consume(pos + 1);
+            break;
+        }
+        if buf.len() + available.len() > max_bytes {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "HTTP line exceeds maximum length",
+            ));
+        }
+        let len = available.len();
+        buf.extend_from_slice(available);
+        reader.consume(len);
+    }
+    if buf.last() == Some(&b'\r') {
+        buf.pop();
+    }
+    String::from_utf8(buf)
+        .map(Some)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
+}
+
+pub(super) async fn parse_http_headers<R: AsyncRead + Unpin>(
+    reader: &mut BufReader<R>,
 ) -> io::Result<ParsedHttpRequest> {
-    let mut request_line = String::new();
-    let n = reader.read_line(&mut request_line).await?;
-    if n == 0 {
+    let Some(request_line) = read_bounded_http_line(reader, MAX_REQUEST_LINE_BYTES).await? else {
         return Err(io::Error::new(
             io::ErrorKind::UnexpectedEof,
             "empty HTTP request",
         ));
-    }
+    };
+    let mut total_bytes = request_line.len();
     let mut parts = request_line.split_whitespace();
     let method = parts
         .next()
@@ -40,16 +85,20 @@ pub(super) async fn parse_http_headers(
     let mut authorization = None;
     let mut origin = None;
     for _ in 0..MAX_HEADER_LINES {
-        let mut line = String::new();
-        let read = reader.read_line(&mut line).await?;
-        if read == 0 {
+        let Some(line) = read_bounded_http_line(reader, MAX_HEADER_LINE_BYTES).await? else {
+            break;
+        };
+        if line.is_empty() {
             break;
         }
-        let trimmed = line.trim_end_matches(['\r', '\n']);
-        if trimmed.is_empty() {
-            break;
+        total_bytes = total_bytes.saturating_add(line.len());
+        if total_bytes > MAX_TOTAL_HEADER_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "HTTP headers exceed maximum aggregate size",
+            ));
         }
-        if let Some((name, value)) = trimmed.split_once(':') {
+        if let Some((name, value)) = line.split_once(':') {
             let lower = name.trim().to_ascii_lowercase();
             let val = value.trim().to_owned();
             if lower == "authorization" {
@@ -139,4 +188,49 @@ pub(super) async fn write_error(
     );
     writer.write_all(resp.as_bytes()).await?;
     writer.flush().await
+}
+
+#[cfg(test)]
+mod tests {
+    use tokio::io::BufReader;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn rejects_oversized_request_line_and_header_line() {
+        let oversized_req = format!(
+            "GET /{} HTTP/1.1\r\n\r\n",
+            "a".repeat(MAX_REQUEST_LINE_BYTES)
+        );
+        let mut reader = BufReader::new(oversized_req.as_bytes());
+        let err = parse_http_headers(&mut reader)
+            .await
+            .err()
+            .expect("oversized request line must fail");
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+
+        let oversized_hdr = format!(
+            "GET /plugins/demo/index.html HTTP/1.1\r\nX-Pad: {}\r\n\r\n",
+            "b".repeat(MAX_HEADER_LINE_BYTES)
+        );
+        let mut reader2 = BufReader::new(oversized_hdr.as_bytes());
+        let err2 = parse_http_headers(&mut reader2)
+            .await
+            .err()
+            .expect("oversized header line must fail");
+        assert_eq!(err2.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[tokio::test]
+    async fn parses_valid_bounded_request_headers() {
+        let raw = b"GET /plugins/demo/web/index.html HTTP/1.1\r\nAuthorization: Bearer secret\r\nOrigin: https://example.test\r\n\r\n";
+        let mut reader = BufReader::new(&raw[..]);
+        let parsed = parse_http_headers(&mut reader)
+            .await
+            .expect("parse headers");
+        assert_eq!(parsed.method, "GET");
+        assert_eq!(parsed.target, "/plugins/demo/web/index.html");
+        assert_eq!(parsed.authorization.as_deref(), Some("Bearer secret"));
+        assert_eq!(parsed.origin.as_deref(), Some("https://example.test"));
+    }
 }

@@ -19,6 +19,7 @@ use sideveil_protocol::rpc::{
 };
 use sideveil_protocol::sensor::HubToSensor;
 
+use crate::plugin_registry::PluginRegistryError;
 use crate::state::HubState;
 
 impl HubState {
@@ -101,7 +102,7 @@ impl HubState {
         &self,
         plugin_id: &str,
         package_override: Option<&str>,
-    ) -> Result<PluginActiveChangedPayload, String> {
+    ) -> Result<PluginActiveChangedPayload, PluginRegistryError> {
         let fg = match package_override {
             Some(p) if !p.trim().is_empty() => p.trim().to_owned(),
             _ => self
