@@ -45,8 +45,8 @@
     }
 
     .sideveil-compact-metrics [data-pochita="metric-tile"] > div:first-child {
-      flex-wrap: wrap;
-      align-items: center;
+      flex-direction: column;
+      align-items: flex-start;
       row-gap: 0.25rem;
       column-gap: 0.25rem;
     }
@@ -109,8 +109,8 @@
     }
 
     .sideveil-compact-metrics [data-pochita="metric-tile"] > div:first-child {
-      flex-wrap: wrap;
-      align-items: center;
+      flex-direction: column;
+      align-items: flex-start;
       row-gap: 0.25rem;
       column-gap: 0.25rem;
     }
