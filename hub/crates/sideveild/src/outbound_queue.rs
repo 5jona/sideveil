@@ -60,7 +60,7 @@ impl OutboundSender {
 
     /// Stores the latest high-frequency ephemeral frame, overwriting any unconsumed older frame.
     pub fn send_ephemeral(&self, payload: String) -> bool {
-        if self.critical_tx.is_closed() {
+        if self.critical_tx.is_closed() || self.ephemeral.closed.load(Ordering::Acquire) {
             return false;
         }
         let mut slot = self
@@ -85,6 +85,12 @@ impl OutboundReceiver {
     /// Receives the next frame with strict priority for critical control/RPC frames.
     pub async fn recv(&mut self) -> Option<String> {
         loop {
+            // Register waiter before inspecting state so `close()`'s `notify_waiters()`
+            // can never race between the closed check and parking in `select!`.
+            let notified = self.ephemeral.notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+
             if let Ok(critical) = self.critical_rx.try_recv() {
                 return Some(critical);
             }
@@ -103,7 +109,7 @@ impl OutboundReceiver {
                         None => return self.take_ephemeral(),
                     }
                 }
-                () = self.ephemeral.notify.notified() => {
+                () = notified => {
                     // Loop back to re-check critical lane first before taking ephemeral.
                 }
             }
@@ -146,5 +152,22 @@ mod tests {
             received,
             vec!["dragStart", "rpcResponse", "dragEnd", "dragMove-9999"]
         );
+    }
+
+    #[tokio::test]
+    async fn close_wakes_receiver_reliably_while_sender_clone_remains_alive() {
+        for _ in 0..100 {
+            let (tx, mut rx) = channel();
+            let tx_clone = tx.clone();
+            let recv_task = tokio::spawn(async move { rx.recv().await });
+            tokio::task::yield_now().await;
+            tx.close();
+            let res = tokio::time::timeout(std::time::Duration::from_secs(1), recv_task)
+                .await
+                .expect("receiver must wake on close without lost wakeup")
+                .expect("join recv_task");
+            assert_eq!(res, None);
+            assert!(!tx_clone.send_ephemeral("dropped-after-close".to_owned()));
+        }
     }
 }

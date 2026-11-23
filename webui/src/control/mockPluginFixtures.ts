@@ -40,22 +40,20 @@ export const INITIAL_MOCK_NETWORK_CONTEXT: NetworkContextSnapshot = {
 export const INITIAL_MOCK_PLUGINS: readonly PluginDescriptor[] = [
   {
     id: 'sideveil.diagnostic',
-    name: '系统诊断',
-    version: '1.0.0',
+    name: '内置诊断',
+    version: '0.1.0',
     entry: 'index.html',
     builtin: true,
     enabled: true,
-    priority: 0,
+    priority: 20,
     packages: [],
-    global: true,
+    global: false,
     hasScopeOverride: false,
     backend: 'none',
     backendState: 'none',
-    capabilities: ['storage', 'toast', 'system-exec'],
+    capabilities: ['storage', 'toast'],
     surface: {
       backdrop: 'native-glass',
-      widthDp: 340,
-      heightPercent: 72,
     },
   },
   {

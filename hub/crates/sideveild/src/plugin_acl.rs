@@ -1,8 +1,7 @@
 //! Capability-gated per-plugin storage (`fs.read` / `fs.writeAtomic`) and `system.exec`.
 
-use std::fs::{self, OpenOptions};
-use std::io::Write;
-use std::os::unix::fs::PermissionsExt;
+use std::fs::{self, File};
+use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
@@ -12,6 +11,7 @@ use sideveil_protocol::plugin::PluginCapability;
 use sideveil_protocol::rpc::error_codes;
 use tokio::process::Command;
 
+use crate::fs_util::write_file_atomic;
 use crate::plugin_registry::PluginRegistry;
 
 const MAX_READ_BYTES: usize = 2 * 1024 * 1024;
@@ -46,12 +46,33 @@ pub fn handle_fs_read(
         ));
     }
 
-    let bytes = fs::read(&canonical_target).map_err(|e| {
+    let meta = fs::metadata(&canonical_target).map_err(|e| {
         (
             error_codes::INTERNAL_ERROR,
-            format!("Failed reading plugin file: {e}"),
+            format!("Failed inspecting plugin file: {e}"),
         )
     })?;
+    if meta.len() > MAX_READ_BYTES as u64 {
+        return Err((
+            error_codes::INVALID_PARAMS,
+            "File exceeds 2 MiB plugin storage limit".to_owned(),
+        ));
+    }
+    let file = File::open(&canonical_target).map_err(|e| {
+        (
+            error_codes::INTERNAL_ERROR,
+            format!("Failed opening plugin file: {e}"),
+        )
+    })?;
+    let mut bytes = Vec::with_capacity((meta.len() as usize).min(MAX_READ_BYTES));
+    file.take((MAX_READ_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|e| {
+            (
+                error_codes::INTERNAL_ERROR,
+                format!("Failed reading plugin file: {e}"),
+            )
+        })?;
     if bytes.len() > MAX_READ_BYTES {
         return Err((
             error_codes::INVALID_PARAMS,
@@ -107,33 +128,7 @@ pub fn handle_fs_write_atomic(
         }
     }
 
-    let file_name = target
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("data");
-    let tmp = target.with_file_name(format!(".{file_name}.tmp.{}", std::process::id()));
-    let mut file = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(&tmp)
-        .map_err(|e| {
-            (
-                error_codes::INTERNAL_ERROR,
-                format!("Failed opening temp file: {e}"),
-            )
-        })?;
-    file.write_all(content.as_bytes()).map_err(|e| {
-        (
-            error_codes::INTERNAL_ERROR,
-            format!("Failed writing temp file: {e}"),
-        )
-    })?;
-    let _ = file.sync_all();
-    let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600));
-    drop(file);
-    fs::rename(&tmp, &target).map_err(|e| {
-        let _ = fs::remove_file(&tmp);
+    write_file_atomic(&target, content.as_bytes(), 0o600, None, false).map_err(|e| {
         (
             error_codes::INTERNAL_ERROR,
             format!("Failed committing atomic write: {e}"),
@@ -165,14 +160,21 @@ pub async fn handle_system_exec(
         "/bin/sh"
     };
 
-    let fut = Command::new(shell)
+    let child = Command::new(shell)
         .args(["-c", &cmd])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .output();
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|err| {
+            (
+                error_codes::INTERNAL_ERROR,
+                format!("Failed executing command: {err}"),
+            )
+        })?;
 
-    match tokio::time::timeout(Duration::from_millis(timeout_ms), fut).await {
+    match tokio::time::timeout(Duration::from_millis(timeout_ms), child.wait_with_output()).await {
         Ok(Ok(out)) => Ok(json!({
             "errno": out.status.code().unwrap_or(-1),
             "stdout": String::from_utf8_lossy(&out.stdout),

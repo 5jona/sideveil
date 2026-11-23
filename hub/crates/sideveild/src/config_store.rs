@@ -1,10 +1,9 @@
 //! Authoritative disk configuration store with atomic persistence and Linux `inotify` hot reload.
 
-use std::ffi::CString;
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
+use std::fs;
+use std::io;
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, PoisonError, RwLock};
 use std::time::Duration;
@@ -12,6 +11,7 @@ use std::time::Duration;
 use sideveil_protocol::config::{AppearancePatchParams, EdgePatchParams, SideVeilConfig};
 use tokio::sync::broadcast;
 
+use crate::fs_util::write_file_atomic;
 use crate::inotify::{DIR_CHANGE_MASK, InotifyDirWatcher};
 use crate::log_ring::LogRing;
 
@@ -85,10 +85,10 @@ impl ConfigStore {
         let next = {
             let mut guard = self.current.write().unwrap_or_else(PoisonError::into_inner);
             let updated = guard.apply_appearance_patch(patch);
+            self.persist_config(&updated)?;
             *guard = updated.clone();
             updated
         };
-        self.persist_config(&next)?;
         let _ = self.updates_tx.send(next.clone());
         Ok(next)
     }
@@ -98,10 +98,10 @@ impl ConfigStore {
         let next = {
             let mut guard = self.current.write().unwrap_or_else(PoisonError::into_inner);
             let updated = guard.apply_edge_patch(patch);
+            self.persist_config(&updated)?;
             *guard = updated.clone();
             updated
         };
-        self.persist_config(&next)?;
         let _ = self.updates_tx.send(next.clone());
         Ok(next)
     }
@@ -115,10 +115,10 @@ impl ConfigStore {
             let mut updated = guard.clone();
             updated.debug.webview_debugging_enabled = enabled;
             let updated = updated.sanitized();
+            self.persist_config(&updated)?;
             *guard = updated.clone();
             (prev, updated)
         };
-        self.persist_config(&next)?;
         let _ = self.updates_tx.send(next.clone());
         Ok((prev, next))
     }
@@ -157,44 +157,17 @@ impl ConfigStore {
     }
 
     fn persist_config(&self, config: &SideVeilConfig) -> io::Result<()> {
-        let parent = self
-            .path
-            .parent()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "config has no parent"))?;
-        fs::create_dir_all(parent)?;
-
         let existing_owner = fs::metadata(&self.path).ok().map(|m| (m.uid(), m.gid()));
-        let serialized = serde_json::to_string_pretty(config)
+        let mut serialized = serde_json::to_string_pretty(config)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-
-        let tmp_name = format!(
-            ".{}.tmp.{}",
-            self.path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("config.json"),
-            std::process::id()
-        );
-        let tmp_path = parent.join(tmp_name);
-
-        let mut file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(&tmp_path)?;
-        file.write_all(serialized.as_bytes())?;
-        file.write_all(b"\n")?;
-        file.sync_all()?;
-        fs::set_permissions(&tmp_path, fs::Permissions::from_mode(0o644))?;
-        if let Some((uid, gid)) = existing_owner {
-            let _ = chown_path(&tmp_path, uid, gid);
-        }
-        drop(file);
-        fs::rename(&tmp_path, &self.path)?;
-        if let Ok(dir) = File::open(parent) {
-            let _ = dir.sync_all();
-        }
-        Ok(())
+        serialized.push('\n');
+        write_file_atomic(
+            &self.path,
+            serialized.as_bytes(),
+            0o644,
+            existing_owner,
+            true,
+        )
     }
 }
 
@@ -219,23 +192,37 @@ fn load_from_disk(path: &Path, logs: &LogRing) -> Option<SideVeilConfig> {
     }
 }
 
-fn chown_path(path: &Path, uid: u32, gid: u32) -> io::Result<()> {
-    let c_path = CString::new(path.as_os_str().as_bytes())
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains interior NUL"))?;
-    let rc = unsafe {
-        // SAFETY: `c_path` is a valid NUL-terminated C string.
-        libc::chown(c_path.as_ptr(), uid, gid)
-    };
-    if rc == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_persist_does_not_mutate_in_memory_config() {
+        let dir = std::env::temp_dir().join(format!(
+            "sideveil-cfg-fail-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).expect("create temp dir");
+        // Point config path at an existing directory so atomic rename fails with EISDIR.
+        let bad_target = dir.join("config_dir");
+        fs::create_dir_all(&bad_target).expect("create dir at target");
+        let logs = Arc::new(LogRing::new());
+        let store = ConfigStore::open(bad_target, logs);
+        let before = store.current();
+
+        let err = store.patch_appearance(&AppearancePatchParams {
+            color_mode: Some("light".to_owned()),
+            ..Default::default()
+        });
+        assert!(err.is_err());
+        assert_eq!(store.current(), before);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[tokio::test]
     async fn atomic_patch_and_inotify_reload_work_end_to_end() {

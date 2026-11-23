@@ -1,9 +1,8 @@
 //! Built-in diagnostic manifest, descriptor assembly, and atomic `plugins.json` persistence.
 
 use std::collections::BTreeMap;
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
-use std::os::unix::fs::PermissionsExt;
+use std::fs;
+use std::io;
 use std::path::Path;
 
 use sideveil_protocol::config::{ScopeMode, SideVeilConfig};
@@ -14,6 +13,7 @@ use sideveil_protocol::plugin::{
 };
 
 use super::LoadedPlugin;
+use crate::fs_util::write_file_atomic;
 use crate::log_ring::LogRing;
 
 pub(super) fn builtin_diag_manifest() -> PluginManifest {
@@ -30,7 +30,7 @@ pub(super) fn builtin_diag_manifest() -> PluginManifest {
         },
         entry: "index.html".to_owned(),
         backend: PluginBackendKind::None,
-        capabilities: vec![PluginCapability::Toast],
+        capabilities: vec![PluginCapability::Storage, PluginCapability::Toast],
         surface: PluginSurfacePrefs {
             backdrop: PluginSurfaceBackdrop::NativeGlass,
             ..PluginSurfacePrefs::default()
@@ -77,62 +77,42 @@ pub(super) fn build_descriptor(
     };
 
     let mut surface = loaded.manifest.surface.clone();
-    if let Some(keep_alive) = ov.and_then(|o| o.keep_alive) {
-        surface.keep_alive = keep_alive;
+    let mut embed = loaded.manifest.embed.clone();
+    let mut network = loaded.manifest.network.clone();
+    if let Some(o) = ov {
+        if let Some(keep_alive) = o.keep_alive {
+            surface.keep_alive = keep_alive;
+        }
+        surface.width_dp = o.width_dp.or(surface.width_dp);
+        surface.height_percent = o.height_percent.or(surface.height_percent);
+        if let Some(e) = embed.as_mut() {
+            if let Some(url) = &o.embed_url {
+                e.url = url.clone();
+            }
+            if let Some(remote_url) = &o.remote_url {
+                e.remote_url = Some(remote_url.clone());
+            }
+            if let Some(lan_ssids) = &o.lan_ssids {
+                e.lan_ssids = lan_ssids.clone();
+            }
+            if let Some(origins) = &o.allowed_origins {
+                e.allowed_origins = origins.clone();
+            }
+            e.allow_cleartext = o.allow_cleartext.unwrap_or(e.allow_cleartext);
+            e.wide_viewport = o.wide_viewport.unwrap_or(e.wide_viewport);
+            e.allow_zoom = o.allow_zoom.unwrap_or(e.allow_zoom);
+            e.web_history_back = o.web_history_back.unwrap_or(e.web_history_back);
+            e.text_zoom = o.text_zoom.or(e.text_zoom);
+            e.show_toolbar = o.show_toolbar.unwrap_or(e.show_toolbar);
+            e.keep_alive_grace_sec = o.keep_alive_grace_sec.or(e.keep_alive_grace_sec);
+        }
+        if let Some(n) = network.as_mut() {
+            if let Some(origins) = &o.allowed_origins {
+                n.allowed_origins = origins.clone();
+            }
+            n.allow_cleartext = o.allow_cleartext.unwrap_or(n.allow_cleartext);
+        }
     }
-    if let Some(width_dp) = ov.and_then(|o| o.width_dp) {
-        surface.width_dp = Some(width_dp);
-    }
-    if let Some(height_percent) = ov.and_then(|o| o.height_percent) {
-        surface.height_percent = Some(height_percent);
-    }
-
-    let embed = loaded.manifest.embed.clone().map(|mut e| {
-        if let Some(url) = ov.and_then(|o| o.embed_url.as_ref()) {
-            e.url = url.clone();
-        }
-        if let Some(remote_url) = ov.and_then(|o| o.remote_url.as_ref()) {
-            e.remote_url = Some(remote_url.clone());
-        }
-        if let Some(lan_ssids) = ov.and_then(|o| o.lan_ssids.as_ref()) {
-            e.lan_ssids = lan_ssids.clone();
-        }
-        if let Some(origins) = ov.and_then(|o| o.allowed_origins.as_ref()) {
-            e.allowed_origins = origins.clone();
-        }
-        if let Some(allow_cleartext) = ov.and_then(|o| o.allow_cleartext) {
-            e.allow_cleartext = allow_cleartext;
-        }
-        if let Some(wide_viewport) = ov.and_then(|o| o.wide_viewport) {
-            e.wide_viewport = wide_viewport;
-        }
-        if let Some(allow_zoom) = ov.and_then(|o| o.allow_zoom) {
-            e.allow_zoom = allow_zoom;
-        }
-        if let Some(web_history_back) = ov.and_then(|o| o.web_history_back) {
-            e.web_history_back = web_history_back;
-        }
-        if let Some(text_zoom) = ov.and_then(|o| o.text_zoom) {
-            e.text_zoom = Some(text_zoom);
-        }
-        if let Some(show_toolbar) = ov.and_then(|o| o.show_toolbar) {
-            e.show_toolbar = show_toolbar;
-        }
-        if let Some(keep_alive_grace_sec) = ov.and_then(|o| o.keep_alive_grace_sec) {
-            e.keep_alive_grace_sec = Some(keep_alive_grace_sec);
-        }
-        e
-    });
-
-    let network = loaded.manifest.network.clone().map(|mut n| {
-        if let Some(origins) = ov.and_then(|o| o.allowed_origins.as_ref()) {
-            n.allowed_origins = origins.clone();
-        }
-        if let Some(allow_cleartext) = ov.and_then(|o| o.allow_cleartext) {
-            n.allow_cleartext = allow_cleartext;
-        }
-        n
-    });
 
     PluginDescriptor {
         id: loaded.manifest.id.clone(),
@@ -173,21 +153,61 @@ pub(super) fn matches_activity(activities: &[String], foreground_activity: &str)
     })
 }
 
-/// Validates that a Dev Mode server URL strictly targets loopback (`127.0.0.1` or `localhost`).
+/// Validates that a Dev Mode server URL strictly targets loopback (`localhost`, `127.0.0.1`, `[::1]`)
+/// with `http://` or `https://`, no userinfo (`@`), no control/whitespace chars, and a valid numeric port.
 pub(super) fn validate_loopback_dev_url(raw: &str) -> Result<String, String> {
     let trimmed = raw.trim().trim_end_matches('/');
-    let rest = trimmed.strip_prefix("http://").ok_or_else(|| {
-        "devServerUrl must start with http://127.0.0.1 or http://localhost".to_owned()
-    })?;
-    let host_port = rest.split('/').next().unwrap_or_default();
-    let host = host_port.split(':').next().unwrap_or_default();
-    if host != "127.0.0.1" && host != "localhost" {
+    if trimmed.is_empty()
+        || trimmed
+            .chars()
+            .any(|c| c.is_control() || c.is_whitespace() || c == '\\')
+    {
         return Err(
-            "devServerUrl is restricted strictly to loopback (127.0.0.1 / localhost)".to_owned(),
+            "devServerUrl must not be empty or contain whitespace, control chars, or backslashes"
+                .to_owned(),
         );
     }
-    if trimmed.contains(char::is_whitespace) || trimmed.contains('\r') || trimmed.contains('\n') {
-        return Err("devServerUrl must not contain whitespace".to_owned());
+    let Some((scheme, rest)) = trimmed.split_once("://") else {
+        return Err("devServerUrl must use http:// or https://".to_owned());
+    };
+    if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
+        return Err("devServerUrl must use http:// or https://".to_owned());
+    }
+    if rest.contains('?') || rest.contains('#') {
+        return Err("devServerUrl must not contain query or fragment components".to_owned());
+    }
+    let authority = rest.split('/').next().unwrap_or_default();
+    if authority.is_empty() || authority.contains('@') {
+        return Err("devServerUrl authority must not be empty or contain userinfo (@)".to_owned());
+    }
+    let (host, port_part) = if authority.starts_with('[') {
+        let Some(end) = authority.find(']') else {
+            return Err("devServerUrl has malformed IPv6 host".to_owned());
+        };
+        (&authority[..=end], &authority[end + 1..])
+    } else if let Some((h, p)) = authority.split_once(':') {
+        (h, &authority[h.len()..h.len() + 1 + p.len()])
+    } else {
+        (authority, "")
+    };
+    let is_loopback =
+        host.eq_ignore_ascii_case("localhost") || host == "127.0.0.1" || host == "[::1]";
+    if !is_loopback {
+        return Err(
+            "devServerUrl is restricted strictly to loopback (localhost, 127.0.0.1, [::1])"
+                .to_owned(),
+        );
+    }
+    if !port_part.is_empty() {
+        let Some(digits) = port_part.strip_prefix(':') else {
+            return Err("devServerUrl has invalid port syntax".to_owned());
+        };
+        if digits.is_empty()
+            || !digits.bytes().all(|b| b.is_ascii_digit())
+            || digits.parse::<u16>().ok().is_none_or(|p| p == 0)
+        {
+            return Err("devServerUrl port must be a valid integer in 1..=65535".to_owned());
+        }
     }
     Ok(trimmed.to_owned())
 }
@@ -266,27 +286,8 @@ pub(super) fn load_overrides(path: &Path, logs: &LogRing) -> PluginOverridesFile
 }
 
 pub(super) fn persist_overrides(path: &Path, data: &PluginOverridesFile) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let json = serde_json::to_string_pretty(data)
+    let mut json = serde_json::to_string_pretty(data)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    let tmp = path.with_extension(format!("json.tmp.{}", std::process::id()));
-    let mut f = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(&tmp)?;
-    f.write_all(json.as_bytes())?;
-    f.write_all(b"\n")?;
-    f.sync_all()?;
-    fs::set_permissions(&tmp, fs::Permissions::from_mode(0o644))?;
-    drop(f);
-    fs::rename(&tmp, path)?;
-    if let Some(parent) = path.parent()
-        && let Ok(dir) = File::open(parent)
-    {
-        let _ = dir.sync_all();
-    }
-    Ok(())
+    json.push('\n');
+    write_file_atomic(path, json.as_bytes(), 0o644, None, true)
 }

@@ -1,9 +1,7 @@
 //! HostService endpoint sync, SELinux relabeling, and `am` foreground service wake helpers.
 
-use std::ffi::CString;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
-use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -12,6 +10,7 @@ use std::sync::Arc;
 use sideveil_protocol::rpc::DaemonEndpoint;
 use tokio::process::Command;
 
+use crate::fs_util::{chown_path, unique_tmp_path};
 use crate::state::HubState;
 
 pub(crate) async fn force_stop_host(host_package: &str) {
@@ -82,13 +81,9 @@ async fn sync_host_endpoint(host_package: &str, port: u16, token: &str) -> io::R
     })
     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
-    let tmp = no_backup.join(format!("daemon_endpoint.json.tmp.{}", std::process::id()));
     let dst = no_backup.join("daemon_endpoint.json");
-    let mut file = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(&tmp)?;
+    let tmp = unique_tmp_path(&dst);
+    let mut file = OpenOptions::new().create_new(true).write(true).open(&tmp)?;
     file.write_all(payload.as_bytes())?;
     file.write_all(b"\n")?;
     file.sync_all()?;
@@ -97,7 +92,10 @@ async fn sync_host_endpoint(host_package: &str, port: u16, token: &str) -> io::R
     let _ = chown_path(&tmp, uid, gid);
     let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600));
     relabel_selinux(&data_dir, &no_backup, &tmp).await;
-    fs::rename(&tmp, &dst)?;
+    if let Err(err) = fs::rename(&tmp, &dst) {
+        let _ = fs::remove_file(&tmp);
+        return Err(err);
+    }
     Ok(())
 }
 
@@ -123,19 +121,5 @@ async fn relabel_selinux(ref_dir: &Path, dir: &Path, file: &Path) {
             .stderr(Stdio::null())
             .status()
             .await;
-    }
-}
-
-pub(crate) fn chown_path(path: &Path, uid: u32, gid: u32) -> io::Result<()> {
-    let c_path = CString::new(path.as_os_str().as_bytes())
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains interior NUL"))?;
-    let rc = unsafe {
-        // SAFETY: `c_path` is a valid NUL-terminated C string.
-        libc::chown(c_path.as_ptr(), uid, gid)
-    };
-    if rc == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
     }
 }

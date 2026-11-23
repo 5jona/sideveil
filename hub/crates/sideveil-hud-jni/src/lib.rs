@@ -11,6 +11,13 @@ thread_local! {
     static HUD_CANVAS: RefCell<HudCanvas> = RefCell::new(HudCanvas::default());
 }
 
+/// Decodes a JNI UTF-16 code-unit slice into standard Rust UTF-8, preserving
+/// supplementary Unicode surrogate pairs (such as emoji) that JNI MUTF-8 breaks.
+#[must_use]
+pub fn decode_jni_utf16(units: &[u16]) -> String {
+    String::from_utf16(units).unwrap_or_else(|_| String::from_utf16_lossy(units))
+}
+
 /// Pure-Rust scene decode + rasterization entrypoint shared by JNI and host unit tests.
 pub fn render_scene_json_into(
     scene_json: &str,
@@ -63,12 +70,12 @@ pub fn render_scene_json_into(
 #[cfg(target_os = "android")]
 #[allow(non_snake_case)]
 mod android_jni {
-    use std::ffi::{CStr, c_void};
+    use std::ffi::c_void;
     use std::ptr;
 
     use jni_sys::{JNI_FALSE, JNI_TRUE, JNIEnv, jboolean, jclass, jfloat, jobject, jstring};
 
-    use super::{HUD_CANVAS, render_scene_json_into};
+    use super::{HUD_CANVAS, decode_jni_utf16, render_scene_json_into};
     use sideveil_gfx::hud_renderer::HudCanvas;
 
     const ANDROID_BITMAP_RESULT_SUCCESS: i32 = 0;
@@ -98,6 +105,12 @@ mod android_jni {
         fn AndroidBitmap_unlockPixels(env: *mut JNIEnv, jbitmap: jobject) -> i32;
     }
 
+    /// JNI entrypoint invoked by `pochita.sideveil.host.NativeHudRenderer.nativeRenderScene`.
+    ///
+    /// # Safety
+    ///
+    /// Caller (ART JNI bridge) must pass a valid `JNIEnv`, a valid Java `String` (`scene_json`),
+    /// and a valid `android.graphics.Bitmap` (`bitmap`) or null pointers (which return `JNI_FALSE`).
     #[unsafe(no_mangle)]
     pub unsafe extern "system" fn Java_pochita_sideveil_host_NativeHudRenderer_nativeRenderScene(
         env: *mut JNIEnv,
@@ -115,22 +128,26 @@ mod android_jni {
             return JNI_FALSE;
         }
 
-        // SAFETY: `scene_json` is a valid non-null Java String reference provided by ART.
-        let utf_ptr =
-            unsafe { ((*vtable).v1_1.GetStringUTFChars)(env, scene_json, ptr::null_mut()) };
-        if utf_ptr.is_null() {
+        // SAFETY: `scene_json` is a valid non-null Java String; returns UTF-16 code unit count.
+        let utf16_len = unsafe { ((*vtable).v1_1.GetStringLength)(env, scene_json) };
+        let Ok(len) = usize::try_from(utf16_len) else {
             return JNI_FALSE;
-        }
-        // SAFETY: `utf_ptr` is NUL-terminated UTF-8 owned by ART until ReleaseStringUTFChars.
-        let json_owned = unsafe { CStr::from_ptr(utf_ptr) }
-            .to_str()
-            .ok()
-            .map(str::to_owned);
-        // SAFETY: Matches the preceding GetStringUTFChars call on the same env and jstring.
-        unsafe { ((*vtable).v1_1.ReleaseStringUTFChars)(env, scene_json, utf_ptr) };
-
-        let Some(json_str) = json_owned else {
-            return JNI_FALSE;
+        };
+        let json_str = if len == 0 {
+            String::new()
+        } else {
+            // SAFETY: `scene_json` is a valid non-null Java String reference provided by ART.
+            let chars_ptr =
+                unsafe { ((*vtable).v1_1.GetStringChars)(env, scene_json, ptr::null_mut()) };
+            if chars_ptr.is_null() {
+                return JNI_FALSE;
+            }
+            // SAFETY: `chars_ptr` points to `len` UTF-16 code units until ReleaseStringChars.
+            let units = unsafe { std::slice::from_raw_parts(chars_ptr, len) };
+            let decoded = decode_jni_utf16(units);
+            // SAFETY: Matches the preceding GetStringChars call on the same env and jstring.
+            unsafe { ((*vtable).v1_1.ReleaseStringChars)(env, scene_json, chars_ptr) };
+            decoded
         };
 
         let mut info = AndroidBitmapInfo::default();
@@ -224,5 +241,40 @@ mod tests {
             &mut strided
         ));
         assert!(strided[stride * 24 + 60 * 4 + 3] > 200);
+    }
+
+    #[test]
+    fn decodes_utf16_surrogate_pairs_and_renders_emoji_hud_scene() {
+        let json = r#"{
+            "pluginId": "demo.hud",
+            "widthDp": 120,
+            "heightDp": 48,
+            "primitives": [
+                {"kind": "roundedPill", "x": 2, "y": 2, "w": 116, "h": 44, "radius": 12, "fillArgb": 4280361249}
+            ],
+            "texts": [
+                {"x": 8, "y": 20, "text": "🔥 CPU 42% 🚀 中文", "sizeSp": 12, "colorArgb": 4294967295}
+            ]
+        }"#;
+        let utf16_units: Vec<u16> = json.encode_utf16().collect();
+        // Verify surrogate pairs exist in UTF-16 representation (emoji take 2 code units each).
+        assert!(utf16_units.len() > json.chars().count());
+        let decoded = decode_jni_utf16(&utf16_units);
+        assert_eq!(decoded, json);
+
+        let mut packed = vec![0u8; 120 * 48 * 4];
+        assert!(render_scene_json_into(
+            &decoded,
+            1.0,
+            120,
+            48,
+            120 * 4,
+            &mut packed
+        ));
+        assert!(packed.as_chunks::<4>().0.iter().any(|px| px[3] > 200));
+
+        // Lone surrogate degrades gracefully without panicking.
+        let lone = [0x0041u16, 0xD83Du16, 0x0042u16];
+        assert_eq!(decode_jni_utf16(&lone), "A\u{FFFD}B");
     }
 }

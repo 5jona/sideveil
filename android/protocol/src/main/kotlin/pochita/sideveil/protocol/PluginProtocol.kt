@@ -160,7 +160,8 @@ data class PluginDescriptor(
                 builtin = true,
                 enabled = true,
                 priority = 20,
-                capabilities = listOf(PluginCapability.TOAST),
+                global = false,
+                capabilities = listOf(PluginCapability.STORAGE, PluginCapability.TOAST),
             )
     }
 }

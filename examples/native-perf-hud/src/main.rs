@@ -2,25 +2,23 @@
 //! frames to `sideveild` -> `libsideveil_hud.so` (`vello_cpu` NEON + HWUI text).
 
 mod sampler;
+mod scene;
 
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::Duration;
 
 use sampler::{read_cpu, sample_cpu, sample_mem_mb, sample_temp_c};
+use scene::{PLUGIN_ID, build_scene};
 use serde_json::{Value, json};
-use sideveil_protocol::hud::{
-    HudBackdropKind, HudPrimitive, HudTextAlign, HudTextOverlay, NativeHudScene,
-};
 use sideveil_protocol::paths;
 use sideveil_protocol::rpc::{HostEventEnvelope, RpcRequest, RpcResponse, methods};
 use sideveil_protocol::uds::{UdsClientHello, UdsHandshakeAck};
 
-const PLUGIN_ID: &str = "example.native-perf-hud";
 const HISTORY_LEN: usize = 24;
 
 fn main() {
@@ -45,14 +43,15 @@ fn run_session(
     click_through: &Arc<AtomicBool>,
     dark_surface: &Arc<AtomicBool>,
 ) -> std::io::Result<()> {
-    let mut write_stream = UnixStream::connect(socket_path)?;
-    let read_stream = write_stream.try_clone()?;
+    let stream = UnixStream::connect(socket_path)?;
+    let read_stream = stream.try_clone()?;
+    let writer = Arc::new(Mutex::new(stream));
 
     let hello = UdsClientHello::PluginBackend {
         plugin_id: PLUGIN_ID.to_owned(),
         package_name: None,
     };
-    send_json_line(&mut write_stream, &hello)?;
+    send_json_line(&writer, &hello)?;
 
     let mut reader = BufReader::new(read_stream);
     let mut ack_line = String::new();
@@ -68,18 +67,24 @@ fn run_session(
     let enabled_rx = Arc::clone(enabled);
     let click_rx = Arc::clone(click_through);
     let dark_rx = Arc::clone(dark_surface);
+    let disconnected = Arc::new(AtomicBool::new(false));
+    let disconnected_rx = Arc::clone(&disconnected);
     let sampler_thread = thread::current();
-    let mut reply_stream = write_stream.try_clone()?;
+    let reply_writer = Arc::clone(&writer);
     thread::spawn(move || {
         let mut line = String::new();
         while reader.read_line(&mut line).unwrap_or(0) > 0 {
             if let Ok(req) = serde_json::from_str::<RpcRequest>(line.trim()) {
                 let resp = handle_rpc(req, &enabled_rx, &click_rx, &dark_rx);
-                let _ = send_json_line(&mut reply_stream, &resp);
+                if send_json_line(&reply_writer, &resp).is_err() {
+                    break;
+                }
                 sampler_thread.unpark();
             }
             line.clear();
         }
+        disconnected_rx.store(true, Ordering::Release);
+        sampler_thread.unpark();
     });
 
     let mut cpu_prev = read_cpu().unwrap_or_default();
@@ -87,6 +92,12 @@ fn run_session(
     let mut was_enabled = false;
 
     loop {
+        if disconnected.load(Ordering::Acquire) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "hub socket closed",
+            ));
+        }
         if !enabled.load(Ordering::Relaxed) {
             if was_enabled {
                 was_enabled = false;
@@ -94,7 +105,7 @@ fn run_session(
                     event: methods::HUD_DISMISS.to_owned(),
                     payload: None,
                 };
-                send_json_line(&mut write_stream, &dismiss)?;
+                send_json_line(&writer, &dismiss)?;
             }
             thread::park_timeout(Duration::from_millis(300));
             continue;
@@ -122,7 +133,7 @@ fn run_session(
             event: methods::HUD_UPDATE_SCENE.to_owned(),
             payload: serde_json::to_value(scene).ok(),
         };
-        send_json_line(&mut write_stream, &frame)?;
+        send_json_line(&writer, &frame)?;
         thread::park_timeout(Duration::from_millis(500));
     }
 }
@@ -176,132 +187,61 @@ fn handle_rpc(
     )
 }
 
-fn build_scene(
-    history: &VecDeque<f32>,
-    cpu_pct: f32,
-    mem_used: u64,
-    mem_total: u64,
-    temp_c: f32,
-    click_through: bool,
-    is_dark: bool,
-) -> NativeHudScene {
-    let mem_ratio = if mem_total > 0 {
-        (mem_used as f32 / mem_total as f32).clamp(0.0, 1.0)
-    } else {
-        0.0
-    };
-    let temp_ratio = ((temp_c - 20.0) / 65.0).clamp(0.0, 1.0);
-    let (
-        primary_text,
-        gauge_text,
-        track_argb,
-        wave_stroke,
-        wave_fill_top,
-        bar_start,
-        bar_end,
-        gauge_end,
-    ) = if is_dark {
-        (
-            0xFFF1_F5F9,
-            0xFFF8_FAFC,
-            0x33FF_FFFF,
-            0xFF38_BDF8,
-            0x5538_BDF8,
-            0xFF34_D399,
-            0xFF38_BDF8,
-            0xFFEF_4444,
-        )
-    } else {
-        (
-            0xFF0F_172A,
-            0xFF0F_172A,
-            0x280F_172A,
-            0xFF02_84C7,
-            0x4402_84C7,
-            0xFF05_9669,
-            0xFF02_84C7,
-            0xFFDC_2626,
-        )
-    };
-    NativeHudScene {
-        plugin_id: PLUGIN_ID.to_owned(),
-        width_dp: 216.0,
-        height_dp: 94.0,
-        corner_radius_dp: 18.0,
-        backdrop: HudBackdropKind::NativeGlass,
-        click_through,
-        anchor_x_percent: 4.0,
-        anchor_y_percent: 12.0,
-        primitives: vec![
-            HudPrimitive::Sparkline {
-                x: 12.0,
-                y: 28.0,
-                w: 122.0,
-                h: 36.0,
-                values: history.iter().copied().collect(),
-                min: Some(0.0),
-                max: Some(100.0),
-                stroke_argb: wave_stroke,
-                stroke_width: 2.0,
-                fill_top_argb: Some(wave_fill_top),
-                fill_bottom_argb: Some(wave_stroke & 0x00FF_FFFF),
-                smooth: true,
-            },
-            HudPrimitive::ProgressBar {
-                x: 12.0,
-                y: 74.0,
-                w: 122.0,
-                h: 6.0,
-                radius: 3.0,
-                value: mem_ratio,
-                track_argb,
-                fill_start_argb: bar_start,
-                fill_end_argb: Some(bar_end),
-            },
-            HudPrimitive::RadialGauge {
-                cx: 174.0,
-                cy: 48.0,
-                radius: 22.0,
-                thickness: 5.0,
-                value: temp_ratio,
-                start_angle_deg: 135.0,
-                sweep_angle_deg: 270.0,
-                track_argb,
-                fill_start_argb: bar_start,
-                fill_end_argb: Some(gauge_end),
-            },
-        ],
-        texts: vec![
-            HudTextOverlay {
-                x: 12.0,
-                y: 20.0,
-                text: format!("CPU {cpu_pct:4.1}%  RAM {:.1}G", mem_used as f32 / 1024.0),
-                size_sp: 11.0,
-                color_argb: primary_text,
-                align: HudTextAlign::Start,
-                bold: true,
-                tabular_nums: true,
-                max_width_dp: Some(130.0),
-            },
-            HudTextOverlay {
-                x: 174.0,
-                y: 52.0,
-                text: format!("{temp_c:.0}°C"),
-                size_sp: 11.0,
-                color_argb: gauge_text,
-                align: HudTextAlign::Center,
-                bold: true,
-                tabular_nums: true,
-                max_width_dp: None,
-            },
-        ],
-    }
-}
-
-fn send_json_line<T: serde::Serialize>(stream: &mut UnixStream, value: &T) -> std::io::Result<()> {
+fn send_json_line<T: serde::Serialize>(
+    writer: &Mutex<UnixStream>,
+    value: &T,
+) -> std::io::Result<()> {
     let mut bytes = serde_json::to_vec(value)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     bytes.push(b'\n');
+    let mut stream = writer.lock().unwrap_or_else(PoisonError::into_inner);
     stream.write_all(&bytes)?;
     stream.flush()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::os::unix::net::UnixListener;
+
+    use super::*;
+
+    #[test]
+    fn run_session_exits_promptly_on_hub_eof_when_idle() {
+        let sock_path =
+            std::env::temp_dir().join(format!("sideveil-perf-hud-eof-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&sock_path);
+        let listener = UnixListener::bind(&sock_path).expect("bind unix listener");
+
+        let server = thread::spawn(move || {
+            let (mut conn, _) = listener.accept().expect("accept");
+            let mut reader = BufReader::new(conn.try_clone().expect("clone"));
+            let mut hello = String::new();
+            reader.read_line(&mut hello).expect("read hello");
+            let ack = UdsHandshakeAck {
+                ok: true,
+                error: None,
+            };
+            let line = format!("{}\n", serde_json::to_string(&ack).expect("encode ack"));
+            conn.write_all(line.as_bytes()).expect("write ack");
+            conn.flush().expect("flush ack");
+            thread::sleep(Duration::from_millis(50));
+            drop(conn);
+        });
+
+        let enabled = Arc::new(AtomicBool::new(false));
+        let click_through = Arc::new(AtomicBool::new(false));
+        let dark_surface = Arc::new(AtomicBool::new(true));
+        let started = std::time::Instant::now();
+        let res = run_session(
+            sock_path.to_str().expect("utf8 path"),
+            &enabled,
+            &click_through,
+            &dark_surface,
+        );
+        assert!(res.is_err());
+        assert!(started.elapsed() < Duration::from_secs(2));
+
+        server.join().expect("join server");
+        let _ = std::fs::remove_file(&sock_path);
+    }
 }

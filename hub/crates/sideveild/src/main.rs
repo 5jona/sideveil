@@ -17,7 +17,7 @@ use sideveild::state::HubState;
 use sideveild::supervisor::{SupervisorConfig, spawn_supervisors};
 use sideveild::uds_gateway::UdsGateway;
 use tokio::signal::unix::{SignalKind, signal};
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{broadcast, mpsc, watch};
 
 #[derive(Debug)]
 struct DaemonArgs {
@@ -151,16 +151,35 @@ async fn run(args: DaemonArgs) -> io::Result<()> {
     let mut cfg_rx = config_store.subscribe();
     let cfg_state = Arc::clone(&state);
     let cfg_forward_task = tokio::spawn(async move {
-        while let Ok(next_cfg) = cfg_rx.recv().await {
-            cfg_state.on_config_changed(&next_cfg);
+        loop {
+            match cfg_rx.recv().await {
+                Ok(next_cfg) => cfg_state.on_config_changed(&next_cfg),
+                Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                    cfg_state.logs().warn(format!(
+                        "Config forwarder lagged by {skipped} updates; resyncing latest config"
+                    ));
+                    let latest = cfg_state.config_store().current();
+                    cfg_state.on_config_changed(&latest);
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
         }
     });
 
     let mut plugin_rx = plugin_registry.subscribe();
     let plugin_state = Arc::clone(&state);
     let plugin_forward_task = tokio::spawn(async move {
-        while let Ok(()) = plugin_rx.recv().await {
-            plugin_state.on_plugins_changed();
+        loop {
+            match plugin_rx.recv().await {
+                Ok(()) => plugin_state.on_plugins_changed(),
+                Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                    plugin_state.logs().warn(format!(
+                        "Plugin forwarder lagged by {skipped} updates; resyncing snapshot"
+                    ));
+                    plugin_state.on_plugins_changed();
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
         }
     });
 

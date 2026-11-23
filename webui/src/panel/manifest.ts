@@ -6,19 +6,17 @@ import {
 
 export const DIAGNOSTIC_PLUGIN_MANIFEST: PluginManifest = definePluginManifest({
   id: BUILTIN_DIAG_PLUGIN_ID,
-  name: '系统诊断',
-  version: '1.0.0',
+  name: '内置诊断',
+  version: '0.1.0',
   entry: 'index.html',
   backend: 'none',
-  capabilities: ['storage', 'toast', 'system-exec'],
+  capabilities: ['storage', 'toast'],
   triggers: {
     packages: [],
-    global: true,
+    global: false,
     priority: 20,
   },
   surface: {
     backdrop: 'native-glass',
-    widthDp: 340,
-    heightPercent: 72,
   },
 });

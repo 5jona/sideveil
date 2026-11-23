@@ -1,14 +1,14 @@
 //! Bounded NDJSON framing and Unix socket binding helpers for `uds_gateway`.
 
-use std::ffi::CString;
 use std::fs;
 use std::io;
-use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
+
+use crate::fs_util::chown_path;
 
 const MAX_LINE_BYTES: usize = 256 * 1024;
 
@@ -75,21 +75,7 @@ pub(super) fn bind_socket(
     let listener = UnixListener::bind(path)?;
     fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
     if let Some((uid, gid)) = owner {
-        let _ = try_chown(path, uid, gid);
+        let _ = chown_path(path, uid, gid);
     }
     Ok(listener)
-}
-
-fn try_chown(path: &Path, uid: u32, gid: u32) -> io::Result<()> {
-    let c_path = CString::new(path.as_os_str().as_bytes())
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains interior NUL"))?;
-    let rc = unsafe {
-        // SAFETY: `c_path` is a valid NUL-terminated C string.
-        libc::chown(c_path.as_ptr(), uid, gid)
-    };
-    if rc == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
-    }
 }

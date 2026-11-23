@@ -112,6 +112,7 @@ async fn handle_connection(stream: TcpStream, state: Arc<HubState>) {
                 maybe_msg = out_rx.recv() => {
                     let Some(text) = maybe_msg else {
                         let _ = ws_sink.send(Message::Close(None)).await;
+                        let _ = ws_sink.flush().await;
                         break;
                     };
                     if ws_sink.send(Message::Text(text.into())).await.is_err() {
@@ -144,7 +145,13 @@ async fn handle_connection(stream: TcpStream, state: Arc<HubState>) {
     }
 
     out_tx.close();
-    writer_task.abort();
+    let mut writer_task = writer_task;
+    if tokio::time::timeout(Duration::from_millis(250), &mut writer_task)
+        .await
+        .is_err()
+    {
+        writer_task.abort();
+    }
     state.clear_host_session(session_id);
 }
 

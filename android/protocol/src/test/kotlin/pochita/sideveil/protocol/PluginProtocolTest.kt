@@ -150,4 +150,15 @@ class PluginProtocolTest {
         assertEquals("network.contextChanged", SideVeilEvents.NETWORK_CONTEXT_CHANGED)
         assertEquals("network.context", SideVeilMethods.NETWORK_CONTEXT)
     }
+
+    @Test
+    fun `builtinDiagnostic descriptor matches unified manifest contract`() {
+        val diag = PluginDescriptor.builtinDiagnostic()
+        assertEquals(BUILTIN_DIAG_PLUGIN_ID, diag.id)
+        assertEquals("内置诊断", diag.name)
+        assertEquals("0.1.0", diag.version)
+        assertFalse(diag.global)
+        assertEquals(20, diag.priority)
+        assertEquals(listOf(PluginCapability.STORAGE, PluginCapability.TOAST), diag.capabilities)
+    }
 }

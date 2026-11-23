@@ -48,7 +48,7 @@ run = "./gradlew spotlessApply"
 [tasks."hub:check"]
 description = "Run Rust fmt check, clippy (-D warnings), and workspace unit tests (including bundled example daemons)"
 dir = "{{config_root}}/hub"
-run = "cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo fmt --manifest-path ../examples/native-perf-hud/Cargo.toml --check && cargo clippy --manifest-path ../examples/native-perf-hud/Cargo.toml --all-targets -- -D warnings"
+run = "cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo fmt --manifest-path ../examples/native-perf-hud/Cargo.toml --check && cargo clippy --manifest-path ../examples/native-perf-hud/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path ../examples/native-perf-hud/Cargo.toml"
 
 [tasks."hub:format"]
 description = "Format Rust workspace with rustfmt"

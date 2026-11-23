@@ -1,14 +1,14 @@
 //! Atomic staged plugin directory installer validating manifests and refusing symlink escapes.
 
-use std::ffi::CString;
 use std::fs;
 use std::io;
-use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use sideveil_protocol::plugin::{BUILTIN_DIAG_PLUGIN_ID, PluginManifest};
+
+use crate::fs_util::chown_path;
 
 static INSTALL_SEQ: AtomicU64 = AtomicU64::new(1);
 
@@ -145,11 +145,7 @@ fn copy_dir_no_symlinks(src: &Path, dst: &Path) -> io::Result<()> {
 }
 
 pub(super) fn try_chown_root_system(path: &Path) {
-    let Ok(c_path) = CString::new(path.as_os_str().as_bytes()) else {
-        return;
-    };
-    // SAFETY: `c_path` is NUL-terminated; failure on non-root host tests is intentionally ignored.
-    let _ = unsafe { libc::chown(c_path.as_ptr(), 0, 1000) };
+    let _ = chown_path(path, 0, 1000);
 }
 
 #[cfg(test)]

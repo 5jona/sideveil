@@ -4,8 +4,7 @@
 //! (PNG/WebP/JPEG) through verbatim, and rasterizes SVG icons via `sideveil-gfx` (`usvg` +
 //! `vello_cpu` NEON) with `(plugin_id, size, theme, mtime)` disk caching.
 
-use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 
@@ -15,6 +14,7 @@ use sideveil_gfx::svg_icon::{
 use tokio::fs;
 
 use crate::asset_server::{mime_type_for, resolve_asset_file};
+use crate::fs_util::write_file_atomic;
 use crate::state::HubState;
 
 const MAX_RASTER_ICON_BYTES: u64 = 2 * 1024 * 1024;
@@ -182,9 +182,10 @@ async fn write_cache_atomic(
         }
     }
 
-    let tmp_path: PathBuf = cache_dir.join(format!(".{file_name}.tmp.{}", std::process::id()));
-    fs::write(&tmp_path, png_bytes).await?;
-    let _ = fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(0o644)).await;
-    fs::rename(&tmp_path, cache_path).await?;
+    let target = cache_path.to_path_buf();
+    let payload = png_bytes.to_vec();
+    tokio::task::spawn_blocking(move || write_file_atomic(&target, &payload, 0o644, None, false))
+        .await
+        .map_err(std::io::Error::other)??;
     Ok(())
 }

@@ -17,8 +17,9 @@ use std::time::Duration;
 use tokio::process::Command;
 use tokio::sync::{mpsc, watch};
 
-use self::host_wake::{chown_path, force_stop_host, wake_host_service};
+use self::host_wake::{force_stop_host, wake_host_service};
 use self::plugin_daemons::run_perf_hud_supervisor;
+use crate::fs_util::{chown_path, unique_tmp_path};
 use crate::pidfd::PidFd;
 use crate::state::{HostWakeSignal, HubState};
 
@@ -251,12 +252,15 @@ fn stage_sensor_dex(src: &Path, dst: &Path) -> io::Result<()> {
     if let Some(parent) = dst.parent() {
         fs::create_dir_all(parent)?;
     }
-    let tmp = dst.with_extension(format!("dex.tmp.{}", std::process::id()));
+    let tmp = unique_tmp_path(dst);
     let _ = fs::remove_file(&tmp);
     fs::copy(src, &tmp)?;
     fs::set_permissions(&tmp, fs::Permissions::from_mode(0o640))?;
     let _ = chown_path(&tmp, 0, SENSOR_UID);
-    fs::rename(&tmp, dst)?;
+    if let Err(err) = fs::rename(&tmp, dst) {
+        let _ = fs::remove_file(&tmp);
+        return Err(err);
+    }
     Ok(())
 }
 

@@ -4,6 +4,7 @@ pub mod asset_server;
 pub mod audit_ring;
 pub mod config_store;
 pub mod events;
+pub mod fs_util;
 pub mod host_ws;
 pub mod inotify;
 pub mod log_ring;

@@ -4,6 +4,8 @@ mod installer;
 mod overrides;
 mod query;
 mod store;
+#[cfg(test)]
+mod store_tests;
 mod web_embed;
 
 use std::collections::{BTreeMap, HashMap};

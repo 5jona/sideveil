@@ -19,9 +19,11 @@ import { DIAGNOSTIC_PLUGIN_MANIFEST } from '../src/panel/manifest.ts';
 
 test('DIAGNOSTIC_PLUGIN_MANIFEST defines valid builtin plugin', () => {
   assert.equal(DIAGNOSTIC_PLUGIN_MANIFEST.id, BUILTIN_DIAG_PLUGIN_ID);
-  assert.equal(DIAGNOSTIC_PLUGIN_MANIFEST.name, '系统诊断');
+  assert.equal(DIAGNOSTIC_PLUGIN_MANIFEST.name, '内置诊断');
+  assert.equal(DIAGNOSTIC_PLUGIN_MANIFEST.version, '0.1.0');
+  assert.equal(DIAGNOSTIC_PLUGIN_MANIFEST.triggers?.global, false);
   assert.equal(DIAGNOSTIC_PLUGIN_MANIFEST.backend, 'none');
-  assert.deepEqual(DIAGNOSTIC_PLUGIN_MANIFEST.capabilities, ['storage', 'toast', 'system-exec']);
+  assert.deepEqual(DIAGNOSTIC_PLUGIN_MANIFEST.capabilities, ['storage', 'toast']);
   assert.equal(DIAGNOSTIC_PLUGIN_MANIFEST.surface?.backdrop, 'native-glass');
 });
 
