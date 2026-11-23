@@ -1,4 +1,4 @@
-package pochita.sideveil.sensor
+package pochita.sideveil.sensor.system
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

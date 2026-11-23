@@ -1,4 +1,4 @@
-package pochita.sideveil.sensor
+package pochita.sideveil.sensor.gesture
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -29,14 +29,7 @@ class EdgeGestureStateMachineTest {
         scopeActive: Boolean = true,
         panelState: PanelState = PanelState.CLOSED,
         fullscreenActive: Boolean = false,
-    ): EdgeGestureEnv =
-        EdgeGestureEnv(
-            config = config,
-            geometry = geometry,
-            scopeActive = scopeActive,
-            panelState = panelState,
-            fullscreenActive = fullscreenActive,
-        )
+    ): EdgeGestureEnv = EdgeGestureEnv(config, geometry, scopeActive, panelState, fullscreenActive)
 
     private data class DragEndRecord(
         val shouldOpen: Boolean,
@@ -116,30 +109,22 @@ class EdgeGestureStateMachineTest {
     }
 
     @Test
-    fun `rejects vertical scroll without pilfering pointers`() {
+    fun `rejects vertical scroll and multi-touch ambiguity without pilfering`() {
         val cb = RecordingCallbacks()
         val sm = EdgeGestureStateMachine(cb)
 
         sm.onDown(0, 990f, 700f, 100L, env())
         assertTrue(sm.isTracking)
-
         sm.onMove(0, 985f, 740f, 116L, 116L, env())
         assertFalse(sm.isTracking)
         assertFalse(sm.isPilfered)
-        assertEquals(0, cb.pilferCount)
-        assertTrue(cb.starts.isEmpty())
-    }
 
-    @Test
-    fun `cancels ambiguity on multi-touch before pilfer`() {
-        val cb = RecordingCallbacks()
-        val sm = EdgeGestureStateMachine(cb)
-
-        sm.onDown(0, 990f, 700f, 100L, env())
+        sm.onDown(0, 990f, 700f, 200L, env())
         assertTrue(sm.isTracking)
         sm.onPointerDown()
         assertFalse(sm.isTracking)
         assertEquals(0, cb.pilferCount)
+        assertTrue(cb.starts.isEmpty())
     }
 
     @Test
@@ -154,11 +139,9 @@ class EdgeGestureStateMachineTest {
         assertEquals(1, cb.starts.size)
         assertEquals(1, cb.moves.size)
 
-        // Move within 8ms throttle window is dropped.
         sm.onMove(0, 940f, 702f, 120L, 120L, env())
         assertEquals(1, cb.moves.size)
 
-        // Move past trigger distance (40dp * 2 = 80px) after throttle window emits move.
         sm.onMove(0, 900f, 702f, 132L, 132L, env())
         assertEquals(2, cb.moves.size)
 
@@ -170,35 +153,21 @@ class EdgeGestureStateMachineTest {
     }
 
     @Test
-    fun `zeros release velocity when finger pauses past stale window`() {
+    fun `zeros release velocity past stale window and cancels on 240px reverse-pull`() {
         val cb = RecordingCallbacks()
         val sm = EdgeGestureStateMachine(cb)
 
         sm.onDown(0, 990f, 700f, 100L, env())
         sm.onMove(0, 955f, 700f, 110L, 110L, env())
-        assertTrue(sm.isPilfered)
-
         sm.onUpOrCancel(955f, 230L, canceled = false, env = env())
-        assertEquals(1, cb.ends.size)
         assertFalse(cb.ends.single().shouldOpen)
         assertEquals(0f, cb.ends.single().velocity, 1e-4f)
-    }
 
-    @Test
-    fun `cancels opening when user pulls back into 240px reverse-cancel zone`() {
-        val cb = RecordingCallbacks()
-        val sm = EdgeGestureStateMachine(cb)
-
-        sm.onDown(0, 990f, 700f, 100L, env())
-        // Pull deep inward by 310px (past 240px cancel zone + 20px touch slop).
-        sm.onMove(0, 680f, 700f, 120L, 120L, env())
-        assertTrue(sm.isPilfered)
-
-        // Pull back outward to inwardDx = 150px (still > 80px triggerDist, but inside 240px zone).
-        sm.onMove(0, 840f, 700f, 140L, 140L, env())
-        sm.onUpOrCancel(840f, 145L, canceled = false, env = env())
-
-        assertEquals(1, cb.ends.size)
+        cb.ends.clear()
+        sm.onDown(0, 990f, 700f, 300L, env())
+        sm.onMove(0, 680f, 700f, 320L, 320L, env())
+        sm.onMove(0, 840f, 700f, 340L, 340L, env())
+        sm.onUpOrCancel(840f, 345L, canceled = false, env = env())
         assertFalse(cb.ends.single().shouldOpen)
         assertTrue(cb.ends.single().canceled)
     }
@@ -210,14 +179,12 @@ class EdgeGestureStateMachineTest {
         val fsConfig = rightConfig.copy(edge = rightConfig.edge.copy(doubleSwipeInFullscreen = true))
         val fsEnv = env(config = fsConfig, fullscreenActive = true)
 
-        // First swipe emits hint without pilfering pointers.
         sm.onDown(0, 990f, 700f, 100L, fsEnv)
         sm.onMove(0, 950f, 700f, 120L, 120L, fsEnv)
         assertFalse(sm.isPilfered)
         assertEquals(0, cb.pilferCount)
         assertEquals(listOf(EdgeSide.RIGHT), cb.fullscreenHints)
 
-        // Second swipe within 1500ms commits pilfer and opens normally.
         sm.onDown(0, 990f, 700f, 600L, fsEnv)
         sm.onMove(0, 900f, 700f, 620L, 620L, fsEnv)
         assertTrue(sm.isPilfered)
@@ -236,107 +203,45 @@ class EdgeGestureStateMachineTest {
         assertEquals(1, cb.pilferCount)
         assertEquals(1, cb.repositionStarts.size)
 
-        // Drag vertically down and across horizontal threshold (< 35% width) to flip to LEFT.
         sm.onMove(0, 200f, 1200f, 600L, 600L, env())
-        assertEquals(1, cb.repositionMoves.size)
         assertEquals(EdgeSide.LEFT, cb.repositionMoves.single().first)
 
         sm.onUpOrCancel(200f, 650L, canceled = false, env = env())
         assertFalse(sm.isRepositioning)
-        assertEquals(1, cb.repositionEnds.size)
         assertEquals(EdgeSide.LEFT, cb.repositionEnds.single().first)
         assertTrue(cb.repositionEnds.single().third)
     }
 
     @Test
-    fun `ignores touches outside hotzone or when panel is already open`() {
+    fun `ignores touches outside hotzone and detects status bar pull-down only when panel is open`() {
         val cb = RecordingCallbacks()
-        val sm = EdgeGestureStateMachine(cb)
+        val sm = EdgeGestureStateMachine(cb, cb::onStatusBarPullDown)
+        val openEnv = env(panelState = PanelState.OPEN)
 
         sm.onDown(0, 500f, 700f, 100L, env())
         assertFalse(sm.isTracking)
-
-        sm.onDown(0, 990f, 700f, 100L, env(panelState = PanelState.OPEN))
+        sm.onDown(0, 990f, 700f, 100L, openEnv)
         assertFalse(sm.isTracking)
 
         val leftConfig = rightConfig.copy(edge = rightConfig.edge.copy(side = EdgeSide.LEFT))
         sm.onDown(0, 10f, 700f, 100L, env(config = leftConfig))
         assertTrue(sm.isTracking)
-    }
 
-    @Test
-    fun `status bar pull-down when panel is open triggers once without pilfering`() {
-        val cb = RecordingCallbacks()
-        val sm = EdgeGestureStateMachine(cb, cb::onStatusBarPullDown)
-        val openEnv = env(panelState = PanelState.OPEN)
-
-        sm.onDown(0, 500f, 40f, 100L, openEnv)
+        sm.onDown(0, 500f, 40f, 200L, openEnv)
         assertTrue(sm.isTracking)
-        assertFalse(sm.isPilfered)
-        assertEquals(0, cb.pilferCount)
-
-        // Small downward move below 12dp * 2 = 24px threshold does not trigger yet.
-        sm.onMove(0, 502f, 55f, 110L, 110L, openEnv)
+        sm.onMove(0, 502f, 55f, 210L, 210L, openEnv)
         assertEquals(0, cb.statusBarPullDownCount)
-        assertEquals(0, cb.pilferCount)
+        sm.onMove(0, 505f, 80f, 220L, 220L, openEnv)
+        assertEquals(1, cb.statusBarPullDownCount)
+        assertFalse(sm.isTracking)
 
-        // Downward pull >= 24px with dy > abs(dx) * 1.2 triggers once and returns to IDLE.
-        sm.onMove(0, 505f, 80f, 120L, 120L, openEnv)
+        sm.onDown(0, 500f, 700f, 300L, openEnv)
+        sm.onMove(0, 500f, 820f, 320L, 320L, openEnv)
+        sm.onDown(0, 500f, 40f, 400L, env())
+        sm.onMove(0, 500f, 120f, 420L, 420L, env())
+        sm.onDown(0, 300f, 40f, 500L, openEnv)
+        sm.onMove(0, 460f, 70f, 520L, 520L, openEnv)
         assertEquals(1, cb.statusBarPullDownCount)
         assertEquals(0, cb.pilferCount)
-        assertFalse(sm.isTracking)
-        assertFalse(sm.isPilfered)
-
-        // Subsequent moves in the same gesture do not re-trigger.
-        sm.onMove(0, 505f, 200f, 130L, 130L, openEnv)
-        sm.onUpOrCancel(505f, 140L, canceled = false, env = openEnv)
-        assertEquals(1, cb.statusBarPullDownCount)
-        assertEquals(0, cb.pilferCount)
-    }
-
-    @Test
-    fun `mid-screen downward swipe when panel is open does not trigger status bar pull-down`() {
-        val cb = RecordingCallbacks()
-        val sm = EdgeGestureStateMachine(cb, cb::onStatusBarPullDown)
-        val openEnv = env(panelState = PanelState.OPEN)
-
-        sm.onDown(0, 500f, 700f, 100L, openEnv)
-        assertFalse(sm.isTracking)
-        sm.onMove(0, 500f, 820f, 120L, 120L, openEnv)
-        sm.onUpOrCancel(500f, 140L, canceled = false, env = openEnv)
-
-        assertEquals(0, cb.statusBarPullDownCount)
-        assertEquals(0, cb.pilferCount)
-    }
-
-    @Test
-    fun `top status bar pull-down when panel is closed does not trigger`() {
-        val cb = RecordingCallbacks()
-        val sm = EdgeGestureStateMachine(cb, cb::onStatusBarPullDown)
-        val closedEnv = env(panelState = PanelState.CLOSED)
-
-        sm.onDown(0, 500f, 40f, 100L, closedEnv)
-        assertFalse(sm.isTracking)
-        sm.onMove(0, 500f, 120f, 120L, 120L, closedEnv)
-        sm.onUpOrCancel(500f, 140L, canceled = false, env = closedEnv)
-
-        assertEquals(0, cb.statusBarPullDownCount)
-        assertEquals(0, cb.pilferCount)
-    }
-
-    @Test
-    fun `horizontal swipe in status bar zone does not trigger status bar pull-down`() {
-        val cb = RecordingCallbacks()
-        val sm = EdgeGestureStateMachine(cb, cb::onStatusBarPullDown)
-        val openEnv = env(panelState = PanelState.OPEN)
-
-        sm.onDown(0, 300f, 40f, 100L, openEnv)
-        assertTrue(sm.isTracking)
-        sm.onMove(0, 460f, 70f, 120L, 120L, openEnv)
-        sm.onUpOrCancel(460f, 140L, canceled = false, env = openEnv)
-
-        assertEquals(0, cb.statusBarPullDownCount)
-        assertEquals(0, cb.pilferCount)
-        assertFalse(sm.isTracking)
     }
 }

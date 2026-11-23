@@ -13,6 +13,12 @@ import pochita.sideveil.protocol.EdgeSide
 import pochita.sideveil.protocol.HubToSensor
 import pochita.sideveil.protocol.SensorToHub
 import pochita.sideveil.protocol.SideVeilConfig
+import pochita.sideveil.sensor.gesture.EdgeGestureListener
+import pochita.sideveil.sensor.gesture.EdgeGestureMonitor
+import pochita.sideveil.sensor.ipc.HubUdsClient
+import pochita.sideveil.sensor.system.AppOpsManagerBridge
+import pochita.sideveil.sensor.system.ForegroundMonitor
+import pochita.sideveil.sensor.system.NetworkContextWatcher
 
 private data class SensorArgs(
     val socketPath: String,
@@ -30,6 +36,7 @@ object SensorMain {
     private const val DEFAULT_SOCKET_PATH = "/data/system/sideveil/run/hub.sock"
     private const val DEFAULT_HOST_PACKAGE = "pochita.sideveil.host"
 
+    /** Entrypoint invoked via `app_process64` under `UID 1000`. */
     @JvmStatic
     fun main(args: Array<String>) {
         initApplicationSharedMemory()

@@ -8,10 +8,12 @@ import android.util.Log
 object SensorLog {
     private const val TAG = "SideVeilSensor"
 
+    /** Logs an informational message to logcat under [TAG]. */
     fun info(message: String) {
         runCatching { Log.i(TAG, message) }
     }
 
+    /** Logs a warning message and optional [throwable] to logcat under [TAG]. */
     fun warn(
         message: String,
         throwable: Throwable? = null,

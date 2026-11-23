@@ -1,4 +1,4 @@
-package pochita.sideveil.sensor
+package pochita.sideveil.sensor.system
 
 import android.content.Context
 import android.hardware.display.DisplayManager
@@ -6,16 +6,18 @@ import android.os.Handler
 import android.util.DisplayMetrics
 import android.view.Display
 import pochita.sideveil.protocol.DisplayGeometry
+import pochita.sideveil.sensor.SensorLog
 
 /**
  * Watches default display resolution and density changes via [DisplayManager], querying
  * `DisplayManagerGlobal` with a safe [Display.getRealMetrics] fallback.
  */
-internal class DisplayGeometryWatcher(
+class DisplayGeometryWatcher(
     private val systemContext: Context,
     private val handler: Handler,
     private val onDisplayChanged: (DisplayGeometry) -> Unit,
 ) {
+    /** Latest observed logical display dimensions and density. */
     @Volatile
     var geometry: DisplayGeometry = DisplayGeometry()
         private set
@@ -23,6 +25,7 @@ internal class DisplayGeometryWatcher(
     private var displayManager: DisplayManager? = null
     private var displayListener: DisplayManager.DisplayListener? = null
 
+    /** Registers the display change listener and seeds initial [geometry]. */
     fun start() {
         refresh(notify = false)
         val dm = systemContext.getSystemService(DisplayManager::class.java) ?: return
@@ -43,6 +46,7 @@ internal class DisplayGeometryWatcher(
         displayListener = dl
     }
 
+    /** Unregisters the display change listener. */
     fun stop() {
         displayListener?.let { dl -> displayManager?.unregisterDisplayListener(dl) }
         displayListener = null

@@ -1,4 +1,4 @@
-package pochita.sideveil.sensor
+package pochita.sideveil.sensor.gesture
 
 import pochita.sideveil.protocol.DebugGestureStats
 
@@ -21,6 +21,7 @@ class GestureDiagnosticsTracker(
     private var lastEventTimestampMs: Long = 0L
     private var lastHotzoneReportMs: Long = Long.MIN_VALUE
 
+    /** Increments hotzone miss count and returns a snapshot if the throttle window has elapsed. */
     @Synchronized
     fun recordHotzoneMiss(): DebugGestureStats? {
         val now = clockMs()
@@ -34,6 +35,7 @@ class GestureDiagnosticsTracker(
         return snapshotLocked()
     }
 
+    /** Increments pilfer invocation count and returns an updated snapshot. */
     @Synchronized
     fun recordPilfer(): DebugGestureStats {
         pilferInvocations++
@@ -41,6 +43,7 @@ class GestureDiagnosticsTracker(
         return snapshotLocked()
     }
 
+    /** Increments triggered edge-swipe count and returns an updated snapshot. */
     @Synchronized
     fun recordTriggered(): DebugGestureStats {
         edgeSwipesTriggered++
@@ -48,6 +51,7 @@ class GestureDiagnosticsTracker(
         return snapshotLocked()
     }
 
+    /** Increments rejected edge-swipe count with [reason] and returns an updated snapshot. */
     @Synchronized
     fun recordRejected(reason: String): DebugGestureStats {
         edgeSwipesRejected++
@@ -56,6 +60,7 @@ class GestureDiagnosticsTracker(
         return snapshotLocked()
     }
 
+    /** Returns an immutable snapshot of all gesture diagnostic counters. */
     @Synchronized
     fun snapshot(): DebugGestureStats = snapshotLocked()
 

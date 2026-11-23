@@ -1,4 +1,4 @@
-package pochita.sideveil.sensor
+package pochita.sideveil.sensor.ipc
 
 import android.net.LocalSocket
 import android.net.LocalSocketAddress
@@ -8,12 +8,14 @@ import pochita.sideveil.protocol.SensorToHub
 import pochita.sideveil.protocol.SensorUdsHello
 import pochita.sideveil.protocol.SideVeilWireJson
 import pochita.sideveil.protocol.UdsHandshakeAck
+import pochita.sideveil.sensor.SensorLog
 import java.io.BufferedReader
 import java.io.BufferedWriter
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -49,6 +51,7 @@ class HubUdsClient(
 
     private var workerThread: Thread? = null
 
+    /** Starts the background UDS connection and auto-reconnect loop. */
     fun start() {
         if (!running.compareAndSet(false, true)) return
         workerThread =
@@ -58,20 +61,42 @@ class HubUdsClient(
             }
     }
 
+    /**
+     * Enqueues a [SensorToHub] frame for asynchronous transmission, coalescing back-to-back
+     * [SensorToHub.GestureDragMove] updates when the writer thread is busy.
+     */
     fun send(message: SensorToHub) {
         if (!running.get() || activeWriter == null || writeExecutor.isShutdown) return
         val wire = SideVeilWireJson.encodeToString(SensorToHub.serializer(), message)
         if (message is SensorToHub.GestureDragMove) {
             val wasEmpty = pendingDragMove.getAndSet(wire) == null
             if (wasEmpty) {
-                writeExecutor.execute {
-                    val latest = pendingDragMove.getAndSet(null) ?: return@execute
+                enqueueWrite {
+                    val latest = pendingDragMove.getAndSet(null) ?: return@enqueueWrite
                     writeLine(latest)
                 }
             }
             return
         }
-        writeExecutor.execute { writeLine(wire) }
+        enqueueWrite { writeLine(wire) }
+    }
+
+    /** Stops the client, closes the active UDS socket, and terminates the writer executor. */
+    fun stop() {
+        running.set(false)
+        pendingDragMove.set(null)
+        closeActiveSocket()
+        workerThread?.interrupt()
+        workerThread = null
+        runCatching { writeExecutor.shutdownNow() }
+    }
+
+    private fun enqueueWrite(task: Runnable) {
+        try {
+            writeExecutor.execute(task)
+        } catch (_: RejectedExecutionException) {
+            pendingDragMove.set(null)
+        }
     }
 
     private fun writeLine(wire: String) {
@@ -86,14 +111,6 @@ class HubUdsClient(
                 closeActiveSocket()
             }
         }
-    }
-
-    fun stop() {
-        running.set(false)
-        closeActiveSocket()
-        workerThread?.interrupt()
-        workerThread = null
-        writeExecutor.shutdownNow()
     }
 
     private fun connectLoop() {
@@ -115,6 +132,7 @@ class HubUdsClient(
 
             performHandshake(reader, writer)
             synchronized(writeLock) {
+                pendingDragMove.set(null)
                 activeSocket = socket
                 activeWriter = writer
             }
@@ -164,6 +182,7 @@ class HubUdsClient(
 
     private fun detachSocket(socket: LocalSocket) {
         synchronized(writeLock) {
+            pendingDragMove.set(null)
             if (activeSocket === socket) {
                 activeSocket = null
                 activeWriter = null
@@ -174,6 +193,7 @@ class HubUdsClient(
 
     private fun closeActiveSocket() {
         synchronized(writeLock) {
+            pendingDragMove.set(null)
             val sock = activeSocket
             activeSocket = null
             activeWriter = null

@@ -1,4 +1,4 @@
-package pochita.sideveil.sensor
+package pochita.sideveil.sensor.system
 
 import android.app.ActivityManager
 import android.content.ComponentName
@@ -6,11 +6,12 @@ import android.os.Binder
 import android.os.Handler
 import android.os.Looper
 import android.os.Parcel
+import pochita.sideveil.sensor.SensorLog
 import java.lang.reflect.Method
 import java.lang.reflect.Proxy
 
 /**
- * Monitors foreground Activity package changes via Android 16+ ITaskStackListener
+ * Monitors foreground Activity package changes via Android 16+ `ITaskStackListener`
  * paired with a low-frequency reconciliation poll and optional ColorOS focus lookup.
  */
 class ForegroundMonitor(
@@ -18,14 +19,17 @@ class ForegroundMonitor(
     private val handler: Handler = Handler(Looper.getMainLooper()),
     private val onForegroundChanged: (packageName: String, activityName: String) -> Unit,
 ) {
+    /** Latest resolved non-host foreground package name. */
     @Volatile
     var foregroundPackage: String = ""
         private set
 
+    /** Latest resolved foreground Activity short class name. */
     @Volatile
     var foregroundActivity: String = ""
         private set
 
+    /** Whether `ActivityTaskManager.registerTaskStackListener` succeeded. */
     @Volatile
     var taskListenerActive: Boolean = false
         private set
@@ -56,6 +60,7 @@ class ForegroundMonitor(
             }
         }
 
+    /** Starts task stack listening and periodic foreground reconciliation. */
     fun start() {
         running = true
         registerTaskListener()
@@ -63,6 +68,7 @@ class ForegroundMonitor(
         handler.postDelayed(periodicPoll, POLL_INTERVAL_MS)
     }
 
+    /** Stops task stack listening and cancels pending callbacks. */
     fun stop() {
         running = false
         handler.removeCallbacks(debouncedRefresh)
@@ -79,6 +85,7 @@ class ForegroundMonitor(
         taskListenerActive = false
     }
 
+    /** Queries the current top Activity immediately and emits [onForegroundChanged] on transition. */
     fun refreshNow(): String {
         val (pkg, act) = queryTopComponent()
         if (pkg.isNotBlank() && (pkg != foregroundPackage || act != foregroundActivity)) {
@@ -145,10 +152,7 @@ class ForegroundMonitor(
 
     private fun queryTopComponent(): Pair<String, String> {
         val fromTasks = queryViaAtmGetTasks()
-        if (fromTasks.first.isNotBlank()) {
-            return fromTasks
-        }
-        return queryViaOplusWindowManager()
+        return if (fromTasks.first.isNotBlank()) fromTasks else queryViaOplusWindowManager()
     }
 
     private fun queryViaAtmGetTasks(): Pair<String, String> =
@@ -191,8 +195,7 @@ class ForegroundMonitor(
 
     private fun queryViaOplusWindowManager(): Pair<String, String> =
         runCatching {
-            val rawFocus = oplusFocusCaller?.invoke()
-            extractValidComponent(rawFocus, hostPackage)
+            extractValidComponent(oplusFocusCaller?.invoke(), hostPackage)
         }.getOrDefault("" to "")
 
     companion object {

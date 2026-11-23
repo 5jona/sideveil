@@ -1,11 +1,15 @@
-package pochita.sideveil.sensor
+package pochita.sideveil.sensor.system
 
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.IBinder
 import android.os.ServiceManager
+import pochita.sideveil.sensor.SensorLog
 import java.lang.reflect.Method
 
+/**
+ * Snapshot of installation and permission grant status for the Render Host APK.
+ */
 data class HostAppPermissionsStatus(
     val installed: Boolean,
     val uid: Int?,
@@ -13,8 +17,8 @@ data class HostAppPermissionsStatus(
 )
 
 /**
- * Ensures the headless Render Host APK holds OP_SYSTEM_ALERT_WINDOW and power-save exemption
- * without requiring interactive user prompts.
+ * Ensures the headless Render Host APK holds `OP_SYSTEM_ALERT_WINDOW` and Doze power-save
+ * exemption without requiring interactive user prompts.
  */
 class AppOpsManagerBridge(
     private val systemContext: Context,
@@ -79,6 +83,7 @@ class AppOpsManagerBridge(
         }
     }
 
+    /** Inspects the Render Host package UID and grants overlay + Doze allowlist permissions. */
     fun inspectAndEnsure(): HostAppPermissionsStatus {
         val uid = resolvePackageUid() ?: return HostAppPermissionsStatus(false, null, false)
         val granted = ensureOverlayPermission(uid)
@@ -86,6 +91,7 @@ class AppOpsManagerBridge(
         return HostAppPermissionsStatus(installed = true, uid = uid, overlayGranted = granted)
     }
 
+    /** Resolves the installed Linux UID of [hostPackage], or `null` if not installed. */
     fun resolvePackageUid(): Int? =
         runCatching {
             val pm = systemContext.packageManager

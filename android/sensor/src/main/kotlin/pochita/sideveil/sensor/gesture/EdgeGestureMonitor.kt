@@ -1,4 +1,4 @@
-package pochita.sideveil.sensor
+package pochita.sideveil.sensor.gesture
 
 import android.content.Context
 import android.hardware.input.InputManagerGlobal
@@ -15,9 +15,10 @@ import android.view.InputMonitor
 import android.view.MotionEvent
 import pochita.sideveil.protocol.DebugGestureStats
 import pochita.sideveil.protocol.DisplayGeometry
-import pochita.sideveil.protocol.EdgeSide
 import pochita.sideveil.protocol.PanelState
 import pochita.sideveil.protocol.SideVeilConfig
+import pochita.sideveil.sensor.SensorLog
+import pochita.sideveil.sensor.system.DisplayGeometryWatcher
 
 /**
  * Thin Android Framework adapter connecting `InputManagerGlobal.monitorGestureInput` and
@@ -28,6 +29,7 @@ class EdgeGestureMonitor(
     private val handler: Handler = Handler(Looper.getMainLooper()),
     private val listener: EdgeGestureListener,
 ) {
+    /** Whether `monitorGestureInput` is currently open and receiving global touchscreen events. */
     @Volatile
     var gestureMonitorActive: Boolean = false
         private set
@@ -37,11 +39,13 @@ class EdgeGestureMonitor(
             listener.onDisplayChanged(updated)
         }
 
+    /** Current default display dimensions and density. */
     val geometry: DisplayGeometry
         get() = displayWatcher.geometry
 
     private val diagnosticsTracker = GestureDiagnosticsTracker()
 
+    /** Returns an immutable snapshot of accumulated gesture diagnostics. */
     fun gestureStatsSnapshot(): DebugGestureStats = diagnosticsTracker.snapshot()
 
     @Volatile
@@ -64,84 +68,21 @@ class EdgeGestureMonitor(
 
     private val stateMachine: EdgeGestureStateMachine =
         EdgeGestureStateMachine(
-            object : EdgeGestureCallbacks {
-                override fun onPilferPointers() {
-                    runCatching { inputMonitor?.pilferPointers() }
-                        .onFailure { SensorLog.warn("pilferPointers failed", it) }
-                    listener.onGestureStatsUpdated(diagnosticsTracker.recordPilfer())
-                }
-
-                override fun onDragStart(
-                    side: EdgeSide,
-                    startYFraction: Float,
-                ) = listener.onDragStart(side, startYFraction)
-
-                override fun onDragMove(
-                    side: EdgeSide,
-                    progress: Float,
-                    rawX: Float,
-                    rawY: Float,
-                    deltaX: Float,
-                ) = listener.onDragMove(side, progress, rawX, rawY, deltaX)
-
-                override fun onDragEnd(
-                    shouldOpen: Boolean,
-                    velocityPxPerSec: Float,
-                    canceled: Boolean,
-                ) {
-                    if (shouldOpen) {
-                        listener.onGestureStatsUpdated(diagnosticsTracker.recordTriggered())
-                    }
-                    listener.onDragEnd(shouldOpen, velocityPxPerSec, canceled)
-                }
-
-                override fun onFullscreenHint(side: EdgeSide) = listener.onFullscreenHint(side)
-
-                override fun onEdgeRepositionStart(
-                    side: EdgeSide,
-                    topPercent: Int,
-                ) = listener.onEdgeRepositionStart(side, topPercent)
-
-                override fun onEdgeRepositionMove(
-                    side: EdgeSide,
-                    topPercent: Int,
-                ) = listener.onEdgeRepositionMove(side, topPercent)
-
-                override fun onEdgeRepositionEnd(
-                    side: EdgeSide,
-                    topPercent: Int,
-                    committed: Boolean,
-                ) = listener.onEdgeRepositionEnd(side, topPercent, committed)
-
-                override fun onScheduleLongPress(pointerId: Int) {
-                    cancelPendingLongPress()
-                    val runnable =
-                        Runnable {
-                            pendingLongPress = null
-                            stateMachine.onLongPressTimeout(pointerId, currentEnv())
-                        }
-                    pendingLongPress = runnable
-                    inputHandler?.postDelayed(runnable, EdgeGestureStateMachine.LONG_PRESS_TIMEOUT_MS)
-                }
-
-                override fun onCancelLongPress() {
-                    cancelPendingLongPress()
-                }
-
-                override fun onSwipeRejected(
-                    reason: String,
-                    hotzoneMiss: Boolean,
-                ) {
-                    if (hotzoneMiss) {
-                        diagnosticsTracker.recordHotzoneMiss()?.let(listener::onGestureStatsUpdated)
-                    } else {
-                        listener.onGestureStatsUpdated(diagnosticsTracker.recordRejected(reason))
-                    }
-                }
-            },
+            callbacks =
+                EdgeGestureCallbackAdapter(
+                    listener = listener,
+                    diagnosticsTracker = diagnosticsTracker,
+                    onPilfer = {
+                        runCatching { inputMonitor?.pilferPointers() }
+                            .onFailure { SensorLog.warn("pilferPointers failed", it) }
+                    },
+                    onScheduleLongPressCallback = ::scheduleLongPress,
+                    onCancelLongPressCallback = ::cancelPendingLongPress,
+                ),
             onStatusBarPullDown = { listener.onStatusBarPullDown() },
         )
 
+    /** Starts the dedicated input thread, display watcher, and `monitorGestureInput` channel. */
     fun start(initialConfig: SideVeilConfig) {
         config = initialConfig
         if (inputThread == null) {
@@ -156,6 +97,7 @@ class EdgeGestureMonitor(
         openInputMonitor()
     }
 
+    /** Updates the active configuration, scope eligibility, panel state, and fullscreen flag. */
     fun updateState(
         nextConfig: SideVeilConfig,
         nextScopeActive: Boolean,
@@ -167,52 +109,61 @@ class EdgeGestureMonitor(
         panelState = nextPanelState
         fullscreenActive = nextFullscreenActive
         if (!nextScopeActive) {
-            val dispatcher = inputHandler
-            if (dispatcher != null && dispatcher.looper != Looper.myLooper()) {
-                dispatcher.post {
-                    if (!scopeActive) {
-                        stateMachine.onScopeInactive()
-                    }
-                }
-            } else {
-                stateMachine.onScopeInactive()
+            dispatchToInputThread {
+                if (!scopeActive) stateMachine.onScopeInactive()
             }
         }
     }
 
+    /** Disposes the input receiver/monitor on the input thread and stops the display watcher. */
     fun stop() {
         displayWatcher.stop()
-
-        runCatching { inputReceiver?.dispose() }
-        inputReceiver = null
-
-        runCatching { inputMonitor?.dispose() }
-        inputMonitor = null
-
-        pendingLongPress = null
-        inputHandler?.removeCallbacksAndMessages(null)
-        inputHandler = null
-
-        runCatching { inputThread?.quitSafely() }
-        inputThread = null
-
         gestureMonitorActive = false
-        stateMachine.reset(notifyAbortIfPilfered = true)
+
+        val dispatcher = inputHandler
+        val thread = inputThread
+        val receiverToDispose = inputReceiver
+        val monitorToDispose = inputMonitor
+        inputHandler = null
+        inputThread = null
+        inputReceiver = null
+        inputMonitor = null
+        pendingLongPress = null
+
+        val cleanupOnInputThread = {
+            runCatching { receiverToDispose?.dispose() }
+            runCatching { monitorToDispose?.dispose() }
+            stateMachine.reset(notifyAbortIfPilfered = true)
+        }
+
+        dispatcher?.removeCallbacksAndMessages(null)
+        if (dispatcher != null && dispatcher.looper != Looper.myLooper()) {
+            if (!dispatcher.post(cleanupOnInputThread)) cleanupOnInputThread()
+        } else {
+            cleanupOnInputThread()
+        }
+        runCatching { thread?.quitSafely() }
+    }
+
+    private fun dispatchToInputThread(action: () -> Unit) {
+        val dispatcher = inputHandler
+        if (dispatcher != null && dispatcher.looper != Looper.myLooper()) {
+            if (!dispatcher.post(action)) action()
+        } else {
+            action()
+        }
     }
 
     private fun openInputMonitor() {
         runCatching {
             val monitor = InputManagerGlobal.getInstance().monitorGestureInput("sideveil-edge", Display.DEFAULT_DISPLAY)
             val channel = monitor.inputChannel
-            val channelName = channel.name
             val dispatchLooper = inputThread?.looper ?: handler.looper
             val receiver =
                 object : InputEventReceiver(channel, dispatchLooper) {
                     override fun onInputEvent(event: InputEvent) {
                         try {
-                            if (event is MotionEvent) {
-                                handleMotionEvent(event)
-                            }
+                            if (event is MotionEvent) handleMotionEvent(event)
                         } catch (t: Throwable) {
                             SensorLog.warn("Unhandled error in edge input receiver", t)
                             stateMachine.reset(notifyAbortIfPilfered = true)
@@ -224,7 +175,7 @@ class EdgeGestureMonitor(
             inputMonitor = monitor
             inputReceiver = receiver
             gestureMonitorActive = true
-            SensorLog.info("Opened [Gesture Monitor] input channel: $channelName")
+            SensorLog.info("Opened [Gesture Monitor] input channel: ${channel.name}")
         }.onFailure { err ->
             gestureMonitorActive = false
             SensorLog.warn("Failed to open monitorGestureInput", err)
@@ -232,19 +183,11 @@ class EdgeGestureMonitor(
     }
 
     private fun handleMotionEvent(event: MotionEvent) {
-        if ((event.source and InputDevice.SOURCE_TOUCHSCREEN) == 0) {
-            return
-        }
+        if ((event.source and InputDevice.SOURCE_TOUCHSCREEN) == 0) return
         val env = currentEnv()
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                stateMachine.onDown(
-                    pointerId = event.getPointerId(0),
-                    rawX = event.rawX,
-                    rawY = event.rawY,
-                    eventTimeMs = event.eventTime,
-                    env = env,
-                )
+                stateMachine.onDown(event.getPointerId(0), event.rawX, event.rawY, event.eventTime, env)
             }
 
             MotionEvent.ACTION_POINTER_DOWN -> {
@@ -257,30 +200,15 @@ class EdgeGestureMonitor(
 
             MotionEvent.ACTION_POINTER_UP -> {
                 val idx = event.actionIndex
-                stateMachine.onPointerUp(
-                    liftedPointerId = event.getPointerId(idx),
-                    rawX = event.getRawX(idx),
-                    eventTimeMs = event.eventTime,
-                    env = env,
-                )
+                stateMachine.onPointerUp(event.getPointerId(idx), event.getRawX(idx), event.eventTime, env)
             }
 
             MotionEvent.ACTION_UP -> {
-                stateMachine.onUpOrCancel(
-                    rawX = event.rawX,
-                    eventTimeMs = event.eventTime,
-                    canceled = false,
-                    env = env,
-                )
+                stateMachine.onUpOrCancel(event.rawX, event.eventTime, canceled = false, env = env)
             }
 
             MotionEvent.ACTION_CANCEL -> {
-                stateMachine.onUpOrCancel(
-                    rawX = null,
-                    eventTimeMs = event.eventTime,
-                    canceled = true,
-                    env = env,
-                )
+                stateMachine.onUpOrCancel(rawX = null, eventTimeMs = event.eventTime, canceled = true, env = env)
             }
         }
     }
@@ -306,14 +234,18 @@ class EdgeGestureMonitor(
         )
     }
 
-    private fun currentEnv(): EdgeGestureEnv =
-        EdgeGestureEnv(
-            config = config,
-            geometry = geometry,
-            scopeActive = scopeActive,
-            panelState = panelState,
-            fullscreenActive = fullscreenActive,
-        )
+    private fun currentEnv(): EdgeGestureEnv = EdgeGestureEnv(config, geometry, scopeActive, panelState, fullscreenActive)
+
+    private fun scheduleLongPress(pointerId: Int) {
+        cancelPendingLongPress()
+        val runnable =
+            Runnable {
+                pendingLongPress = null
+                stateMachine.onLongPressTimeout(pointerId, currentEnv())
+            }
+        pendingLongPress = runnable
+        inputHandler?.postDelayed(runnable, EdgeGestureStateMachine.LONG_PRESS_TIMEOUT_MS)
+    }
 
     private fun cancelPendingLongPress() {
         pendingLongPress?.let { inputHandler?.removeCallbacks(it) }

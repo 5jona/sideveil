@@ -1,4 +1,4 @@
-package pochita.sideveil.sensor
+package pochita.sideveil.sensor.system
 
 import android.content.Context
 import android.net.ConnectivityManager
@@ -10,13 +10,14 @@ import android.net.wifi.WifiInfo
 import android.os.Handler
 import pochita.sideveil.protocol.NetworkContextSnapshot
 import pochita.sideveil.protocol.NetworkTransportKind
+import pochita.sideveil.sensor.SensorLog
 import java.net.Inet4Address
 
 /**
  * Zero-polling network context tracker backed by [ConnectivityManager.registerDefaultNetworkCallback]
  * and a dedicated VPN network callback.
  */
-internal class NetworkContextWatcher(
+class NetworkContextWatcher(
     private val systemContext: Context,
     private val handler: Handler,
     private val onContextChanged: (NetworkContextSnapshot) -> Unit,
@@ -25,6 +26,7 @@ internal class NetworkContextWatcher(
     private val activeVpnNetworks = LinkedHashSet<Network>()
     private val deduplicator = NetworkContextDeduplicator()
 
+    /** Latest deduplicated network context snapshot. */
     @Volatile
     var snapshot: NetworkContextSnapshot = NetworkContextSnapshot()
         private set
@@ -37,6 +39,7 @@ internal class NetworkContextWatcher(
     private var currentCapabilities: NetworkCapabilities? = null
     private var currentLinkProperties: LinkProperties? = null
 
+    /** Seeds initial connectivity state and registers default + VPN network callbacks. */
     fun start() {
         val cm = systemContext.getSystemService(ConnectivityManager::class.java) ?: return
         connectivityManager = cm
@@ -44,52 +47,41 @@ internal class NetworkContextWatcher(
 
         val defaultCb =
             object : ConnectivityManager.NetworkCallback(FLAG_INCLUDE_LOCATION_INFO) {
-                override fun onAvailable(network: Network) {
-                    updateDefaultNetwork(cm, network, null, null)
-                }
+                override fun onAvailable(network: Network) = updateDefaultNetwork(cm, network)
 
                 override fun onCapabilitiesChanged(
                     network: Network,
                     networkCapabilities: NetworkCapabilities,
-                ) {
-                    updateDefaultNetwork(cm, network, networkCapabilities, null)
-                }
+                ) = updateDefaultNetwork(cm, network, caps = networkCapabilities)
 
                 override fun onLinkPropertiesChanged(
                     network: Network,
                     linkProperties: LinkProperties,
-                ) {
-                    updateDefaultNetwork(cm, network, null, linkProperties)
-                }
+                ) = updateDefaultNetwork(cm, network, props = linkProperties)
 
-                override fun onLost(network: Network) {
-                    clearDefaultNetworkIfCurrent(network)
-                }
+                override fun onLost(network: Network) = clearDefaultNetworkIfCurrent(network)
 
-                override fun onUnavailable() {
-                    clearDefaultNetworkIfCurrent(null)
-                }
+                override fun onUnavailable() = clearDefaultNetworkIfCurrent(null)
             }
 
         runCatching {
             cm.registerDefaultNetworkCallback(defaultCb, handler)
             defaultCallback = defaultCb
-        }.onFailure { err ->
-            SensorLog.warn("Failed to register default network callback", err)
-        }
+        }.onFailure { SensorLog.warn("Failed to register default network callback", it) }
 
         registerVpnCallback(cm)
     }
 
+    /** Unregisters all network callbacks and clears tracked state. */
     fun stop() {
         val cm = connectivityManager
         defaultCallback?.let { cb ->
             runCatching { cm?.unregisterNetworkCallback(cb) }
-                .onFailure { err -> SensorLog.warn("Failed to unregister default network callback", err) }
+                .onFailure { SensorLog.warn("Failed to unregister default network callback", it) }
         }
         vpnCallback?.let { cb ->
             runCatching { cm?.unregisterNetworkCallback(cb) }
-                .onFailure { err -> SensorLog.warn("Failed to unregister VPN network callback", err) }
+                .onFailure { SensorLog.warn("Failed to unregister VPN network callback", it) }
         }
         defaultCallback = null
         vpnCallback = null
@@ -124,9 +116,7 @@ internal class NetworkContextWatcher(
         runCatching {
             cm.registerNetworkCallback(vpnRequest, vpnCb, handler)
             vpnCallback = vpnCb
-        }.onFailure { err ->
-            SensorLog.warn("Failed to register VPN network callback", err)
-        }
+        }.onFailure { SensorLog.warn("Failed to register VPN network callback", it) }
     }
 
     private fun seedInitialState(cm: ConnectivityManager) {
@@ -138,32 +128,28 @@ internal class NetworkContextWatcher(
                 currentLinkProperties = active?.let(cm::getLinkProperties)
             }
             recomputeAndEmit(notify = false)
-        }.onFailure { err ->
-            SensorLog.warn("Failed to seed initial network context", err)
-        }
+        }.onFailure { SensorLog.warn("Failed to seed initial network context", it) }
     }
 
     private fun updateDefaultNetwork(
         cm: ConnectivityManager,
         network: Network,
-        caps: NetworkCapabilities?,
-        props: LinkProperties?,
+        caps: NetworkCapabilities? = null,
+        props: LinkProperties? = null,
     ) {
         synchronized(lock) {
             val switched = currentNetwork != network
             currentNetwork = network
-            currentCapabilities =
-                caps ?: if (switched || currentCapabilities == null) {
-                    runCatching { cm.getNetworkCapabilities(network) }.getOrNull()
-                } else {
-                    currentCapabilities
-                }
-            currentLinkProperties =
-                props ?: if (switched || currentLinkProperties == null) {
-                    runCatching { cm.getLinkProperties(network) }.getOrNull()
-                } else {
-                    currentLinkProperties
-                }
+            if (caps != null) {
+                currentCapabilities = caps
+            } else if (switched || currentCapabilities == null) {
+                currentCapabilities = runCatching { cm.getNetworkCapabilities(network) }.getOrNull()
+            }
+            if (props != null) {
+                currentLinkProperties = props
+            } else if (switched || currentLinkProperties == null) {
+                currentLinkProperties = runCatching { cm.getLinkProperties(network) }.getOrNull()
+            }
         }
         recomputeAndEmit(notify = true)
     }
@@ -180,19 +166,13 @@ internal class NetworkContextWatcher(
                     true
                 }
             }
-        if (cleared) {
-            recomputeAndEmit(notify = true)
-        }
+        if (cleared) recomputeAndEmit(notify = true)
     }
 
     private fun recomputeAndEmit(notify: Boolean) {
         val updated =
             synchronized(lock) {
-                buildSnapshot(
-                    caps = currentCapabilities,
-                    props = currentLinkProperties,
-                    hasActiveVpn = activeVpnNetworks.isNotEmpty(),
-                )
+                buildSnapshot(currentCapabilities, currentLinkProperties, activeVpnNetworks.isNotEmpty())
             }
         if (deduplicator.accept(updated)) {
             snapshot = updated
@@ -200,9 +180,7 @@ internal class NetworkContextWatcher(
                 "Network context: transport=${updated.transport} vpn=${updated.vpnActive} " +
                     "validated=${updated.validated} iface=${updated.interfaceName.orEmpty()}",
             )
-            if (notify) {
-                onContextChanged(updated)
-            }
+            if (notify) onContextChanged(updated)
         }
     }
 
@@ -214,26 +192,16 @@ internal class NetworkContextWatcher(
             props: LinkProperties?,
             hasActiveVpn: Boolean,
         ): NetworkContextSnapshot {
-            if (caps == null) {
-                return NetworkContextSnapshot(vpnActive = hasActiveVpn)
-            }
-            val transport = resolveTransport(caps)
-            val vpnActive = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) || hasActiveVpn
-            val validated = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-            val metered = !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
-            val interfaceName = props?.interfaceName?.takeIf { it.isNotBlank() }
-            val ssid = sanitizeSsid((caps.transportInfo as? WifiInfo)?.ssid)
-            val gateway = extractDefaultIpv4Gateway(props)
-            val localIpv4 = extractLocalIpv4(props)
+            if (caps == null) return NetworkContextSnapshot(vpnActive = hasActiveVpn)
             return NetworkContextSnapshot(
-                transport = transport,
-                vpnActive = vpnActive,
-                validated = validated,
-                metered = metered,
-                interfaceName = interfaceName,
-                ssid = ssid,
-                gateway = gateway,
-                localIpv4 = localIpv4,
+                transport = resolveTransport(caps),
+                vpnActive = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) || hasActiveVpn,
+                validated = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
+                metered = !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED),
+                interfaceName = props?.interfaceName?.takeIf { it.isNotBlank() },
+                ssid = sanitizeSsid((caps.transportInfo as? WifiInfo)?.ssid),
+                gateway = extractDefaultIpv4Gateway(props),
+                localIpv4 = extractLocalIpv4(props),
             )
         }
 
@@ -253,10 +221,7 @@ internal class NetworkContextWatcher(
                 } else {
                     trimmed
                 }
-            if (unquoted.isEmpty() || unquoted.equals(UNKNOWN_SSID, ignoreCase = true)) {
-                return null
-            }
-            return unquoted
+            return unquoted.takeUnless { it.isEmpty() || it.equals(UNKNOWN_SSID, ignoreCase = true) }
         }
 
         private fun extractDefaultIpv4Gateway(props: LinkProperties?): String? =
@@ -278,6 +243,7 @@ internal class NetworkContextWatcher(
     }
 }
 
+/** Suppresses duplicate consecutive [NetworkContextSnapshot] emissions. */
 internal class NetworkContextDeduplicator(
     initial: NetworkContextSnapshot? = null,
 ) {
