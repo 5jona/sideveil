@@ -11,7 +11,11 @@ import {
   SIDEVEIL_METHODS,
   type SideVeilConfig,
 } from '../../shared/types.ts';
-import { parseDaemonLogLines } from './logParser.ts';
+import {
+  shouldPollControlInBackground,
+  shouldRefreshOnVisibility,
+} from './controlPollingPolicy.ts';
+import { parseDaemonLogsStdout, parseDaemonStatusStdout } from './logParser.ts';
 import { usePluginsControl } from './usePluginsControl.ts';
 
 /**
@@ -45,14 +49,8 @@ export function useSideVeilControl() {
   configLoadErrorRef.current = configLoadError;
   const isLoadedRef = useRef(false);
   const isPollingRef = useRef(false);
+  const lastVisibilityRefreshRef = useRef(0);
   const saveTimerRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
 
   const refreshStatus = useCallback(async () => {
     if (isPollingRef.current) return;
@@ -61,11 +59,10 @@ export function useSideVeilControl() {
       const res = await bridge.exec(`${shellQuote(CTL_BIN)} status`);
       if (!mountedRef.current) return;
       if (res.errno === 0 && res.stdout.trim()) {
-        try {
-          setStatus(JSON.parse(res.stdout.trim()) as DaemonStatus);
+        const parsed = parseDaemonStatusStdout(res.stdout);
+        if (parsed) {
+          setStatus(parsed);
           setDaemonOfflineError(null);
-        } catch {
-          // Ignore transient partial output.
         }
       } else {
         setDaemonOfflineError(
@@ -83,15 +80,9 @@ export function useSideVeilControl() {
 
   const refreshLogs = useCallback(async () => {
     const res = await bridge.exec(`${shellQuote(CTL_BIN)} logs`);
-    if (!mountedRef.current || res.errno !== 0 || !res.stdout.trim()) return;
-    try {
-      const parsed = JSON.parse(res.stdout.trim()) as { result?: { lines?: string[] } };
-      if (Array.isArray(parsed.result?.lines)) {
-        setLogs(parseDaemonLogLines(parsed.result.lines));
-      }
-    } catch {
-      // Ignore malformed log frame.
-    }
+    if (!mountedRef.current || res.errno !== 0) return;
+    const entries = parseDaemonLogsStdout(res.stdout);
+    if (entries) setLogs(entries);
   }, [bridge]);
 
   const enqueueAtomicWrite = useCallback(
@@ -139,11 +130,6 @@ export function useSideVeilControl() {
       configLoadErrorRef.current = null;
       isLoadedRef.current = true;
     };
-    const failLoad = () => {
-      const errMsg = '读取配置文件失败，已停止自动覆写以保护现有配置';
-      configLoadErrorRef.current = errMsg;
-      if (mountedRef.current) setConfigLoadError(errMsg);
-    };
     try {
       const raw = await bridge.readFile(CONFIG_PATH);
       if (!mountedRef.current) return;
@@ -154,7 +140,9 @@ export function useSideVeilControl() {
       }
       applyLoadedConfig(normalizeSideVeilConfig(JSON.parse(raw) as Partial<SideVeilConfig>));
     } catch {
-      failLoad();
+      const errMsg = '读取配置文件失败，已停止自动覆写以保护现有配置';
+      configLoadErrorRef.current = errMsg;
+      if (mountedRef.current) setConfigLoadError(errMsg);
     }
   }, [bridge, enqueueAtomicWrite, setColorMode, setThemeId]);
 
@@ -192,9 +180,11 @@ export function useSideVeilControl() {
   );
 
   useEffect(() => {
+    mountedRef.current = true;
     const handlePageHide = () => flushPendingSave();
     window.addEventListener('pagehide', handlePageHide);
     return () => {
+      mountedRef.current = false;
       window.removeEventListener('pagehide', handlePageHide);
       flushPendingSave();
     };
@@ -205,6 +195,7 @@ export function useSideVeilControl() {
     const loadInitial = async () => {
       await loadConfigFromDisk();
       if (active && mountedRef.current) {
+        lastVisibilityRefreshRef.current = Date.now();
         await refreshStatus();
         await refreshLogs();
         await refreshPlugins();
@@ -216,6 +207,9 @@ export function useSideVeilControl() {
       if (document.hidden) {
         flushPendingSave();
       } else if (mountedRef.current) {
+        const now = Date.now();
+        if (!shouldRefreshOnVisibility(lastVisibilityRefreshRef.current, now)) return;
+        lastVisibilityRefreshRef.current = now;
         void refreshStatus();
         void refreshLogs();
         void refreshPlugins();
@@ -223,19 +217,28 @@ export function useSideVeilControl() {
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    const timer = window.setInterval(() => {
-      if (!document.hidden && mountedRef.current) {
-        void refreshStatus();
-        void refreshPlugins();
-      }
-    }, 3000);
+    const timer = shouldPollControlInBackground(bridge.env)
+      ? window.setInterval(() => {
+          if (!document.hidden && mountedRef.current) {
+            void refreshStatus();
+            void refreshPlugins();
+          }
+        }, 3000)
+      : null;
 
     return () => {
       active = false;
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.clearInterval(timer);
+      if (timer !== null) window.clearInterval(timer);
     };
-  }, [flushPendingSave, loadConfigFromDisk, refreshLogs, refreshPlugins, refreshStatus]);
+  }, [
+    bridge.env,
+    flushPendingSave,
+    loadConfigFromDisk,
+    refreshLogs,
+    refreshPlugins,
+    refreshStatus,
+  ]);
 
   const runCtl = useCallback(
     async (action: CtlCommand, label: string) => {

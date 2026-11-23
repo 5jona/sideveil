@@ -80,12 +80,25 @@ internal class PluginWebViewDeps(
 internal class PluginWebChromeClient(
     private val pluginIdProvider: () -> String,
     private val daemonClient: DaemonClient,
+    private val isUntrustedEmbed: Boolean = false,
 ) : WebChromeClient() {
     override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
         val msg = consoleMessage ?: return false
         val level = msg.messageLevel()?.name?.lowercase() ?: "info"
         val pluginId = pluginIdProvider()
         val text = msg.message().orEmpty().take(MAX_MESSAGE_LEN)
+        if (!WebViewErrorReportPolicy.shouldForwardConsoleToDaemon(isUntrustedEmbed)) {
+            when (msg.messageLevel()) {
+                ConsoleMessage.MessageLevel.ERROR, ConsoleMessage.MessageLevel.WARNING -> {
+                    Log.w(TAG, "[embed:$pluginId][$level] $text")
+                }
+
+                else -> {
+                    Log.d(TAG, "[embed:$pluginId][$level] $text")
+                }
+            }
+            return true
+        }
         when (msg.messageLevel()) {
             ConsoleMessage.MessageLevel.ERROR -> Log.e(TAG, "[$pluginId][$level] $text")
             ConsoleMessage.MessageLevel.WARNING -> Log.w(TAG, "[$pluginId][$level] $text")

@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {
+  shouldPollControlInBackground,
+  shouldRefreshOnVisibility,
+  VISIBILITY_REFRESH_COOLDOWN_MS,
+} from '../src/control/hooks/controlPollingPolicy.ts';
 import { parseDaemonLogLines } from '../src/control/hooks/logParser.ts';
 import { handleMockControlExec } from '../src/control/mockControlBridge.ts';
 import {
@@ -148,4 +153,15 @@ test('handleMockControlExec supports debug mode get/set and gates builtin test p
     toRelease.snapshot.matchedPluginIds.includes(SIDEVEIL_BUILTIN_TEST_PLUGINS.DIAGNOSTIC),
     false,
   );
+});
+
+test('controlPollingPolicy disables background interval under ksu and enforces 5s visibility cooldown', () => {
+  assert.equal(shouldPollControlInBackground('ksu'), false);
+  assert.equal(shouldPollControlInBackground('host'), true);
+  assert.equal(shouldPollControlInBackground('mock'), true);
+
+  assert.equal(VISIBILITY_REFRESH_COOLDOWN_MS, 5000);
+  assert.equal(shouldRefreshOnVisibility(10_000, 14_999), false);
+  assert.equal(shouldRefreshOnVisibility(10_000, 15_000), true);
+  assert.equal(shouldRefreshOnVisibility(0, 5_000), true);
 });

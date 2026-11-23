@@ -1,9 +1,17 @@
-//! Unit tests for `plugin_registry::store` loopback dev-URL validation and built-in manifest.
+//! Unit tests for `plugin_registry::store` loopback dev-URL validation, asset revision, and built-in manifest.
 
+use std::collections::HashSet;
+use std::fs;
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use sideveil_protocol::config::SideVeilConfig;
 use sideveil_protocol::plugin::{BUILTIN_DIAG_PLUGIN_ID, PluginCapability};
 
+use super::PluginRegistry;
 use super::dev_url::validate_loopback_dev_url;
-use super::store::builtin_diag_manifest;
+use super::store::{builtin_diag_manifest, compute_asset_revision};
+use crate::log_ring::LogRing;
 
 #[test]
 fn validate_loopback_dev_url_accepts_valid_loopback_and_rejects_ssrf() {
@@ -72,4 +80,88 @@ fn builtin_diag_manifest_declares_storage_and_toast() {
         m.capabilities,
         vec![PluginCapability::Storage, PluginCapability::Toast]
     );
+}
+
+#[test]
+fn compute_asset_revision_detects_entry_changes_and_rejects_traversal() {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let dir =
+        std::env::temp_dir().join(format!("sideveil-asset-rev-{}-{nanos}", std::process::id()));
+    let plugin_dir = dir.join("plugins/strata.manager");
+    fs::create_dir_all(plugin_dir.join("web")).expect("mkdir");
+    fs::write(
+        plugin_dir.join("manifest.json"),
+        r#"{
+            "id": "strata.manager",
+            "name": "Strata Manager",
+            "version": "1.0.0",
+            "entry": "web/index.html"
+        }"#,
+    )
+    .expect("write manifest");
+    fs::write(
+        plugin_dir.join("web/index.html"),
+        "<html><script src=\"./assets/index-AAA.js\"></script></html>",
+    )
+    .expect("write html v1");
+
+    let rev1 = compute_asset_revision(&plugin_dir, "web/index.html").expect("rev1");
+    assert_eq!(
+        compute_asset_revision(&plugin_dir, "web/index.html").as_deref(),
+        Some(rev1.as_str())
+    );
+    assert!(compute_asset_revision(&plugin_dir, "../manifest.json").is_none());
+    assert!(compute_asset_revision(&plugin_dir, "").is_none());
+
+    let logs = Arc::new(LogRing::new());
+    let registry = PluginRegistry::open(dir.join("plugins"), dir.join("plugins.json"), logs);
+    let mut rx = registry.subscribe();
+    let cfg = SideVeilConfig::default();
+    let snap1 = registry.snapshot("", "", &cfg, &HashSet::new());
+    let desc1 = snap1
+        .plugins
+        .iter()
+        .find(|p| p.id == "strata.manager")
+        .expect("strata descriptor");
+    assert_eq!(desc1.asset_revision.as_deref(), Some(rev1.as_str()));
+
+    // Re-scanning with unchanged files must not emit a spurious update.
+    let _ = registry.rescan();
+    assert!(rx.try_recv().is_err());
+
+    // Updating only web/index.html (manifest.json untouched) MUST change asset_revision and fire updates_tx!
+    fs::write(
+        plugin_dir.join("web/index.html"),
+        "<html><script src=\"./assets/index-DXWqVSzR.js\"></script></html>",
+    )
+    .expect("write html v2");
+    let _ = registry.rescan();
+    assert!(
+        rx.try_recv().is_ok(),
+        "rescan must broadcast update when entry HTML changes"
+    );
+
+    let snap2 = registry.snapshot("", "", &cfg, &HashSet::new());
+    let desc2 = snap2
+        .plugins
+        .iter()
+        .find(|p| p.id == "strata.manager")
+        .expect("strata descriptor v2");
+    assert_ne!(desc1.asset_revision, desc2.asset_revision);
+    assert!(desc2.asset_revision.is_some());
+
+    // Built-in diagnostic plugin omits asset_revision on the wire.
+    let diag = snap2
+        .plugins
+        .iter()
+        .find(|p| p.id == BUILTIN_DIAG_PLUGIN_ID)
+        .expect("builtin diagnostic");
+    assert!(diag.asset_revision.is_none());
+    let diag_json = serde_json::to_value(diag).expect("serialize builtin");
+    assert!(diag_json.get("assetRevision").is_none());
+
+    let _ = fs::remove_dir_all(&dir);
 }

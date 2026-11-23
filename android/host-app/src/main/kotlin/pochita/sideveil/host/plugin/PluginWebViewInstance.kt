@@ -3,6 +3,7 @@ package pochita.sideveil.host.plugin
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.webkit.WebView
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
@@ -98,7 +99,7 @@ internal class PluginWebViewInstance(
                 onRenderProcessGoneEvent = ::handleRenderProcessGone,
                 onMainPageFinished = ::handleMainPageFinished,
             )
-        webView.webChromeClient = PluginWebChromeClient({ descriptor.id }, deps.daemonClient)
+        webView.webChromeClient = PluginWebChromeClient({ descriptor.id }, deps.daemonClient, isUntrustedEmbed)
     }
 
     fun updateDescriptor(next: PluginDescriptor): DescriptorUpdateOutcome {
@@ -236,10 +237,13 @@ internal class PluginWebViewInstance(
     }
 
     private fun emitWebViewError(payload: HostWebViewErrorPayload) {
-        deps.emitWebViewError(payload)
         if (isUntrustedEmbed && payload.isMainFrame && payload.kind == "network") {
-            embedSession.handleMainFrameNetworkError(descriptor, payload.url)
+            if (embedSession.handleMainFrameNetworkError(descriptor, payload.url)) {
+                Log.i(TAG, "Auto-fell back untrusted embed plugin=${descriptor.id} from url=${payload.url}")
+                return
+            }
         }
+        deps.emitWebViewError(payload)
     }
 
     private fun handleMainPageFinished(url: String?) {
@@ -287,4 +291,8 @@ internal class PluginWebViewInstance(
             onBackdrop = { surfaceBackdrop = it },
             onPresentationMode = { presentationMode = it },
         )
+
+    companion object {
+        private const val TAG = "SideVeilPluginWebView"
+    }
 }

@@ -126,9 +126,15 @@ def verify_health(dev: DeviceRunner) -> dict:
     assert health.get("ok") is True, f"Unhealthy daemon: {health}"
     assert status.get("hostConnected") is True, f"Host not connected: {status}"
     assert status.get("sensorConnected") is True, f"Sensor not connected: {status}"
+    assert status.get("gestureMonitorActive") is True, f"Gesture monitor inactive: {status}"
+    assert status.get("taskListenerActive") is True, f"Task listener inactive: {status}"
+    assert status.get("overlayPermissionGranted") is True, f"Overlay permission missing: {status}"
     print(
         f"[OK] ({dev.mode}) health/status: hub_pid={status['pid']} "
         f"sensor_pid={status.get('sensorPid')} host_pid={status.get('hostPid')} "
+        f"gesture={status.get('gestureMonitorActive')} "
+        f"taskListener={status.get('taskListenerActive')} "
+        f"overlay={status.get('overlayPermissionGranted')} "
         f"blur={status.get('crossWindowBlurSupported')}"
     )
     return status

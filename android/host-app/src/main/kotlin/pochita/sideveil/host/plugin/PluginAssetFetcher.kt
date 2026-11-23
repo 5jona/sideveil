@@ -11,7 +11,6 @@ import java.io.IOException
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URI
-import java.util.Locale
 
 /**
  * Resolves isolated per-plugin virtual HTTPS origins (`https://<pluginId>.plugins.sideveil.local/`),
@@ -60,19 +59,25 @@ class PluginAssetFetcher(
         uri: Uri,
         isMainFrame: Boolean = false,
     ): WebResourceResponse {
-        if (!isAllowedPluginUri(uri, descriptor.id)) {
-            return errorResponse(403, "Forbidden")
-        }
+        if (!isAllowedPluginUri(uri, descriptor.id)) return errorResponse(403, "Forbidden")
         val rawPath = uri.path.orEmpty().trimStart('/')
-        if (rawPath.contains("..") || rawPath.contains('\\')) {
-            return errorResponse(403, "Forbidden")
-        }
+        if (rawPath.contains("..") || rawPath.contains('\\')) return errorResponse(403, "Forbidden")
         val coi = descriptor.surface.crossOriginIsolated
+        if (isFaviconShortCircuitPath(rawPath)) {
+            return WebResourceResponse(
+                "image/x-icon",
+                null,
+                204,
+                "No Content",
+                buildResponseHeaders(coi),
+                ByteArrayInputStream(ByteArray(0)),
+            )
+        }
         val devBase =
             descriptor.devServerUrl
                 ?.trim()
                 ?.trimEnd('/')
-                ?.takeIf { isValidLoopbackDevUrl(it) }
+                ?.takeIf(::isValidLoopbackDevUrl)
         if (devBase != null) {
             val rel = rawPath.removePrefix("web/").ifEmpty { "index.html" }
             val querySuffix = uri.encodedQuery?.let { "?$it" }.orEmpty()
@@ -191,67 +196,40 @@ class PluginAssetFetcher(
             val detail = "${err.javaClass.simpleName}: ${err.message.orEmpty()}".take(WebViewDiagnosticsSanitizer.MAX_DESCRIPTION_LEN)
             Log.w(TAG, "Loopback asset fetch failed plugin=${descriptor.id} url=$safeUrl ($detail)")
             onFetchError?.invoke(descriptor.id, safeUrl, detail, isMainFrame)
-            errorResponse(502, "Asset Fetch Failed")
+            errorResponse(502, SYNTHETIC_FETCH_FAILED_REASON, mapOf(SYNTHETIC_ERROR_HEADER to "1"))
         }
     }
 
-    private fun isUtf8Mime(mime: String): Boolean = mime.startsWith("text/") || UTF8_MIME_SUBSTRINGS.any { mime.contains(it) }
+    private fun isUtf8Mime(mime: String): Boolean = PluginAssetMimeTypes.isUtf8Mime(mime)
 
     private fun errorResponse(
         status: Int,
         reason: String,
+        headers: Map<String, String> = emptyMap(),
     ): WebResourceResponse =
         WebResourceResponse(
             "text/plain",
             "UTF-8",
             status,
             reason,
-            emptyMap(),
+            headers,
             ByteArrayInputStream(reason.toByteArray(Charsets.UTF_8)),
         )
 
     companion object {
         private const val TAG = "SideVeilAssetFetcher"
         const val PLUGIN_ORIGIN_SUFFIX = "plugins.sideveil.local"
+        const val SYNTHETIC_ERROR_HEADER = "X-SideVeil-Synthetic-Error"
+        const val SYNTHETIC_FETCH_FAILED_REASON = "Asset Fetch Failed"
         private const val CONNECT_TIMEOUT_MS = 2_000
         private const val READ_TIMEOUT_MS = 4_000
         internal const val MAX_RESPONSE_BYTES = 16 * 1024 * 1024
-        private val UTF8_MIME_SUBSTRINGS = listOf("javascript", "json", "xml")
 
-        private val MIME_TYPES_BY_EXT: Map<String, String> =
-            mapOf(
-                "html" to "text/html",
-                "htm" to "text/html",
-                "js" to "application/javascript",
-                "mjs" to "application/javascript",
-                "css" to "text/css",
-                "svg" to "image/svg+xml",
-                "json" to "application/json",
-                "map" to "application/json",
-                "webmanifest" to "application/manifest+json",
-                "png" to "image/png",
-                "jpg" to "image/jpeg",
-                "jpeg" to "image/jpeg",
-                "gif" to "image/gif",
-                "webp" to "image/webp",
-                "avif" to "image/avif",
-                "ico" to "image/x-icon",
-                "woff2" to "font/woff2",
-                "woff" to "font/woff",
-                "ttf" to "font/ttf",
-                "otf" to "font/otf",
-                "wasm" to "application/wasm",
-                "txt" to "text/plain",
-                "xml" to "application/xml",
-            )
+        /** Returns `true` when [rawPath] should short-circuit to `204 No Content` on virtual plugin origins. */
+        fun isFaviconShortCircuitPath(rawPath: String): Boolean = rawPath == "favicon.ico"
 
         /** Resolves the MIME type for [path] based on its lowercase file extension. */
-        fun mimeTypeFor(path: String): String {
-            val clean = path.substringBefore('?').substringBefore('#')
-            val fileName = clean.substringAfterLast('/')
-            val ext = fileName.substringAfterLast('.', missingDelimiterValue = "").lowercase(Locale.ROOT)
-            return MIME_TYPES_BY_EXT[ext] ?: "application/octet-stream"
-        }
+        fun mimeTypeFor(path: String): String = PluginAssetMimeTypes.mimeTypeFor(path)
 
         /** Builds HTTP response headers with optional COOP/COEP isolation headers. */
         fun buildResponseHeaders(crossOriginIsolated: Boolean): Map<String, String> =

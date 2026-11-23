@@ -38,7 +38,7 @@ impl HubState {
                     }
                 }
                 self.logs().info(format!(
-                    "Sensor hello pid={pid} version={version} display={}x{}@{} overlay={overlay_permission_granted}",
+                    "Sensor hello pid={pid} version={version} display={}x{}@{} overlay={overlay_permission_granted} gesture={gesture_monitor_active} taskListener={task_listener_active}",
                     display.width_px, display.height_px, display.density
                 ));
                 self.sync_sensor_state();

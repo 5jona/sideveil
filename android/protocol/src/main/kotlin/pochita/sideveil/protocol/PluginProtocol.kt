@@ -142,6 +142,7 @@ data class PluginDescriptor(
     val version: String,
     val icon: String? = null,
     val entry: String = "index.html",
+    val assetRevision: String? = null,
     val builtin: Boolean = false,
     val enabled: Boolean = true,
     val priority: Int = 0,

@@ -186,6 +186,8 @@ pub struct PluginDescriptor {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
     pub entry: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset_revision: Option<String>,
     pub builtin: bool,
     pub enabled: bool,
     pub priority: i32,

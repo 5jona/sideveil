@@ -155,30 +155,35 @@ class EdgeGestureMonitor(
     }
 
     private fun openInputMonitor() {
-        runCatching {
-            val monitor = InputManagerGlobal.getInstance().monitorGestureInput("sideveil-edge", Display.DEFAULT_DISPLAY)
-            val channel = monitor.inputChannel
-            val dispatchLooper = inputThread?.looper ?: handler.looper
-            val receiver =
-                object : InputEventReceiver(channel, dispatchLooper) {
-                    override fun onInputEvent(event: InputEvent) {
-                        try {
-                            if (event is MotionEvent) handleMotionEvent(event)
-                        } catch (t: Throwable) {
-                            SensorLog.warn("Unhandled error in edge input receiver", t)
-                            stateMachine.reset(notifyAbortIfPilfered = true)
-                        } finally {
-                            finishInputEvent(event, false)
+        val openedChannelName =
+            runCatching {
+                val monitor = InputManagerGlobal.getInstance().monitorGestureInput("sideveil-edge", Display.DEFAULT_DISPLAY)
+                val channel = monitor.inputChannel
+                val channelName = runCatching { channel.name }.getOrDefault("sideveil-edge")
+                val dispatchLooper = inputThread?.looper ?: handler.looper
+                val receiver =
+                    object : InputEventReceiver(channel, dispatchLooper) {
+                        override fun onInputEvent(event: InputEvent) {
+                            try {
+                                if (event is MotionEvent) handleMotionEvent(event)
+                            } catch (t: Throwable) {
+                                SensorLog.warn("Unhandled error in edge input receiver", t)
+                                stateMachine.reset(notifyAbortIfPilfered = true)
+                            } finally {
+                                finishInputEvent(event, false)
+                            }
                         }
                     }
-                }
-            inputMonitor = monitor
-            inputReceiver = receiver
-            gestureMonitorActive = true
-            SensorLog.info("Opened [Gesture Monitor] input channel: ${channel.name}")
-        }.onFailure { err ->
-            gestureMonitorActive = false
-            SensorLog.warn("Failed to open monitorGestureInput", err)
+                inputMonitor = monitor
+                inputReceiver = receiver
+                gestureMonitorActive = true
+                channelName
+            }.onFailure { err ->
+                gestureMonitorActive = false
+                SensorLog.warn("Failed to open monitorGestureInput", err)
+            }.getOrNull()
+        if (openedChannelName != null) {
+            SensorLog.info("Opened [Gesture Monitor] input channel: $openedChannelName")
         }
     }
 

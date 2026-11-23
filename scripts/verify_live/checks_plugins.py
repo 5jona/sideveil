@@ -66,6 +66,21 @@ def verify_plugins_e2e(dev: DeviceRunner) -> None:
         )
         print("[OK] subdirectory inotify detected in-place manifest update -> v0.1.1")
 
+        # 2b. Loopback-only dev URL validation BEFORE mounting/selecting test_id so no warm
+        # WebView attempts to connect to a closed :5175 dev port and emit synthetic 502 errors.
+        dev_snap = dev.ctl_json(["plugins", "dev", test_id, "http://127.0.0.1:5175"])["result"]
+        assert (
+            next(p for p in dev_snap["plugins"] if p["id"] == test_id).get("devServerUrl")
+            == "http://127.0.0.1:5175"
+        )
+        bad_dev = dev.ctl_json(["plugins", "dev", test_id, "http://198.51.100.10:5175"], check=False)
+        assert "error" in bad_dev, f"Expected non-loopback rejection: {bad_dev}"
+        cleared_dev_snap = dev.ctl_json(["plugins", "dev", test_id, "--clear"])["result"]
+        assert (
+            next(p for p in cleared_dev_snap["plugins"] if p["id"] == test_id).get("devServerUrl")
+            is None
+        )
+
         # 3. Priority, scope override, PanelHost + PluginRail visibility
         prio_snap = dev.ctl_json(["plugins", "priority", test_id, "42"])["result"]
         entry = next(p for p in prio_snap["plugins"] if p["id"] == test_id)
@@ -115,7 +130,7 @@ def verify_plugins_e2e(dev: DeviceRunner) -> None:
         assert int(icon_lines[2]) >= 2 and icon_lines[3] == "DISTINCT", icon_lines
         print(f"[OK] asset isolation + vello_cpu __icon cached {icon_lines[2]} distinct PNGs")
 
-        # 5. Edge patch, loopback-only dev URL, audit diagnostics, and scope reset
+        # 5. Edge patch, audit diagnostics, and scope reset
         orig_edge = dev.ctl_json(["rpc", "config.get"])["result"]["edge"]
         patched_edge = dev.ctl_json(["rpc", "config.patchEdge", json.dumps({"topPercent": 44})])[
             "result"
@@ -128,15 +143,6 @@ def verify_plugins_e2e(dev: DeviceRunner) -> None:
                 json.dumps({"side": orig_edge["side"], "topPercent": orig_edge["topPercent"]}),
             ],
         )
-
-        dev_snap = dev.ctl_json(["plugins", "dev", test_id, "http://127.0.0.1:5175"])["result"]
-        assert (
-            next(p for p in dev_snap["plugins"] if p["id"] == test_id).get("devServerUrl")
-            == "http://127.0.0.1:5175"
-        )
-        bad_dev = dev.ctl_json(["plugins", "dev", test_id, "http://198.51.100.10:5175"], check=False)
-        assert "error" in bad_dev, f"Expected non-loopback rejection: {bad_dev}"
-        dev.ctl_json(["plugins", "dev", test_id, "--clear"])
 
         audit = dev.ctl_json(["plugins", "audit"])["result"]
         assert isinstance(audit.get("entries"), list) and len(audit["entries"]) > 0

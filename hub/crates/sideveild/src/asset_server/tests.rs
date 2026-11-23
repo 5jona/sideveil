@@ -148,5 +148,30 @@ async fn serves_spa_fallback_and_immutable_asset_cache_headers() {
     assert!(asset_resp.contains("Cache-Control: private, max-age=300, immutable\r\n"));
     assert!(asset_resp.contains("ETag: W/\""));
 
+    // 5. Missing root /favicon.ico returns 204 No Content instead of 403 Forbidden.
+    let favicon_204 =
+        send_asset_request(Arc::clone(&state), "/plugins/com.spa.demo/favicon.ico").await;
+    assert!(
+        favicon_204.starts_with("HTTP/1.1 204 No Content\r\n"),
+        "expected 204 for missing favicon, got: {favicon_204}"
+    );
+
+    // 6. When web/favicon.ico exists, /favicon.ico serves it with 200 OK (image/x-icon).
+    fs::write(plugin_dir.join("web/favicon.ico"), b"ICO").expect("write favicon");
+    let favicon_200 =
+        send_asset_request(Arc::clone(&state), "/plugins/com.spa.demo/favicon.ico").await;
+    assert!(
+        favicon_200.starts_with("HTTP/1.1 200 OK\r\n"),
+        "expected 200 when web/favicon.ico exists, got: {favicon_200}"
+    );
+    assert!(favicon_200.contains("Content-Type: image/x-icon\r\n"));
+    assert!(favicon_200.ends_with("ICO"));
+
+    // 7. Non-favicon files outside web/ remain strictly 403 Forbidden.
+    fs::write(plugin_dir.join("secret.txt"), "top-secret").expect("write sibling");
+    let sibling_403 =
+        send_asset_request(Arc::clone(&state), "/plugins/com.spa.demo/secret.txt").await;
+    assert!(sibling_403.starts_with("HTTP/1.1 403 Forbidden\r\n"));
+
     let _ = fs::remove_dir_all(&dir);
 }

@@ -208,4 +208,26 @@ class WebViewDormancyControllerTest {
         controller.setForeground(false)
         assertEquals(180_000L, scheduler.lastDelayMs)
     }
+
+    @Test
+    fun `background page load respects keepAlive hidePauseDelayMs instead of pausing after 1_2s`() {
+        val scheduler = FakeScheduler()
+        var pauses = 0
+        val controller =
+            WebViewDormancyController(
+                onPauseWebView = { pauses += 1 },
+                onResumeWebView = {},
+                scheduleDelayed = scheduler.schedule,
+                hidePauseDelayMs = 180_000L,
+            )
+
+        controller.onLoadStarted()
+        controller.setForeground(false)
+        controller.onPageFinished()
+
+        assertTrue(scheduler.hasPending())
+        assertEquals(180_000L, scheduler.lastDelayMs)
+        assertFalse(controller.isPaused)
+        assertEquals(0, pauses)
+    }
 }

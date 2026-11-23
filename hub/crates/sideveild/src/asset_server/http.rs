@@ -177,6 +177,14 @@ pub(crate) fn cache_headers_for(raw_rel: &str, path: &Path, meta: &Metadata) -> 
     }
 }
 
+pub(super) async fn write_no_content(
+    writer: &mut tokio::net::tcp::OwnedWriteHalf,
+) -> io::Result<()> {
+    let resp = "HTTP/1.1 204 No Content\r\nCache-Control: private, max-age=300\r\nConnection: close\r\n\r\n";
+    writer.write_all(resp.as_bytes()).await?;
+    writer.flush().await
+}
+
 pub(super) async fn write_error(
     writer: &mut tokio::net::tcp::OwnedWriteHalf,
     status: u16,

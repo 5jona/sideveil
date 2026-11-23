@@ -6,6 +6,42 @@ import time
 from .runner import DeviceRunner
 
 WEBVIEW_ERROR_RE = re.compile(r"\[WebView:([^\]]+)\]\[ERROR\]", re.IGNORECASE)
+WEBVIEW_TRANSPORT_ERROR_RE = re.compile(
+    r"\[WebView:([^\]]+)\]\[error:(loopback|http|network)\](?:\s+code=(\d+))?",
+    re.IGNORECASE,
+)
+
+
+def _untrusted_embed_plugin_ids(dev: DeviceRunner) -> set[str]:
+    try:
+        resp = dev.ctl_json(["plugins", "list"], check=False)
+        payload = _unwrap_result(resp)
+        plugins = payload.get("plugins", [])
+        if isinstance(plugins, list):
+            return {
+                p["id"]
+                for p in plugins
+                if isinstance(p, dict) and isinstance(p.get("id"), str) and p.get("embed") is not None
+            }
+    except Exception:  # noqa: BLE001
+        pass
+    return set()
+
+
+def _is_forbidden_webview_error_line(line: str, untrusted_embed_ids: set[str]) -> bool:
+    if WEBVIEW_ERROR_RE.search(line):
+        return True
+    match = WEBVIEW_TRANSPORT_ERROR_RE.search(line)
+    if not match:
+        return False
+    plugin_id = match.group(1)
+    if plugin_id in untrusted_embed_ids:
+        return False
+    kind = match.group(2).lower()
+    if kind == "http":
+        code = int(match.group(3)) if match.group(3) else None
+        return code is None or code >= 400
+    return True
 
 
 def _unwrap_result(payload: dict) -> dict:
@@ -77,7 +113,7 @@ def verify_debug_cdp(dev: DeviceRunner) -> dict:
 def verify_webview_console_zero_errors(
     dev: DeviceRunner, since_seq: int | None = None
 ) -> dict:
-    """Asserts that `sideveil-ctl logs` contains zero `[WebView:<id>][ERROR]` entries."""
+    """Asserts that `sideveil-ctl logs` contains zero WebView console or trusted transport errors."""
     logs_resp: dict
     if since_seq is not None:
         try:
@@ -89,8 +125,13 @@ def verify_webview_console_zero_errors(
     payload = _unwrap_result(logs_resp)
     lines = payload.get("lines", [])
     assert isinstance(lines, list), f"Unexpected logs response: {logs_resp}"
-    errors = [line for line in lines if isinstance(line, str) and WEBVIEW_ERROR_RE.search(line)]
-    assert not errors, "Found WebView console errors in daemon logs:\n" + "\n".join(errors)
+    untrusted_embed_ids = _untrusted_embed_plugin_ids(dev)
+    errors = [
+        line
+        for line in lines
+        if isinstance(line, str) and _is_forbidden_webview_error_line(line, untrusted_embed_ids)
+    ]
+    assert not errors, "Found WebView console/transport errors in daemon logs:\n" + "\n".join(errors)
     seq_info = f", since_seq={since_seq}" if since_seq is not None else ""
-    print(f"[OK] WebView console zero-error assertion passed ({len(lines)} log lines scanned{seq_info})")
+    print(f"[OK] WebView zero-error assertion passed ({len(lines)} log lines scanned{seq_info})")
     return {"scannedLines": len(lines), "webviewErrors": 0, "sinceSeq": since_seq}

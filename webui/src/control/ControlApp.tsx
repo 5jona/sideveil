@@ -19,21 +19,16 @@ import {
   PanelRightOpen,
   SlidersHorizontal,
 } from 'lucide-react';
-import { lazy, Suspense, useMemo } from 'react';
+import { useMemo } from 'react';
 import { CONFIG_PATH, resolveRuntimeMode } from '../shared/types.ts';
 import { AppearanceScopeTab } from './components/AppearanceScopeTab.tsx';
+import { DiagnosticsTab } from './components/DiagnosticsTab.tsx';
 import { OverviewEdgeTab } from './components/OverviewEdgeTab.tsx';
+import { PluginsTab } from './components/PluginsTab.tsx';
 import { useDebugControl } from './hooks/useDebugControl.ts';
 import { useNetworkContextControl } from './hooks/useNetworkContextControl.ts';
 import { useSideVeilControl } from './hooks/useSideVeilControl.ts';
 import { handleMockControlExec } from './mockControlBridge.ts';
-
-const PluginsTab = lazy(() =>
-  import('./components/PluginsTab.tsx').then((m) => ({ default: m.PluginsTab })),
-);
-const DiagnosticsTab = lazy(() =>
-  import('./components/DiagnosticsTab.tsx').then((m) => ({ default: m.DiagnosticsTab })),
-);
 
 const CONTROL_TAB_ORDER = ['overview', 'appearance', 'plugins', 'diagnostics'] as const;
 
@@ -200,58 +195,54 @@ function ControlWorkbench() {
         </TabsContent>
 
         <TabsContent value="plugins">
-          <Suspense fallback={null}>
-            <PluginsTab
-              snapshot={pluginsSnapshot}
-              auditReport={auditReport}
-              busyAction={busyAction}
-              foregroundPackage={status?.foregroundPackage ?? ''}
-              runtimeMode={runtimeMode}
-              runtimeModeBusy={debugBusy === 'runtime-mode'}
-              onSwitchToDebugMode={() => void setRuntimeMode('debug')}
-              onReload={reloadPlugins}
-              onSetEnabled={setPluginEnabled}
-              onSetPriority={setPluginPriority}
-              onSetScopeOverride={setPluginScopeOverride}
-              onSetDevUrl={setPluginDevUrl}
-              onCreateWebEmbed={createWebEmbed}
-              onSetEmbedConfig={setEmbedConfig}
-              onUninstallPlugin={uninstallPlugin}
-              onRefreshAudit={refreshPluginAudit}
-              onSelectPlugin={selectPlugin}
-            />
-          </Suspense>
+          <PluginsTab
+            snapshot={pluginsSnapshot}
+            auditReport={auditReport}
+            busyAction={busyAction}
+            foregroundPackage={status?.foregroundPackage ?? ''}
+            runtimeMode={runtimeMode}
+            runtimeModeBusy={debugBusy === 'runtime-mode'}
+            onSwitchToDebugMode={() => void setRuntimeMode('debug')}
+            onReload={reloadPlugins}
+            onSetEnabled={setPluginEnabled}
+            onSetPriority={setPluginPriority}
+            onSetScopeOverride={setPluginScopeOverride}
+            onSetDevUrl={setPluginDevUrl}
+            onCreateWebEmbed={createWebEmbed}
+            onSetEmbedConfig={setEmbedConfig}
+            onUninstallPlugin={uninstallPlugin}
+            onRefreshAudit={refreshPluginAudit}
+            onSelectPlugin={selectPlugin}
+          />
         </TabsContent>
 
         <TabsContent value="diagnostics">
-          <Suspense fallback={null}>
-            <DiagnosticsTab
-              bridge={bridge}
-              config={config}
-              status={status}
-              logs={logs}
-              busyAction={busyAction}
-              lastPingMs={lastPingMs}
-              cdpStatus={cdpStatus}
-              uiSnapshot={uiSnapshot}
-              inspectCapturedAt={inspectCapturedAt}
-              debugBusy={debugBusy}
-              debugError={debugError}
-              networkContext={networkContext}
-              networkLoading={networkLoading}
-              networkError={networkError}
-              onPing={() => void runCtl('ping', 'Daemon Ping')}
-              onReloadConfig={() => void runCtl('reload', '重载配置')}
-              onRestartHost={() => void runCtl('restart-host', '重启 Host 服务')}
-              onRefreshLogs={() => void refreshLogs()}
-              onClearLogs={() => void clearLogs()}
-              onSetWebViewDebugging={(enabled) => void setWebViewDebugging(enabled)}
-              onSetRuntimeMode={(mode) => void setRuntimeMode(mode)}
-              onInspectUi={() => void inspectUi()}
-              onResetFrameMetrics={() => void resetFrameMetrics()}
-              onRefreshNetwork={() => void refreshNetworkContext()}
-            />
-          </Suspense>
+          <DiagnosticsTab
+            bridge={bridge}
+            config={config}
+            status={status}
+            logs={logs}
+            busyAction={busyAction}
+            lastPingMs={lastPingMs}
+            cdpStatus={cdpStatus}
+            uiSnapshot={uiSnapshot}
+            inspectCapturedAt={inspectCapturedAt}
+            debugBusy={debugBusy}
+            debugError={debugError}
+            networkContext={networkContext}
+            networkLoading={networkLoading}
+            networkError={networkError}
+            onPing={() => void runCtl('ping', 'Daemon Ping')}
+            onReloadConfig={() => void runCtl('reload', '重载配置')}
+            onRestartHost={() => void runCtl('restart-host', '重启 Host 服务')}
+            onRefreshLogs={() => void refreshLogs()}
+            onClearLogs={() => void clearLogs()}
+            onSetWebViewDebugging={(enabled) => void setWebViewDebugging(enabled)}
+            onSetRuntimeMode={(mode) => void setRuntimeMode(mode)}
+            onInspectUi={() => void inspectUi()}
+            onResetFrameMetrics={() => void resetFrameMetrics()}
+            onRefreshNetwork={() => void refreshNetworkContext()}
+          />
         </TabsContent>
       </Tabs>
     </AppShell>

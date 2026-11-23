@@ -81,4 +81,52 @@ class PluginAssetFetcherTest {
         assertEquals("text/plain", PluginAssetFetcher.mimeTypeFor("robots.txt"))
         assertEquals("application/xml", PluginAssetFetcher.mimeTypeFor("feed.xml"))
     }
+
+    @Test
+    fun `identifies root favicon requests for 204 short-circuit without affecting nested paths`() {
+        assertTrue(PluginAssetFetcher.isFaviconShortCircuitPath("favicon.ico"))
+        assertFalse(PluginAssetFetcher.isFaviconShortCircuitPath("web/favicon.ico"))
+        assertFalse(PluginAssetFetcher.isFaviconShortCircuitPath("assets/favicon.ico"))
+        assertFalse(PluginAssetFetcher.isFaviconShortCircuitPath("index.html"))
+    }
+
+    @Test
+    fun `WebViewErrorReportPolicy filters untrusted embed noise and synthetic 502 duplicates`() {
+        assertTrue(WebViewErrorReportPolicy.shouldForwardConsoleToDaemon(isUntrustedEmbed = false))
+        assertFalse(WebViewErrorReportPolicy.shouldForwardConsoleToDaemon(isUntrustedEmbed = true))
+
+        assertTrue(WebViewErrorReportPolicy.shouldForwardErrorToDaemon(isUntrustedEmbed = false, isMainFrame = true))
+        assertTrue(WebViewErrorReportPolicy.shouldForwardErrorToDaemon(isUntrustedEmbed = false, isMainFrame = false))
+        assertTrue(WebViewErrorReportPolicy.shouldForwardErrorToDaemon(isUntrustedEmbed = true, isMainFrame = true))
+        assertFalse(WebViewErrorReportPolicy.shouldForwardErrorToDaemon(isUntrustedEmbed = true, isMainFrame = false))
+
+        assertTrue(
+            WebViewErrorReportPolicy.isSyntheticLoopbackError(
+                statusCode = 502,
+                reasonPhrase = PluginAssetFetcher.SYNTHETIC_FETCH_FAILED_REASON,
+                responseHeaders = emptyMap(),
+            ),
+        )
+        assertTrue(
+            WebViewErrorReportPolicy.isSyntheticLoopbackError(
+                statusCode = 502,
+                reasonPhrase = "Bad Gateway",
+                responseHeaders = mapOf(PluginAssetFetcher.SYNTHETIC_ERROR_HEADER to "1"),
+            ),
+        )
+        assertFalse(
+            WebViewErrorReportPolicy.isSyntheticLoopbackError(
+                statusCode = 502,
+                reasonPhrase = "Bad Gateway",
+                responseHeaders = emptyMap(),
+            ),
+        )
+        assertFalse(
+            WebViewErrorReportPolicy.isSyntheticLoopbackError(
+                statusCode = 404,
+                reasonPhrase = "Not Found",
+                responseHeaders = null,
+            ),
+        )
+    }
 }

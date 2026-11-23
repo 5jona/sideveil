@@ -115,7 +115,11 @@ impl InotifyDirWatcher {
                 {
                     continue;
                 }
+                let web_dir = path.join("web");
                 live_dirs.insert(path);
+                if web_dir.is_dir() {
+                    live_dirs.insert(web_dir);
+                }
             }
         }
 

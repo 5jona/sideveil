@@ -51,7 +51,7 @@ class WebViewDormancyController(
         if (destroyed) return
         pageLoaded = true
         if (!foreground && !paused) {
-            schedulePause(settlePauseDelayMs)
+            schedulePause(maxOf(settlePauseDelayMs, hidePauseDelayMs))
         }
     }
 

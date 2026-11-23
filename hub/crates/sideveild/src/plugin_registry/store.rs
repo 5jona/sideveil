@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 use sideveil_protocol::config::{ScopeMode, SideVeilConfig};
 use sideveil_protocol::generated::protocol_constants::builtin_diagnostic as diag;
@@ -121,6 +121,7 @@ pub(super) fn build_descriptor(
         version: loaded.manifest.version.clone(),
         icon: loaded.manifest.icon.clone(),
         entry: loaded.manifest.entry.clone(),
+        asset_revision: loaded.asset_revision.clone(),
         builtin: loaded.builtin,
         enabled,
         priority,
@@ -154,6 +155,33 @@ pub(super) fn matches_activity(activities: &[String], foreground_activity: &str)
     })
 }
 
+/// Computes a fast deterministic hex fingerprint (FNV-1a 64-bit + byte length) for a plugin's
+/// entry file (e.g. `web/index.html`) so warm WebViews detect asset bundle rebuilds even when
+/// `manifest.json` itself is unchanged.
+pub(super) fn compute_asset_revision(plugin_root: &Path, entry: &str) -> Option<String> {
+    let trimmed = entry.trim().trim_start_matches('/');
+    if trimmed.is_empty() || trimmed.contains('\\') {
+        return None;
+    }
+    let mut clean_rel = PathBuf::new();
+    for comp in Path::new(trimmed).components() {
+        match comp {
+            Component::Normal(seg) => clean_rel.push(seg),
+            _ => return None,
+        }
+    }
+    let entry_path = plugin_root.join(clean_rel);
+    let bytes = fs::read(entry_path).ok()?;
+    const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut hash = FNV_OFFSET_BASIS;
+    for &b in &bytes {
+        hash ^= u64::from(b);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    Some(format!("{hash:016x}-{:x}", bytes.len()))
+}
+
 pub(super) fn scan_plugins_dir(
     plugins_dir: &Path,
     logs: &LogRing,
@@ -164,6 +192,7 @@ pub(super) fn scan_plugins_dir(
         LoadedPlugin {
             manifest: builtin_diag_manifest(),
             root_dir: None,
+            asset_revision: None,
             builtin: true,
         },
     );
@@ -196,11 +225,13 @@ pub(super) fn scan_plugins_dir(
                         logs.warn(format!("Skipped invalid plugin '{dir_name}': {err}"));
                         continue;
                     }
+                    let asset_revision = compute_asset_revision(&path, &manifest.entry);
                     discovered.insert(
                         manifest.id.clone(),
                         LoadedPlugin {
                             manifest,
                             root_dir: Some(path),
+                            asset_revision,
                             builtin: false,
                         },
                     );

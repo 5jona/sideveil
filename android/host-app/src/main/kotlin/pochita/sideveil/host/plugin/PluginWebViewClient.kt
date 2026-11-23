@@ -41,6 +41,37 @@ object WebViewDiagnosticsSanitizer {
 }
 
 /**
+ * Pure-Kotlin diagnostic reporting filter deciding which WebView console/network/HTTP/SSL events
+ * should be forwarded into `sideveild`'s core `LogRing` versus kept in local Android logcat.
+ */
+object WebViewErrorReportPolicy {
+    /** Suppresses third-party website JS console noise for untrusted web embeds. */
+    fun shouldForwardConsoleToDaemon(isUntrustedEmbed: Boolean): Boolean = !isUntrustedEmbed
+
+    /**
+     * Suppresses non-main-frame subresource errors for untrusted third-party web embeds while
+     * preserving all trusted plugin errors and unrecovered main-frame embed failures.
+     */
+    fun shouldForwardErrorToDaemon(
+        isUntrustedEmbed: Boolean,
+        isMainFrame: Boolean,
+    ): Boolean = !isUntrustedEmbed || isMainFrame
+
+    /** Returns `true` when an HTTP error response was synthesized by [PluginAssetFetcher] after already reporting a loopback error. */
+    fun isSyntheticLoopbackError(
+        statusCode: Int,
+        reasonPhrase: String?,
+        responseHeaders: Map<String, String>?,
+    ): Boolean {
+        val headerTagged =
+            responseHeaders?.entries?.any { (k, v) ->
+                k.equals(PluginAssetFetcher.SYNTHETIC_ERROR_HEADER, ignoreCase = true) && v == "1"
+            } == true
+        return headerTagged || (statusCode == 502 && reasonPhrase == PluginAssetFetcher.SYNTHETIC_FETCH_FAILED_REASON)
+    }
+}
+
+/**
  * Thread-safe cumulative WebView render-process crash counter shared across recovery cycles.
  */
 class WebViewCrashRegistry {
@@ -140,21 +171,25 @@ internal class PluginWebViewClient(
                 ?.toString()
                 .orEmpty()
                 .take(WebViewDiagnosticsSanitizer.MAX_DESCRIPTION_LEN)
-        Log.w(
-            TAG,
+        val shouldForward = WebViewErrorReportPolicy.shouldForwardErrorToDaemon(isUntrustedEmbed, request.isForMainFrame)
+        val logMsg =
             "WebView network error plugin=${descriptor.id} code=${error.errorCode} " +
-                "mainFrame=${request.isForMainFrame} url=$sanitizedUrl desc=$desc",
-        )
-        onWebViewError(
-            HostWebViewErrorPayload(
-                pluginId = descriptor.id,
-                kind = "network",
-                code = error.errorCode,
-                description = desc,
-                url = sanitizedUrl,
-                isMainFrame = request.isForMainFrame,
-            ),
-        )
+                "mainFrame=${request.isForMainFrame} url=$sanitizedUrl desc=$desc"
+        if (shouldForward) {
+            Log.w(TAG, logMsg)
+            onWebViewError(
+                HostWebViewErrorPayload(
+                    pluginId = descriptor.id,
+                    kind = "network",
+                    code = error.errorCode,
+                    description = desc,
+                    url = sanitizedUrl,
+                    isMainFrame = request.isForMainFrame,
+                ),
+            )
+        } else {
+            Log.d(TAG, logMsg)
+        }
     }
 
     override fun onReceivedHttpError(
@@ -166,21 +201,34 @@ internal class PluginWebViewClient(
         val descriptor = descriptorProvider()
         val sanitizedUrl = WebViewDiagnosticsSanitizer.sanitizeUrl(request.url?.toString())
         val desc = errorResponse.reasonPhrase.orEmpty().take(WebViewDiagnosticsSanitizer.MAX_DESCRIPTION_LEN)
-        Log.w(
-            TAG,
+        if (WebViewErrorReportPolicy.isSyntheticLoopbackError(
+                statusCode = errorResponse.statusCode,
+                reasonPhrase = errorResponse.reasonPhrase,
+                responseHeaders = errorResponse.responseHeaders,
+            )
+        ) {
+            Log.d(TAG, "Suppressing duplicate synthetic HTTP ${errorResponse.statusCode} for plugin=${descriptor.id} url=$sanitizedUrl")
+            return
+        }
+        val shouldForward = WebViewErrorReportPolicy.shouldForwardErrorToDaemon(isUntrustedEmbed, request.isForMainFrame)
+        val logMsg =
             "WebView HTTP error plugin=${descriptor.id} status=${errorResponse.statusCode} " +
-                "mainFrame=${request.isForMainFrame} url=$sanitizedUrl reason=$desc",
-        )
-        onWebViewError(
-            HostWebViewErrorPayload(
-                pluginId = descriptor.id,
-                kind = "http",
-                code = errorResponse.statusCode,
-                description = desc,
-                url = sanitizedUrl,
-                isMainFrame = request.isForMainFrame,
-            ),
-        )
+                "mainFrame=${request.isForMainFrame} url=$sanitizedUrl reason=$desc"
+        if (shouldForward) {
+            Log.w(TAG, logMsg)
+            onWebViewError(
+                HostWebViewErrorPayload(
+                    pluginId = descriptor.id,
+                    kind = "http",
+                    code = errorResponse.statusCode,
+                    description = desc,
+                    url = sanitizedUrl,
+                    isMainFrame = request.isForMainFrame,
+                ),
+            )
+        } else {
+            Log.d(TAG, logMsg)
+        }
     }
 
     override fun onReceivedSslError(
@@ -195,16 +243,18 @@ internal class PluginWebViewClient(
         val desc = "SSL primaryError=${error.primaryError}"
         val isMain = view.url == null || error.url == view.url
         Log.w(TAG, "WebView SSL error plugin=${descriptor.id} $desc mainFrame=$isMain url=$sanitizedUrl")
-        onWebViewError(
-            HostWebViewErrorPayload(
-                pluginId = descriptor.id,
-                kind = "ssl",
-                code = error.primaryError,
-                description = desc,
-                url = sanitizedUrl,
-                isMainFrame = isMain,
-            ),
-        )
+        if (WebViewErrorReportPolicy.shouldForwardErrorToDaemon(isUntrustedEmbed, isMain)) {
+            onWebViewError(
+                HostWebViewErrorPayload(
+                    pluginId = descriptor.id,
+                    kind = "ssl",
+                    code = error.primaryError,
+                    description = desc,
+                    url = sanitizedUrl,
+                    isMainFrame = isMain,
+                ),
+            )
+        }
     }
 
     override fun onRenderProcessGone(

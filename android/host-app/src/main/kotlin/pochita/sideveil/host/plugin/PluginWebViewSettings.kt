@@ -121,6 +121,8 @@ object PluginWebViewSettings {
         next: PluginDescriptor,
     ): Boolean =
         prev.entry != next.entry ||
+            prev.version != next.version ||
+            prev.assetRevision != next.assetRevision ||
             prev.devServerUrl != next.devServerUrl ||
             EmbedSessionController.didEmbedRoutingChange(prev.embed, next.embed) ||
             prev.network != next.network ||

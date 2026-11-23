@@ -30,6 +30,7 @@ use crate::log_ring::LogRing;
 pub(super) struct LoadedPlugin {
     pub(super) manifest: PluginManifest,
     pub(super) root_dir: Option<PathBuf>,
+    pub(super) asset_revision: Option<String>,
     pub(super) builtin: bool,
 }
 
@@ -82,14 +83,16 @@ impl PluginRegistry {
         let count = discovered.len();
         let changed = {
             let mut guard = self.inner.write().unwrap_or_else(PoisonError::into_inner);
-            let old_ids: Vec<(&String, &PluginManifest)> = guard
+            let old_state: Vec<(&String, &PluginManifest, &Option<String>)> = guard
                 .plugins
                 .iter()
-                .map(|(k, v)| (k, &v.manifest))
+                .map(|(k, v)| (k, &v.manifest, &v.asset_revision))
                 .collect();
-            let new_ids: Vec<(&String, &PluginManifest)> =
-                discovered.iter().map(|(k, v)| (k, &v.manifest)).collect();
-            let diff = old_ids != new_ids;
+            let new_state: Vec<(&String, &PluginManifest, &Option<String>)> = discovered
+                .iter()
+                .map(|(k, v)| (k, &v.manifest, &v.asset_revision))
+                .collect();
+            let diff = old_state != new_state;
             guard.plugins = discovered;
             diff
         };

@@ -1,4 +1,5 @@
 import type { LogEntry } from '@pochita/ui';
+import type { DaemonStatus } from '../../shared/types.ts';
 
 export function parseDaemonLogLines(lines: readonly string[]): LogEntry[] {
   return lines.map((line, idx) => {
@@ -17,4 +18,25 @@ export function parseDaemonLogLines(lines: readonly string[]): LogEntry[] {
       message: line.length > 13 ? line.slice(13).trim() : line,
     };
   });
+}
+
+export function parseDaemonLogsStdout(stdout: string): LogEntry[] | null {
+  const trimmed = stdout.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = JSON.parse(trimmed) as { result?: { lines?: string[] } };
+    return Array.isArray(parsed.result?.lines) ? parseDaemonLogLines(parsed.result.lines) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function parseDaemonStatusStdout(stdout: string): DaemonStatus | null {
+  const trimmed = stdout.trim();
+  if (!trimmed) return null;
+  try {
+    return JSON.parse(trimmed) as DaemonStatus;
+  } catch {
+    return null;
+  }
 }

@@ -35,6 +35,8 @@ export function OverviewEdgeTab({ config, status, onChange }: OverviewEdgeTabPro
   };
 
   const hostState = status?.hostConnected ? 'WebSocket 在线' : '等待 Host 连接';
+  const gestureOk = Boolean(status?.gestureMonitorActive);
+  const bothOk = Boolean(status?.gestureMonitorActive && status?.taskListenerActive);
 
   return (
     <div className="space-y-4">
@@ -61,9 +63,9 @@ export function OverviewEdgeTab({ config, status, onChange }: OverviewEdgeTabPro
         />
         <MetricTile
           label="边缘手势与任务监听"
-          value={status?.gestureMonitorActive ? '运行中' : '异常'}
+          value={gestureOk ? '运行中' : '未就绪'}
           statusLabel={status?.taskListenerActive ? 'TaskStack 就绪' : '轮询兜底'}
-          statusVariant={status?.gestureMonitorActive ? 'success' : 'danger'}
+          statusVariant={!gestureOk ? 'danger' : bothOk ? 'success' : 'warning'}
           hint={
             status
               ? `${status.screenWidthPx}×${status.screenHeightPx} (${status.density}x)`

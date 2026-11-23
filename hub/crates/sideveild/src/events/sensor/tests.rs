@@ -82,3 +82,42 @@ async fn status_bar_pull_down_closes_panel_only_when_open() {
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[tokio::test]
+async fn sensor_hello_updates_runtime_flags_and_logs_gesture_and_task_listener() {
+    let (dir, state) = make_test_state("sensor-hello");
+    state.on_sensor_message(SensorToHub::Hello {
+        pid: 4242,
+        version: "0.1.0".to_owned(),
+        display: sideveil_protocol::sensor::DisplayGeometry {
+            width_px: 1440,
+            height_px: 3168,
+            density: 3.5,
+        },
+        task_listener_active: true,
+        gesture_monitor_active: true,
+        overlay_permission_granted: true,
+        foreground_package: "com.example.app".to_owned(),
+        foreground_activity: ".MainActivity".to_owned(),
+    });
+
+    {
+        let rt = state.runtime.read().unwrap_or_else(PoisonError::into_inner);
+        assert_eq!(rt.sensor_pid, Some(4242));
+        assert!(rt.gesture_monitor_active);
+        assert!(rt.task_listener_active);
+        assert!(rt.overlay_permission_granted);
+    }
+
+    let lines = state.logs().recent();
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("Sensor hello pid=4242")
+                && line.contains("gesture=true")
+                && line.contains("taskListener=true")),
+        "expected sensor hello log with gesture & taskListener flags, got: {lines:?}"
+    );
+
+    let _ = fs::remove_dir_all(&dir);
+}

@@ -22,4 +22,18 @@ const baseConfig = createPochitaViteConfig({
 
 export default mergeConfig(baseConfig, {
   root: path.resolve(__dirname, 'control'),
+  build: {
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [
+            {
+              name: 'vendor',
+              test: /node_modules[\\/](react|react-dom|scheduler|lucide-react)[\\/]/,
+            },
+          ],
+        },
+      },
+    },
+  },
 });

@@ -13,7 +13,7 @@ use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 
 pub(crate) use self::http::{cache_headers_for, mime_type_for};
-use self::http::{parse_http_headers, write_error};
+use self::http::{parse_http_headers, write_error, write_no_content};
 pub use self::path::{
     ResolveAssetError, is_spa_route_path, resolve_asset_file, resolve_asset_file_checked,
 };
@@ -98,21 +98,35 @@ pub async fn handle_http_asset(stream: TcpStream, state: Arc<HubState>) {
         return;
     }
 
-    let (file_path, effective_rel) = match resolve_asset_file_checked(&plugin_root, raw_rel).await {
-        Ok(path) => (path, raw_rel.to_owned()),
-        Err(ResolveAssetError::Forbidden(_)) => {
-            let _ = write_error(&mut write_half, 403, "Forbidden").await;
-            return;
-        }
-        Err(ResolveAssetError::NotFound) => {
-            if is_spa_route_path(raw_rel)
-                && let Some(spa_entry) = state.plugin_registry().plugin_spa_entry(plugin_id)
-                && let Ok(fallback) = resolve_asset_file(&plugin_root, &spa_entry).await
-            {
-                (fallback, spa_entry)
-            } else {
-                let _ = write_error(&mut write_half, 404, "Not Found").await;
+    let (file_path, effective_rel) = if raw_rel == "favicon.ico" {
+        match resolve_asset_file_checked(&plugin_root, "web/favicon.ico").await {
+            Ok(path) => (path, "web/favicon.ico".to_owned()),
+            Err(ResolveAssetError::NotFound) => {
+                let _ = write_no_content(&mut write_half).await;
                 return;
+            }
+            Err(ResolveAssetError::Forbidden(_)) => {
+                let _ = write_error(&mut write_half, 403, "Forbidden").await;
+                return;
+            }
+        }
+    } else {
+        match resolve_asset_file_checked(&plugin_root, raw_rel).await {
+            Ok(path) => (path, raw_rel.to_owned()),
+            Err(ResolveAssetError::Forbidden(_)) => {
+                let _ = write_error(&mut write_half, 403, "Forbidden").await;
+                return;
+            }
+            Err(ResolveAssetError::NotFound) => {
+                if is_spa_route_path(raw_rel)
+                    && let Some(spa_entry) = state.plugin_registry().plugin_spa_entry(plugin_id)
+                    && let Ok(fallback) = resolve_asset_file(&plugin_root, &spa_entry).await
+                {
+                    (fallback, spa_entry)
+                } else {
+                    let _ = write_error(&mut write_half, 404, "Not Found").await;
+                    return;
+                }
             }
         }
     };
