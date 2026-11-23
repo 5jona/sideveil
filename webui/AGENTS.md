@@ -1,6 +1,6 @@
 # SideVeil WebUI & Bundled Plugin Frontend Guidelines
 
-Applies to `webui/` and bundled plugin frontends compiled into `examples/*/web/`. Also follow the shared design system invariants in `pochita-webui-kit/AGENTS.md`.
+Applies to `webui/` and bundled plugin frontends compiled into `examples/*/web/`. Also follow the shared design system invariants in `gojona-kit/AGENTS.md`.
 
 - **No Hand-Coded Bundles**: Never write standalone inline HTML/CSS/JS files for built-in or bundled plugins. Author all plugin frontends as React + TypeScript + Tailwind CSS v4 modules inside `webui/src/` with Vite configs using `createPochitaViteConfig({ surface: 'native-glass', ... })`, and compile outputs into `examples/<plugin>/web/`.
 - **UI & SDK Discipline**: Wrap plugin views in `<AppShell variant="drawer">` with `<SideVeilPluginProvider>` + `<ThemeProvider>`. Reuse `webui/src/shared/useSyncedPluginTheme.ts` so every plugin stays synchronized with daemon theme presets, light/dark color modes, and Material You dynamic palette tokens.

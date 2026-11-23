@@ -45,7 +45,7 @@ SideVeil separates privileges, hidden Android APIs, overlay window rendering, an
 | --- | --- | --- |
 | `contracts/*.contract.json` | `@gojona/contracts-gen` (`mise run contracts:check`) | Canonical wire enums, RPC method/event/error constants, config bounds, and theme/HUD contracts. |
 | `contracts/schemas/*.schema.json` | JSON Schema 2020-12 | Machine-validated config, status, event, and theme/HUD schemas (`contracts/fixtures/` golden tests). |
-| Generated outputs (do not hand-edit) | `mise run contracts:gen` | Rust `hub/crates/sideveil-protocol/src/generated/`, Kotlin `android/protocol/.../generated/`, and in-repo TS `contracts/generated/ts/` (synced upstream to `pochita-webui-kit` packages `@gojona/bridge` + `@gojona/sideveil-sdk` via `scripts/sync-kit-contracts.sh`). |
+| Generated outputs (do not hand-edit) | `mise run contracts:gen` | Rust `hub/crates/sideveil-protocol/src/generated/`, Kotlin `android/protocol/.../generated/`, and in-repo TS `contracts/generated/ts/` (synced upstream to `gojona-kit` packages `@gojona/bridge` + `@gojona/sideveil-sdk` via `scripts/sync-kit-contracts.sh`). |
 
 ### Rust Workspace & Example Daemons
 

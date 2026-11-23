@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Copy generated SideVeil TypeScript contract files into a pochita-webui-kit checkout.
+# Copy generated SideVeil TypeScript contract files into a gojona-kit checkout.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SRC_DIR="${REPO_ROOT}/contracts/generated/ts"
 
-RAW_KIT_ROOT="${1:-${POCHITA_KIT_ROOT:-${REPO_ROOT}/../../../pochita-webui-kit}}"
+RAW_KIT_ROOT="${1:-${POCHITA_KIT_ROOT:-${REPO_ROOT}/../../../gojona-kit}}"
 if [ ! -d "${RAW_KIT_ROOT}" ]; then
-    echo "[!] Error: pochita-webui-kit directory not found: ${RAW_KIT_ROOT}" >&2
-    echo "Usage: bash scripts/sync-kit-contracts.sh [path/to/pochita-webui-kit]" >&2
+    echo "[!] Error: gojona-kit directory not found: ${RAW_KIT_ROOT}" >&2
+    echo "Usage: bash scripts/sync-kit-contracts.sh [path/to/gojona-kit]" >&2
     exit 1
 fi
 KIT_ROOT="$(cd "${RAW_KIT_ROOT}" && pwd)"

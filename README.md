@@ -24,7 +24,7 @@ For the full repository navigation map, runtime data flows, ABI-pinned FQCNs, an
    - Maintains a click-through `TYPE_APPLICATION_OVERLAY` edge indicator capsule (idle auto-dim/tuck, fullscreen double-swipe pulse, live reposition preview, live status badges), zero-reflow origin-anchored spring panel (`drawer`/`peek`/`wide` + `PinnedContainerWindow` with click-through unlock chip), hardware cross-window blur (`BlurMaskDrawable` + dynamic `Oklch`-tinted AGSL `GlassBackdropDrawable`), IME/cutout/tablet `WindowInsets` avoidance, stepped `VibrationEffect.Composition` haptics, Android 16+ `OnBackAnimationCallback` predictive back preview, synchronized `46dp` frosted-glass **Plugin Rail** (`PluginRailWindow` with SVG icon loading, blind scrubbing, and quick menu), and zero-WebView **`NativeHudWindow`** (`vello_cpu` NEON Bitmap + HWUI `tnum` text).
    - Isolates each plugin in its own warm LRU-cached WebView sandbox under `https://<pluginId>.plugins.sideveil.local/` with `WebMessagePort`, COOP/COEP WebGPU support, loopback Dev Mode proxying, `PluginWebChromeClient` console forwarding, WebGPU VRAM-aware LRU eviction, and `onRenderProcessGone` crash self-healing.
 4. **KernelSU WebUI Control Plane, Built-in Diagnostic Plugin (`webui/`), & Reference Examples (`examples/`)**
-   - Built with published [`@gojona/*`](https://github.com/5jona/pochita-webui-kit) npm packages (`@gojona/ui`, `@gojona/bridge`, `@gojona/sideveil-sdk`, `@gojona/config`, and `@gojona/contracts-gen`).
+   - Built with published [`@gojona/*`](https://github.com/5jona/gojona-kit) npm packages (`@gojona/ui`, `@gojona/bridge`, `@gojona/sideveil-sdk`, `@gojona/config`, and `@gojona/contracts-gen`).
    - Control Plane (`webui/control` -> `webroot/`) edits `/data/system/sideveil/config.json` atomically (`inotify` hot-reload), manages registered plugins (enable/disable, priority, scope overrides, loopback Dev Mode, Host memory & ACL audit drawer, quick switch), and controls the live sidebar via `/data/adb/modules/sideveil/bin/sideveil-ctl`.
    - Built-in Diagnostic Plugin (`sideveil.diagnostic`, `webui/panel` -> `assets/panel/`) adheres to the standard `@gojona/sideveil-sdk` plugin contract with live dynamic `Oklch` CSS token sync.
    - Dual reference example plugins live in `examples/` (`vello-vector-scope` for COOP/COEP WebGPU rendering with live glass/transparent toggling and `native-perf-hud` for zero-WebView `uds-native` + `vello_cpu` NEON HUD rendering), with frontends compiled from `webui/src/plugins/`.
@@ -91,7 +91,7 @@ bash build.sh --mode debug
 
 # Regenerate cross-language contract artifacts and optionally sync TS outputs upstream
 mise run contracts:gen
-bash scripts/sync-kit-contracts.sh [path/to/pochita-webui-kit]
+bash scripts/sync-kit-contracts.sh [path/to/gojona-kit]
 
 # Build + live-reload onto Android device via Strata container SSH (or on-device --local)
 bash reload.sh --ssh <host|user@host>
