@@ -1,6 +1,9 @@
 package pochita.sideveil.host
 
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.res.Configuration
 import android.os.Handler
 import android.os.IBinder
@@ -40,6 +43,21 @@ class HostService : LifecycleService() {
     private lateinit var overlayCoordinator: HostOverlayCoordinator
     private lateinit var serviceBridge: HostServiceBridge
     private lateinit var eventDispatcher: HostEventDispatcher
+    private var systemDialogsReceiverRegistered = false
+    private val systemDialogsReceiver =
+        object : BroadcastReceiver() {
+            override fun onReceive(
+                context: Context?,
+                intent: Intent?,
+            ) {
+                @Suppress("DEPRECATION")
+                if (intent?.action != Intent.ACTION_CLOSE_SYSTEM_DIALOGS) return
+                val reason = intent.getStringExtra(SYSTEM_DIALOG_REASON_KEY)
+                if (reason in DISMISS_SYSTEM_DIALOG_REASONS && ::serviceBridge.isInitialized) {
+                    serviceBridge.onSystemDialogCloseRequested()
+                }
+            }
+        }
 
     override fun onCreate() {
         super.onCreate()
@@ -48,6 +66,7 @@ class HostService : LifecycleService() {
         initializeWindows()
         initializeCoordinators()
         attachWarmWindows()
+        registerSystemDialogsReceiver()
         syncEndpointFromDisk()
         Log.i(TAG, "HostService created (pid=${Process.myPid()}, uid=${Process.myUid()})")
     }
@@ -77,6 +96,7 @@ class HostService : LifecycleService() {
     }
 
     override fun onDestroy() {
+        unregisterSystemDialogsReceiver()
         frameMetricsTracker.destroy()
         dynamicThemeExtractor.stop()
         daemonClient.close()
@@ -247,6 +267,21 @@ class HostService : LifecycleService() {
             )
         }
 
+    @Suppress("DEPRECATION")
+    private fun registerSystemDialogsReceiver() {
+        if (systemDialogsReceiverRegistered) return
+        runCatching {
+            registerReceiver(systemDialogsReceiver, IntentFilter(Intent.ACTION_CLOSE_SYSTEM_DIALOGS), RECEIVER_EXPORTED)
+            systemDialogsReceiverRegistered = true
+        }.onFailure { Log.w(TAG, "Failed to register ACTION_CLOSE_SYSTEM_DIALOGS receiver", it) }
+    }
+
+    private fun unregisterSystemDialogsReceiver() {
+        if (!systemDialogsReceiverRegistered) return
+        systemDialogsReceiverRegistered = false
+        runCatching { unregisterReceiver(systemDialogsReceiver) }
+    }
+
     private fun syncEndpointFromDisk() {
         HostServiceSupport.readEndpointFromDisk(this)?.let { endpoint ->
             daemonClient.updateEndpoint(endpoint.port, endpoint.token)
@@ -255,5 +290,8 @@ class HostService : LifecycleService() {
 
     companion object {
         private const val TAG = "SideVeilHostService"
+        private const val SYSTEM_DIALOG_REASON_KEY = "reason"
+        private val DISMISS_SYSTEM_DIALOG_REASONS =
+            setOf("notification_shade", "status_bar", "homekey", "recentapps")
     }
 }

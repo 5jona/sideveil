@@ -102,4 +102,14 @@ class SensorProtocolTest {
         val decoded = SideVeilWireJson.decodeFromString(SensorToHub.serializer(), encoded)
         assertEquals(msg, decoded)
     }
+
+    @Test
+    fun `StatusBarPullDown roundtrips with exact camelCase type tag`() {
+        val msg: SensorToHub = SensorToHub.StatusBarPullDown
+        val encoded = SideVeilWireJson.encodeToString(SensorToHub.serializer(), msg)
+        assertEquals("""{"type":"statusBarPullDown"}""", encoded)
+
+        val decoded = SideVeilWireJson.decodeFromString(SensorToHub.serializer(), encoded)
+        assertEquals(SensorToHub.StatusBarPullDown, decoded)
+    }
 }

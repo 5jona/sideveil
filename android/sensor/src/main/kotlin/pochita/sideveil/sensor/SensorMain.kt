@@ -187,6 +187,10 @@ object SensorMain {
                     override fun onGestureStatsUpdated(stats: DebugGestureStats) {
                         clientProvider().send(SensorToHub.GestureStatsUpdated(stats))
                     }
+
+                    override fun onStatusBarPullDown() {
+                        clientProvider().send(SensorToHub.StatusBarPullDown)
+                    }
                 },
         )
 

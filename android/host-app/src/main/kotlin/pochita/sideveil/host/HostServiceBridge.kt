@@ -102,6 +102,12 @@ internal class HostServiceBridge(
         pluginManager.onPanelStateChanged(state)
     }
 
+    fun onSystemDialogCloseRequested() {
+        if (panelWindow.currentState == PanelState.OPEN) {
+            panelWindow.close()
+        }
+    }
+
     fun onDaemonConnected() {
         daemonClient.sendEvent(
             SideVeilEvents.HOST_HELLO,

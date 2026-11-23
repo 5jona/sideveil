@@ -5,6 +5,7 @@ import pochita.sideveil.protocol.EdgeConfig
 import pochita.sideveil.protocol.EdgeSide
 import pochita.sideveil.protocol.PanelState
 import pochita.sideveil.protocol.SideVeilConfig
+import kotlin.math.max
 import kotlin.math.min
 
 /**
@@ -26,6 +27,22 @@ object EdgeGestureMath {
     const val FLING_OPEN_VELOCITY_PX_PER_SEC = 450f
     const val FLING_CANCEL_VELOCITY_PX_PER_SEC = 380f
     const val REVERSE_CANCEL_EDGE_ZONE_PX = 240f
+    const val STATUS_BAR_TRIGGER_ZONE_DP = 44f
+    const val STATUS_BAR_TRIGGER_ZONE_MIN_PX = 120f
+    const val STATUS_BAR_TRIGGER_ZONE_MAX_HEIGHT_FRACTION = 0.10f
+    const val STATUS_BAR_PULL_SLOP_DP = 12f
+    const val STATUS_BAR_PULL_SLOPE_RATIO = 1.2f
+
+    fun statusBarTriggerZonePx(geometry: DisplayGeometry): Float {
+        val preferredPx = max(STATUS_BAR_TRIGGER_ZONE_DP * geometry.density, STATUS_BAR_TRIGGER_ZONE_MIN_PX)
+        val maxFractionPx = geometry.heightPx.coerceAtLeast(0) * STATUS_BAR_TRIGGER_ZONE_MAX_HEIGHT_FRACTION
+        return min(preferredPx, maxFractionPx)
+    }
+
+    fun isInsideStatusBarTriggerZone(
+        rawY: Float,
+        geometry: DisplayGeometry,
+    ): Boolean = rawY in 0f..statusBarTriggerZonePx(geometry)
 
     fun inwardDelta(
         side: EdgeSide,

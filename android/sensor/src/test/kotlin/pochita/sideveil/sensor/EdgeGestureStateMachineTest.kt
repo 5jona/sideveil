@@ -53,6 +53,7 @@ class EdgeGestureStateMachineTest {
         val repositionStarts = mutableListOf<Pair<EdgeSide, Int>>()
         val repositionMoves = mutableListOf<Pair<EdgeSide, Int>>()
         val repositionEnds = mutableListOf<Triple<EdgeSide, Int, Boolean>>()
+        var statusBarPullDownCount = 0
 
         override fun onPilferPointers() {
             pilferCount++
@@ -107,6 +108,10 @@ class EdgeGestureStateMachineTest {
             committed: Boolean,
         ) {
             repositionEnds += Triple(side, topPercent, committed)
+        }
+
+        fun onStatusBarPullDown() {
+            statusBarPullDownCount++
         }
     }
 
@@ -257,5 +262,81 @@ class EdgeGestureStateMachineTest {
         val leftConfig = rightConfig.copy(edge = rightConfig.edge.copy(side = EdgeSide.LEFT))
         sm.onDown(0, 10f, 700f, 100L, env(config = leftConfig))
         assertTrue(sm.isTracking)
+    }
+
+    @Test
+    fun `status bar pull-down when panel is open triggers once without pilfering`() {
+        val cb = RecordingCallbacks()
+        val sm = EdgeGestureStateMachine(cb, cb::onStatusBarPullDown)
+        val openEnv = env(panelState = PanelState.OPEN)
+
+        sm.onDown(0, 500f, 40f, 100L, openEnv)
+        assertTrue(sm.isTracking)
+        assertFalse(sm.isPilfered)
+        assertEquals(0, cb.pilferCount)
+
+        // Small downward move below 12dp * 2 = 24px threshold does not trigger yet.
+        sm.onMove(0, 502f, 55f, 110L, 110L, openEnv)
+        assertEquals(0, cb.statusBarPullDownCount)
+        assertEquals(0, cb.pilferCount)
+
+        // Downward pull >= 24px with dy > abs(dx) * 1.2 triggers once and returns to IDLE.
+        sm.onMove(0, 505f, 80f, 120L, 120L, openEnv)
+        assertEquals(1, cb.statusBarPullDownCount)
+        assertEquals(0, cb.pilferCount)
+        assertFalse(sm.isTracking)
+        assertFalse(sm.isPilfered)
+
+        // Subsequent moves in the same gesture do not re-trigger.
+        sm.onMove(0, 505f, 200f, 130L, 130L, openEnv)
+        sm.onUpOrCancel(505f, 140L, canceled = false, env = openEnv)
+        assertEquals(1, cb.statusBarPullDownCount)
+        assertEquals(0, cb.pilferCount)
+    }
+
+    @Test
+    fun `mid-screen downward swipe when panel is open does not trigger status bar pull-down`() {
+        val cb = RecordingCallbacks()
+        val sm = EdgeGestureStateMachine(cb, cb::onStatusBarPullDown)
+        val openEnv = env(panelState = PanelState.OPEN)
+
+        sm.onDown(0, 500f, 700f, 100L, openEnv)
+        assertFalse(sm.isTracking)
+        sm.onMove(0, 500f, 820f, 120L, 120L, openEnv)
+        sm.onUpOrCancel(500f, 140L, canceled = false, env = openEnv)
+
+        assertEquals(0, cb.statusBarPullDownCount)
+        assertEquals(0, cb.pilferCount)
+    }
+
+    @Test
+    fun `top status bar pull-down when panel is closed does not trigger`() {
+        val cb = RecordingCallbacks()
+        val sm = EdgeGestureStateMachine(cb, cb::onStatusBarPullDown)
+        val closedEnv = env(panelState = PanelState.CLOSED)
+
+        sm.onDown(0, 500f, 40f, 100L, closedEnv)
+        assertFalse(sm.isTracking)
+        sm.onMove(0, 500f, 120f, 120L, 120L, closedEnv)
+        sm.onUpOrCancel(500f, 140L, canceled = false, env = closedEnv)
+
+        assertEquals(0, cb.statusBarPullDownCount)
+        assertEquals(0, cb.pilferCount)
+    }
+
+    @Test
+    fun `horizontal swipe in status bar zone does not trigger status bar pull-down`() {
+        val cb = RecordingCallbacks()
+        val sm = EdgeGestureStateMachine(cb, cb::onStatusBarPullDown)
+        val openEnv = env(panelState = PanelState.OPEN)
+
+        sm.onDown(0, 300f, 40f, 100L, openEnv)
+        assertTrue(sm.isTracking)
+        sm.onMove(0, 460f, 70f, 120L, 120L, openEnv)
+        sm.onUpOrCancel(460f, 140L, canceled = false, env = openEnv)
+
+        assertEquals(0, cb.statusBarPullDownCount)
+        assertEquals(0, cb.pilferCount)
+        assertFalse(sm.isTracking)
     }
 }

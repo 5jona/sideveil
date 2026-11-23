@@ -169,6 +169,10 @@ sealed interface SensorToHub {
     ) : SensorToHub
 
     @Serializable
+    @SerialName("statusBarPullDown")
+    data object StatusBarPullDown : SensorToHub
+
+    @Serializable
     @SerialName("pong")
     data class Pong(
         val seq: Long,

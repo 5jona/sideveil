@@ -139,6 +139,7 @@ class EdgeGestureMonitor(
                     }
                 }
             },
+            onStatusBarPullDown = { listener.onStatusBarPullDown() },
         )
 
     fun start(initialConfig: SideVeilConfig) {

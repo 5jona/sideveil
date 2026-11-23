@@ -86,7 +86,9 @@ pub enum SensorToHub {
         activity_name: String,
     },
     #[serde(rename_all = "camelCase")]
-    DisplayChanged { display: DisplayGeometry },
+    DisplayChanged {
+        display: DisplayGeometry,
+    },
     #[serde(rename_all = "camelCase")]
     PermissionsStatus {
         installed: bool,
@@ -114,11 +116,19 @@ pub enum SensorToHub {
         canceled: bool,
     },
     #[serde(rename_all = "camelCase")]
-    GestureFullscreenHint { side: EdgeSide },
+    GestureFullscreenHint {
+        side: EdgeSide,
+    },
     #[serde(rename_all = "camelCase")]
-    EdgeRepositionStart { side: EdgeSide, top_percent: i32 },
+    EdgeRepositionStart {
+        side: EdgeSide,
+        top_percent: i32,
+    },
     #[serde(rename_all = "camelCase")]
-    EdgeRepositionMove { side: EdgeSide, top_percent: i32 },
+    EdgeRepositionMove {
+        side: EdgeSide,
+        top_percent: i32,
+    },
     #[serde(rename_all = "camelCase")]
     EdgeRepositionEnd {
         side: EdgeSide,
@@ -126,11 +136,18 @@ pub enum SensorToHub {
         committed: bool,
     },
     #[serde(rename_all = "camelCase")]
-    NetworkContextChanged { context: NetworkContextSnapshot },
+    NetworkContextChanged {
+        context: NetworkContextSnapshot,
+    },
     #[serde(rename_all = "camelCase")]
-    GestureStatsUpdated { stats: DebugGestureStats },
+    GestureStatsUpdated {
+        stats: DebugGestureStats,
+    },
+    StatusBarPullDown,
     #[serde(rename_all = "camelCase")]
-    Pong { seq: u64 },
+    Pong {
+        seq: u64,
+    },
 }
 
 /// Messages pushed from `sideveild` to the UID 1000 Kotlin `:sensor` process.
@@ -229,5 +246,15 @@ mod tests {
         assert!(encoded.contains(r#""lastRejectReason":"vertical_scroll""#));
         let decoded: SensorToHub = serde_json::from_str(&encoded).expect("decode gesture stats");
         assert_eq!(decoded, SensorToHub::GestureStatsUpdated { stats });
+    }
+
+    #[test]
+    fn status_bar_pull_down_roundtrips_camel_case() {
+        let msg = SensorToHub::StatusBarPullDown;
+        let encoded = serde_json::to_string(&msg).expect("encode StatusBarPullDown");
+        assert_eq!(encoded, r#"{"type":"statusBarPullDown"}"#);
+        let decoded: SensorToHub =
+            serde_json::from_str(&encoded).expect("decode StatusBarPullDown");
+        assert_eq!(decoded, SensorToHub::StatusBarPullDown);
     }
 }

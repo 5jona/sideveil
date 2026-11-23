@@ -14,10 +14,12 @@ import kotlin.math.hypot
  */
 class EdgeGestureStateMachine(
     private val callbacks: EdgeGestureCallbacks,
+    private val onStatusBarPullDown: () -> Unit = {},
 ) {
     private val repositionTracker = EdgeRepositionTracker()
 
     private var tracking = false
+    private var trackingStatusBarPullDown = false
     private var pilfered = false
     private var activePointerId = INVALID_POINTER_ID
     private var activeEdge: EdgeSide = EdgeSide.RIGHT
@@ -33,7 +35,7 @@ class EdgeGestureStateMachine(
     private var lastFullscreenHintMs = Long.MIN_VALUE
 
     val isTracking: Boolean
-        get() = tracking
+        get() = tracking || trackingStatusBarPullDown
 
     val isPilfered: Boolean
         get() = pilfered
@@ -52,7 +54,18 @@ class EdgeGestureStateMachine(
         env: EdgeGestureEnv,
     ) {
         reset(notifyAbortIfPilfered = true)
-        if (!env.scopeActive || env.panelState == PanelState.OPEN) {
+        if (env.panelState == PanelState.OPEN) {
+            if (EdgeGestureMath.isInsideStatusBarTriggerZone(rawY, env.geometry)) {
+                trackingStatusBarPullDown = true
+                activePointerId = pointerId
+                downX = rawX
+                downY = rawY
+                lastX = rawX
+                lastY = rawY
+            }
+            return
+        }
+        if (!env.scopeActive) {
             return
         }
         if (!EdgeGestureMath.isInsideHotzone(rawX, rawY, env.config.edge, env.geometry)) {
@@ -114,6 +127,10 @@ class EdgeGestureStateMachine(
         uptimeMs: Long,
         env: EdgeGestureEnv,
     ) {
+        if (trackingStatusBarPullDown) {
+            handleStatusBarPullMove(pointerId, rawX, rawY, env)
+            return
+        }
         if (!tracking) return
         if (pointerId != activePointerId) {
             reset(notifyAbortIfPilfered = true)
@@ -167,7 +184,7 @@ class EdgeGestureStateMachine(
         eventTimeMs: Long,
         env: EdgeGestureEnv,
     ) {
-        if (tracking && liftedPointerId == activePointerId) {
+        if (isTracking && liftedPointerId == activePointerId) {
             onUpOrCancel(rawX, eventTimeMs, canceled = false, env = env)
         }
     }
@@ -179,6 +196,10 @@ class EdgeGestureStateMachine(
         env: EdgeGestureEnv,
     ) {
         callbacks.onCancelLongPress()
+        if (trackingStatusBarPullDown) {
+            reset(notifyAbortIfPilfered = false)
+            return
+        }
         if (!tracking) return
         if (repositionTracker.active) {
             repositionTracker.finish()?.let { (side, top) ->
@@ -246,6 +267,7 @@ class EdgeGestureStateMachine(
         val finishedReposition = repositionTracker.finish()
         val wasPilfered = pilfered
         tracking = false
+        trackingStatusBarPullDown = false
         pilfered = false
         activePointerId = INVALID_POINTER_ID
         maxInwardDx = 0f
@@ -255,6 +277,27 @@ class EdgeGestureStateMachine(
             callbacks.onEdgeRepositionEnd(finishedReposition.first, finishedReposition.second, committed = false)
         } else if (notifyAbortIfPilfered && wasPilfered) {
             callbacks.onDragEnd(shouldOpen = false, velocityPxPerSec = 0f, canceled = true)
+        }
+    }
+
+    private fun handleStatusBarPullMove(
+        pointerId: Int,
+        rawX: Float,
+        rawY: Float,
+        env: EdgeGestureEnv,
+    ) {
+        if (pointerId != activePointerId || env.panelState != PanelState.OPEN) {
+            reset(notifyAbortIfPilfered = false)
+            return
+        }
+        lastX = rawX
+        lastY = rawY
+        val dx = rawX - downX
+        val dy = rawY - downY
+        val pullSlopPx = EdgeGestureMath.STATUS_BAR_PULL_SLOP_DP * env.geometry.density
+        if (dy >= pullSlopPx && dy > abs(dx) * EdgeGestureMath.STATUS_BAR_PULL_SLOPE_RATIO) {
+            reset(notifyAbortIfPilfered = false)
+            onStatusBarPullDown()
         }
     }
 

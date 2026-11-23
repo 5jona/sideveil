@@ -102,4 +102,6 @@ interface EdgeGestureListener {
     fun onDisplayChanged(geometry: DisplayGeometry)
 
     fun onGestureStatsUpdated(stats: DebugGestureStats) {}
+
+    fun onStatusBarPullDown() {}
 }
