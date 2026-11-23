@@ -111,6 +111,9 @@ class ForegroundMonitor(
                             handler.removeCallbacks(debouncedRefresh)
                             handler.postDelayed(debouncedRefresh, DEBOUNCE_MS)
                         }
+                        if ((flags and FLAG_ONEWAY) == 0) {
+                            reply?.writeNoException()
+                        }
                         return true
                     }
                 }

@@ -1,9 +1,12 @@
 package pochita.sideveil.host
 
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.ByteArrayInputStream
 
 class PluginAssetFetcherTest {
     @Test
@@ -20,12 +23,50 @@ class PluginAssetFetcherTest {
     }
 
     @Test
-    fun `restricts devServerUrl strictly to loopback http addresses`() {
+    fun `restricts devServerUrl strictly to loopback http or https addresses and rejects SSRF`() {
         assertTrue(PluginAssetFetcher.isValidLoopbackDevUrl("http://127.0.0.1:5175"))
         assertTrue(PluginAssetFetcher.isValidLoopbackDevUrl("http://localhost:3000/"))
-        assertFalse(PluginAssetFetcher.isValidLoopbackDevUrl("http://192.168.1.2:5175"))
-        assertFalse(PluginAssetFetcher.isValidLoopbackDevUrl("https://evil.example.com"))
-        assertFalse(PluginAssetFetcher.isValidLoopbackDevUrl("file:///etc/passwd"))
+        assertTrue(PluginAssetFetcher.isValidLoopbackDevUrl("https://localhost:8443/app"))
+        assertTrue(PluginAssetFetcher.isValidLoopbackDevUrl("http://[::1]:5173"))
+        assertTrue(PluginAssetFetcher.isValidLoopbackDevUrl("http://127.0.0.1"))
+
+        val rejected =
+            listOf(
+                "",
+                "   ",
+                "http://127.0.0.1:80@attacker.example",
+                "http://localhost@evil.example:5173",
+                "http://user:pass@127.0.0.1:5173",
+                "http://127.0.0.1:0",
+                "http://127.0.0.1:99999",
+                "http://127.0.0.1:",
+                "http://127.0.0.1:abc",
+                "http://127.0.0.1?@attacker.example",
+                "http://127.0.0.1#frag",
+                "http://127.0.0.1\\attacker.example",
+                "http://127.0.0.1:5173/\r\nX-Inject: 1",
+                "http://127.0.0.1:5173/with space",
+                "http://192.168.1.2:5175",
+                "http://[::2]:5173",
+                "https://evil.example.com",
+                "file:///etc/passwd",
+                "ftp://127.0.0.1:5173",
+            )
+        for (url in rejected) {
+            assertFalse("expected rejection for $url", PluginAssetFetcher.isValidLoopbackDevUrl(url))
+        }
+    }
+
+    @Test
+    fun `readBoundedBytes enforces exact byte cap without overflowing`() {
+        val exact = PluginAssetFetcher.readBoundedBytes(ByteArrayInputStream(byteArrayOf(1, 2, 3, 4)), maxBytes = 4)
+        assertArrayEquals(byteArrayOf(1, 2, 3, 4), exact)
+
+        val overLimit = PluginAssetFetcher.readBoundedBytes(ByteArrayInputStream(byteArrayOf(1, 2, 3, 4, 5)), maxBytes = 4)
+        assertNull(overLimit)
+
+        val empty = PluginAssetFetcher.readBoundedBytes(ByteArrayInputStream(ByteArray(0)), maxBytes = 4)
+        assertArrayEquals(ByteArray(0), empty)
     }
 
     @Test

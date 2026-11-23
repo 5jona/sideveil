@@ -11,6 +11,9 @@ import androidx.webkit.WebMessagePortCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -22,6 +25,52 @@ import pochita.sideveil.protocol.RpcRequest
 import pochita.sideveil.protocol.RpcResponse
 import pochita.sideveil.protocol.SideVeilMethods
 import pochita.sideveil.protocol.SideVeilWireJson
+import java.util.concurrent.atomic.AtomicBoolean
+
+/**
+ * Buffers pre-ready messages while isolating RPC replies from evictable event bursts so
+ * high-frequency host events can never evict an in-flight JSON-RPC response.
+ */
+internal class PendingWebMessageQueue(
+    private val maxPendingEvents: Int = DEFAULT_MAX_PENDING_EVENTS,
+) {
+    private val pendingResponses = ArrayDeque<String>()
+    private val pendingEvents = ArrayDeque<String>(maxPendingEvents)
+
+    fun enqueueResponse(rawJson: String) {
+        pendingResponses.addLast(rawJson)
+    }
+
+    fun enqueueEvent(rawJson: String) {
+        if (maxPendingEvents <= 0) return
+        if (pendingEvents.size >= maxPendingEvents) {
+            pendingEvents.removeFirst()
+        }
+        pendingEvents.addLast(rawJson)
+    }
+
+    fun drainAll(deliver: (String) -> Unit) {
+        while (pendingResponses.isNotEmpty()) {
+            deliver(pendingResponses.removeFirst())
+        }
+        while (pendingEvents.isNotEmpty()) {
+            deliver(pendingEvents.removeFirst())
+        }
+    }
+
+    fun clear() {
+        pendingResponses.clear()
+        pendingEvents.clear()
+    }
+
+    fun responseCount(): Int = pendingResponses.size
+
+    fun eventCount(): Int = pendingEvents.size
+
+    companion object {
+        const val DEFAULT_MAX_PENDING_EVENTS = 16
+    }
+}
 
 /**
  * Manages the `WebMessagePort` / `window.__POCHITA_HOST__` channel, queued pre-ready
@@ -29,7 +78,7 @@ import pochita.sideveil.protocol.SideVeilWireJson
  * JSON-RPC forwarding for a single [PluginWebViewInstance].
  */
 internal class PluginWebMessageBridge(
-    private val scope: CoroutineScope,
+    scope: CoroutineScope,
     private val daemonClient: DaemonClient,
     private val localRpcHandler: PluginLocalRpcHandler,
     private val webView: WebView,
@@ -38,7 +87,9 @@ internal class PluginWebMessageBridge(
     private val onContainerAction: (ContainerActionPayload?) -> Unit,
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val pendingEventsBeforeReady = ArrayDeque<String>(12)
+    private val bridgeScope = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[Job]))
+    private val pendingQueue = PendingWebMessageQueue()
+    private val destroyed = AtomicBoolean(false)
 
     @Volatile
     private var activePort: WebMessagePortCompat? = null
@@ -52,12 +103,14 @@ internal class PluginWebMessageBridge(
     fun createJsHostObject(): JsHostObject = JsHostObject()
 
     fun resetBeforeLoad() {
+        if (destroyed.get()) return
         pageReady = false
         lastCommittedUrl = null
         closeActivePort()
     }
 
     fun onNavigationCommitted(url: String?) {
+        if (destroyed.get()) return
         lastCommittedUrl = url
         if (!PluginNetworkPolicy.isSameTrustedOrigin(url, pluginOrigin)) {
             pageReady = false
@@ -66,6 +119,7 @@ internal class PluginWebMessageBridge(
     }
 
     fun installChannel() {
+        if (destroyed.get()) return
         if (!WebViewFeature.isFeatureSupported(WebViewFeature.CREATE_WEB_MESSAGE_CHANNEL) ||
             !WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_PORT_SET_MESSAGE_CALLBACK) ||
             !WebViewFeature.isFeatureSupported(WebViewFeature.POST_WEB_MESSAGE)
@@ -86,6 +140,15 @@ internal class PluginWebMessageBridge(
             val pagePort = channel[1]
 
             closeActivePort()
+            if (destroyed.get()) {
+                runCatching {
+                    if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_PORT_CLOSE)) {
+                        hostPort.close()
+                        pagePort.close()
+                    }
+                }
+                return@runCatching
+            }
             activePort = hostPort
             if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_PORT_SET_MESSAGE_CALLBACK)) {
                 hostPort.setWebMessageCallback(
@@ -94,6 +157,7 @@ internal class PluginWebMessageBridge(
                             port: WebMessagePortCompat,
                             message: WebMessageCompat?,
                         ) {
+                            if (destroyed.get()) return
                             val data = message?.data ?: return
                             handleMessageFromWebView(data)
                         }
@@ -108,15 +172,17 @@ internal class PluginWebMessageBridge(
                 )
             }
             pageReady = true
-            flushQueuedEvents()
+            flushQueuedMessages()
         }.onFailure { err ->
+            if (destroyed.get()) return
             Log.w(TAG, "WebMessagePort setup failed for ${descriptorProvider().id}: ${err.message}")
             fallbackToEvaluateJavascript("WebMessagePort setup failed")
         }
     }
 
     fun postRawAsync(rawJson: String) {
-        mainHandler.post { sendToWebView(rawJson) }
+        if (destroyed.get()) return
+        mainHandler.post { sendToWebView(rawJson, isRpcResponse = false) }
     }
 
     fun closeActivePort() {
@@ -127,58 +193,81 @@ internal class PluginWebMessageBridge(
         }
     }
 
+    fun destroy() {
+        if (!destroyed.compareAndSet(false, true)) return
+        pageReady = false
+        bridgeScope.cancel()
+        mainHandler.removeCallbacksAndMessages(null)
+        pendingQueue.clear()
+        closeActivePort()
+    }
+
     private fun fallbackToEvaluateJavascript(reason: String) {
+        if (destroyed.get()) return
         Log.w(TAG, "$reason for ${descriptorProvider().id}, using evaluateJavascript fallback")
         pageReady = true
-        flushQueuedEvents()
+        flushQueuedMessages()
     }
 
     private fun handleMessageFromWebView(raw: String) {
+        if (destroyed.get()) return
         val req = runCatching { SideVeilWireJson.decodeFromString<RpcRequest>(raw) }.getOrNull() ?: return
         if (req.method == SideVeilMethods.CONTAINER_ACTION) {
             handleContainerAction(req)
             return
         }
-        if (localRpcHandler.tryHandle(req, descriptorProvider(), ::sendToWebView)) {
+        if (localRpcHandler.tryHandle(req, descriptorProvider(), ::sendRpcResponseToWebView)) {
             return
         }
         forwardDaemonRpc(req)
     }
 
     private fun forwardDaemonRpc(req: RpcRequest) {
+        if (destroyed.get()) return
         // Stamp authenticated pluginId on the host side so WebView JS cannot spoof identity.
         val stamped = req.copy(pluginId = descriptorProvider().id)
-        scope.launch {
+        bridgeScope.launch {
             val response = daemonClient.forwardRpc(stamped)
+            if (destroyed.get()) return@launch
             val encoded = SideVeilWireJson.encodeToString(response)
-            mainHandler.post { sendToWebView(encoded) }
+            mainHandler.post { sendRpcResponseToWebView(encoded) }
         }
     }
 
     private fun handleContainerAction(req: RpcRequest) {
+        if (destroyed.get()) return
         val action =
             req.params?.let { params ->
                 runCatching { SideVeilWireJson.decodeFromJsonElement<ContainerActionPayload>(params) }.getOrNull()
             }
         mainHandler.post {
+            if (destroyed.get()) return@post
             onContainerAction(action)
             val ok = RpcResponse(id = req.id, result = buildJsonObject { put("ok", JsonPrimitive(true)) })
-            sendToWebView(SideVeilWireJson.encodeToString(ok))
+            sendRpcResponseToWebView(SideVeilWireJson.encodeToString(ok))
         }
     }
 
-    private fun flushQueuedEvents() {
-        while (pendingEventsBeforeReady.isNotEmpty()) {
-            sendToWebView(pendingEventsBeforeReady.removeFirst())
-        }
+    private fun flushQueuedMessages() {
+        if (destroyed.get()) return
+        pendingQueue.drainAll { raw -> sendToWebView(raw, isRpcResponse = true) }
     }
 
-    private fun sendToWebView(rawJson: String) {
+    private fun sendRpcResponseToWebView(rawJson: String) {
+        sendToWebView(rawJson, isRpcResponse = true)
+    }
+
+    private fun sendToWebView(
+        rawJson: String,
+        isRpcResponse: Boolean,
+    ) {
+        if (destroyed.get()) return
         if (!pageReady) {
-            if (pendingEventsBeforeReady.size >= MAX_PENDING_EVENTS) {
-                pendingEventsBeforeReady.removeFirst()
+            if (isRpcResponse) {
+                pendingQueue.enqueueResponse(rawJson)
+            } else {
+                pendingQueue.enqueueEvent(rawJson)
             }
-            pendingEventsBeforeReady.addLast(rawJson)
             return
         }
 
@@ -188,10 +277,12 @@ internal class PluginWebMessageBridge(
                 port.postMessage(WebMessageCompat(rawJson))
                 return
             }.onFailure { err ->
+                if (destroyed.get()) return
                 Log.w(TAG, "WebMessagePort postMessage failed for ${descriptorProvider().id}", err)
             }
         }
 
+        if (destroyed.get()) return
         val quoted = JSONObject.quote(rawJson)
         val quotedOrigin = JSONObject.quote(pluginOrigin)
         webView.evaluateJavascript("window.postMessage($quoted, $quotedOrigin);", null)
@@ -200,8 +291,9 @@ internal class PluginWebMessageBridge(
     inner class JsHostObject {
         @JavascriptInterface
         fun postMessage(message: String) {
-            if (PluginNetworkPolicy.isUntrustedEmbed(descriptorProvider())) return
+            if (destroyed.get() || PluginNetworkPolicy.isUntrustedEmbed(descriptorProvider())) return
             mainHandler.post {
+                if (destroyed.get()) return@post
                 val liveUrl = webView.url
                 val committed = lastCommittedUrl
                 val liveAllowed = PluginNetworkPolicy.isSameTrustedOrigin(liveUrl, pluginOrigin)
@@ -227,6 +319,5 @@ internal class PluginWebMessageBridge(
 
     companion object {
         private const val TAG = "SideVeilPluginBridge"
-        private const val MAX_PENDING_EVENTS = 16
     }
 }

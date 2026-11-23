@@ -269,7 +269,7 @@ internal class PluginWebViewInstance(
     fun destroy() {
         dormancy.destroy()
         flushCookies()
-        messageBridge?.closeActivePort()
+        messageBridge?.destroy()
         webView.stopLoading()
         webView.destroy()
     }

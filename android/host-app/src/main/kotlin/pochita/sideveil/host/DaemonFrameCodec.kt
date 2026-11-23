@@ -139,19 +139,26 @@ internal object DaemonFrameCodec {
     fun openHandshakeSocket(
         port: Int,
         token: String,
+        onSocketCreated: (Socket) -> Unit = {},
     ): Socket {
         val socket = Socket()
-        socket.tcpNoDelay = true
-        socket.connect(InetSocketAddress(LOOPBACK_HOST, port), CONNECT_TIMEOUT_MS)
-        socket.soTimeout = READ_TIMEOUT_MS
-        WebSocketCodec.performClientHandshake(
-            input = socket.getInputStream(),
-            output = socket.getOutputStream(),
-            path = WS_PATH,
-            hostHeader = "$LOOPBACK_HOST:$port",
-            extraHeaders = mapOf("Authorization" to "Bearer $token"),
-        )
-        return socket
+        onSocketCreated(socket)
+        try {
+            socket.tcpNoDelay = true
+            socket.connect(InetSocketAddress(LOOPBACK_HOST, port), CONNECT_TIMEOUT_MS)
+            socket.soTimeout = READ_TIMEOUT_MS
+            WebSocketCodec.performClientHandshake(
+                input = socket.getInputStream(),
+                output = socket.getOutputStream(),
+                path = WS_PATH,
+                hostHeader = "$LOOPBACK_HOST:$port",
+                extraHeaders = mapOf("Authorization" to "Bearer $token"),
+            )
+            return socket
+        } catch (t: Throwable) {
+            runCatching { socket.close() }
+            throw t
+        }
     }
 
     fun encodeEvent(

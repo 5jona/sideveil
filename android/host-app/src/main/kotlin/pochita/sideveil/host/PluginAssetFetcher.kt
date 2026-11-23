@@ -6,7 +6,9 @@ import android.util.Log
 import android.webkit.WebResourceResponse
 import pochita.sideveil.protocol.PluginDescriptor
 import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URI
 import java.util.Locale
@@ -61,7 +63,11 @@ class PluginAssetFetcher(
             return errorResponse(403, "Forbidden")
         }
         val coi = descriptor.surface.crossOriginIsolated
-        val devBase = descriptor.devServerUrl?.trim()?.takeIf { isValidLoopbackDevUrl(it) }
+        val devBase =
+            descriptor.devServerUrl
+                ?.trim()
+                ?.trimEnd('/')
+                ?.takeIf { isValidLoopbackDevUrl(it) }
         if (devBase != null) {
             val rel = rawPath.removePrefix("web/").ifEmpty { "index.html" }
             val querySuffix = uri.encodedQuery?.let { "?$it" }.orEmpty()
@@ -141,6 +147,7 @@ class PluginAssetFetcher(
             val conn =
                 (URI(targetUrl).toURL().openConnection() as HttpURLConnection).apply {
                     requestMethod = "GET"
+                    instanceFollowRedirects = false
                     connectTimeout = CONNECT_TIMEOUT_MS
                     readTimeout = READ_TIMEOUT_MS
                     useCaches = false
@@ -150,12 +157,15 @@ class PluginAssetFetcher(
                 }
             try {
                 val code = conn.responseCode
+                if (conn.contentLengthLong > MAX_RESPONSE_BYTES) {
+                    return@runCatching errorResponse(413, "Payload Too Large")
+                }
                 val body =
                     if (code in 200..299) {
-                        conn.inputStream.use { it.readBytes() }
+                        conn.inputStream.use { readBoundedBytes(it, MAX_RESPONSE_BYTES) }
                     } else {
-                        conn.errorStream?.use { it.readBytes() } ?: ByteArray(0)
-                    }
+                        conn.errorStream?.use { readBoundedBytes(it, MAX_RESPONSE_BYTES) } ?: ByteArray(0)
+                    } ?: return@runCatching errorResponse(413, "Payload Too Large")
                 val contentType = conn.contentType ?: mimeTypeFor(fallbackPath)
                 val mime = contentType.substringBefore(';').trim().ifEmpty { mimeTypeFor(fallbackPath) }
                 val encoding = if (isUtf8Mime(mime)) "UTF-8" else null
@@ -199,6 +209,7 @@ class PluginAssetFetcher(
         const val PLUGIN_ORIGIN_SUFFIX = "plugins.sideveil.local"
         private const val CONNECT_TIMEOUT_MS = 2_000
         private const val READ_TIMEOUT_MS = 4_000
+        internal const val MAX_RESPONSE_BYTES = 16 * 1024 * 1024
         private val UTF8_MIME_SUBSTRINGS = listOf("javascript", "json", "xml")
 
         private val MIME_TYPES_BY_EXT: Map<String, String> =
@@ -249,9 +260,50 @@ class PluginAssetFetcher(
 
         fun isValidLoopbackDevUrl(raw: String): Boolean {
             val trimmed = raw.trim().trimEnd('/')
-            if (!trimmed.startsWith("http://")) return false
-            val host = trimmed.removePrefix("http://").substringBefore('/').substringBefore(':')
-            return host == "127.0.0.1" || host == "localhost"
+            if (trimmed.isEmpty() || trimmed.any(::hasForbiddenDevUrlChar)) return false
+            val uri = runCatching { URI(trimmed) }.getOrNull() ?: return false
+            val scheme = uri.scheme?.lowercase(Locale.ROOT)
+            val schemeOk = scheme == "http" || scheme == "https"
+            return schemeOk && hasValidLoopbackAuthority(uri)
+        }
+
+        private fun hasForbiddenDevUrlChar(ch: Char): Boolean {
+            if (ch.isWhitespace() || ch in FORBIDDEN_DEV_URL_CHARS) return true
+            return ch.code < ASCII_PRINTABLE_MIN || ch.code == ASCII_DEL
+        }
+
+        private fun hasValidLoopbackAuthority(uri: URI): Boolean {
+            if (uri.rawUserInfo != null || uri.userInfo != null) return false
+            if (uri.rawQuery != null || uri.rawFragment != null) return false
+            val authority = uri.rawAuthority
+            if (authority.isNullOrEmpty() || authority.contains('@') || authority.endsWith(':')) return false
+            val host = uri.host?.lowercase(Locale.ROOT) ?: return false
+            val portOk = uri.port == -1 || uri.port in 1..MAX_PORT
+            return host in LOOPBACK_HOSTS && portOk
+        }
+
+        private const val ASCII_PRINTABLE_MIN = 0x20
+        private const val ASCII_DEL = 0x7F
+        private const val MAX_PORT = 65_535
+        private val FORBIDDEN_DEV_URL_CHARS = setOf('\\', '@', '?', '#')
+        private val LOOPBACK_HOSTS = setOf("127.0.0.1", "localhost", "::1", "[::1]")
+
+        internal fun readBoundedBytes(
+            input: InputStream,
+            maxBytes: Int = MAX_RESPONSE_BYTES,
+        ): ByteArray? {
+            if (maxBytes < 0) return null
+            val out = ByteArrayOutputStream(minOf(maxBytes, 8 * 1024))
+            val buffer = ByteArray(8 * 1024)
+            var total = 0
+            while (true) {
+                val read = input.read(buffer)
+                if (read <= 0) break
+                total += read
+                if (total > maxBytes) return null
+                out.write(buffer, 0, read)
+            }
+            return out.toByteArray()
         }
     }
 }

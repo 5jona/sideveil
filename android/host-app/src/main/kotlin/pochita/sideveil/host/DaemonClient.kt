@@ -20,6 +20,7 @@ import pochita.sideveil.protocol.WebSocketCodec
 import java.net.Socket
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.cancellation.CancellationException
 
 /**
@@ -42,6 +43,10 @@ class DaemonClient(
     private val pendingRpcs = ConcurrentHashMap<String, CompletableDeferred<RpcResponse>>()
     private val generationCounter = AtomicLong(0L)
     private val rpcSeq = AtomicLong(0L)
+    private val connectingSocket = AtomicReference<Socket?>(null)
+
+    @Volatile
+    private var closed: Boolean = false
 
     @Volatile
     private var port: Int = 0
@@ -51,12 +56,12 @@ class DaemonClient(
 
     private var connectionJob: Job? = null
 
-    fun isConnected(): Boolean = writer.isConnected()
+    fun isConnected(): Boolean = !closed && writer.isConnected()
 
     fun currentEndpoint(): Pair<Int, String>? {
         val currentPort = port
         val currentToken = token
-        return if (currentPort in 1..65535 && currentToken.isNotBlank()) currentPort to currentToken else null
+        return if (!closed && currentPort in 1..65535 && currentToken.isNotBlank()) currentPort to currentToken else null
     }
 
     @Synchronized
@@ -64,7 +69,7 @@ class DaemonClient(
         nextPort: Int,
         nextToken: String,
     ) {
-        if (nextPort <= 0 || nextToken.isBlank()) return
+        if (closed || nextPort <= 0 || nextToken.isBlank()) return
         if (nextPort == port && nextToken == token && connectionJob?.isActive == true) {
             return
         }
@@ -72,6 +77,7 @@ class DaemonClient(
         token = nextToken
         val nextGen = generationCounter.incrementAndGet()
         connectionJob?.cancel()
+        abortConnectingSocket()
         writer.closeCurrent()
         connectionJob = scope.launch(Dispatchers.IO) { connectLoop(nextGen) }
     }
@@ -108,10 +114,16 @@ class DaemonClient(
         }
     }
 
+    @Synchronized
     fun close() {
+        if (closed) return
+        closed = true
+        port = 0
+        token = ""
         generationCounter.incrementAndGet()
         connectionJob?.cancel()
         connectionJob = null
+        abortConnectingSocket()
         failAllPending("DaemonClient closed")
         writer.shutdown()
     }
@@ -121,25 +133,41 @@ class DaemonClient(
         while (canContinueConnecting(generation)) {
             val connected = runSingleSession(generation)
             if (connected) attempt = 0
-            if (generation != generationCounter.get()) break
+            if (!canContinueConnecting(generation)) break
             delay(BACKOFF_MS[attempt.coerceAtMost(BACKOFF_MS.lastIndex)])
             attempt++
         }
     }
 
     private fun canContinueConnecting(generation: Long): Boolean =
-        scope.isActive && generation == generationCounter.get() && port > 0 && token.isNotEmpty()
+        !closed && scope.isActive && generation == generationCounter.get() && port > 0 && token.isNotEmpty()
 
     private fun runSingleSession(generation: Long): Boolean {
         val currentPort = port
         val currentToken = token
+        if (!canContinueConnecting(generation)) return false
         var loopSocket: Socket? = null
         var connected = false
         try {
-            val socket = DaemonFrameCodec.openHandshakeSocket(currentPort, currentToken)
-            loopSocket = socket
-            if (generation != generationCounter.get()) return false
-            writer.attach(socket)
+            val socket =
+                DaemonFrameCodec.openHandshakeSocket(currentPort, currentToken) { created ->
+                    loopSocket = created
+                    connectingSocket.set(created)
+                    if (!canContinueConnecting(generation)) {
+                        runCatching { created.close() }
+                    }
+                }
+            connectingSocket.compareAndSet(socket, null)
+            val attached =
+                synchronized(this) {
+                    if (!canContinueConnecting(generation)) {
+                        false
+                    } else {
+                        writer.attach(socket)
+                        true
+                    }
+                }
+            if (!attached) return false
             connected = true
             Log.i(TAG, "Connected full-duplex WebSocket to 127.0.0.1:$currentPort")
             onConnected()
@@ -147,13 +175,20 @@ class DaemonClient(
         } catch (c: CancellationException) {
             throw c
         } catch (t: Throwable) {
-            if (generation == generationCounter.get()) {
+            if (!closed && generation == generationCounter.get()) {
                 Log.w(TAG, "WebSocket loop error: ${t.message}")
             }
         } finally {
+            connectingSocket.compareAndSet(loopSocket, null)
             cleanupSession(loopSocket, generation, connected)
         }
         return connected
+    }
+
+    private fun abortConnectingSocket() {
+        connectingSocket.getAndSet(null)?.let { socket ->
+            runCatching { socket.close() }
+        }
     }
 
     private fun readIncomingFrames(
@@ -177,7 +212,7 @@ class DaemonClient(
     private fun isReaderActive(
         socket: Socket,
         generation: Long,
-    ): Boolean = scope.isActive && generation == generationCounter.get() && !socket.isClosed
+    ): Boolean = !closed && scope.isActive && generation == generationCounter.get() && !socket.isClosed
 
     private fun handleInboundMessage(message: DaemonInboundMessage) {
         when (message) {

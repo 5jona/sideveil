@@ -6,27 +6,55 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import pochita.sideveil.protocol.PluginCapability
 import pochita.sideveil.protocol.PluginDescriptor
 import pochita.sideveil.protocol.RpcError
 import pochita.sideveil.protocol.RpcRequest
 import pochita.sideveil.protocol.RpcResponse
+import pochita.sideveil.protocol.SideVeilErrorCodes
 import pochita.sideveil.protocol.SideVeilMethods
 import pochita.sideveil.protocol.SideVeilWireJson
+
+internal interface LocalRpcPlatformActions {
+    fun showToast(message: String)
+
+    fun readClipboardText(): String?
+
+    fun writeClipboardText(text: String)
+
+    fun triggerHaptics(kind: String)
+}
+
+internal sealed interface ParsedStringParam {
+    data class Valid(
+        val value: String,
+    ) : ParsedStringParam
+
+    data class Invalid(
+        val message: String,
+    ) : ParsedStringParam
+}
 
 /**
  * Handles host-local ACL-gated plugin RPCs (`ui.toast`, `clipboard.get`, `clipboard.set`,
  * `haptics.trigger`) without round-tripping through `sideveild`.
  */
-internal class PluginLocalRpcHandler(
-    private val context: Context,
-    private val haptics: EdgeHapticsController,
+internal class PluginLocalRpcHandler internal constructor(
+    private val actions: LocalRpcPlatformActions,
+    private val postOnMain: (Runnable) -> Unit,
 ) {
-    private val mainHandler = Handler(Looper.getMainLooper())
+    constructor(
+        context: Context,
+        haptics: EdgeHapticsController,
+    ) : this(
+        actions = AndroidLocalRpcActions(context, haptics),
+        postOnMain = { runnable -> Handler(Looper.getMainLooper()).post(runnable) },
+    )
 
     fun tryHandle(
         req: RpcRequest,
@@ -53,14 +81,18 @@ internal class PluginLocalRpcHandler(
             return
         }
         val msg =
-            req.params
-                ?.jsonObject
-                ?.get("message")
-                ?.jsonPrimitive
-                ?.content
-                .orEmpty()
-        mainHandler.post {
-            if (msg.isNotBlank()) Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+            when (val parsed = parseOptionalStringParam(req.params, "message")) {
+                is ParsedStringParam.Valid -> {
+                    parsed.value
+                }
+
+                is ParsedStringParam.Invalid -> {
+                    sendInvalidParams(req.id, parsed.message, sendReply)
+                    return
+                }
+            }
+        postOnMain {
+            if (msg.isNotBlank()) actions.showToast(msg)
             sendOk(req.id, sendReply)
         }
     }
@@ -74,16 +106,13 @@ internal class PluginLocalRpcHandler(
             sendDenied(req.id, descriptor.id, "clipboard", sendReply)
             return
         }
-        mainHandler.post {
-            val text =
-                runCatching {
-                    val cm = context.getSystemService(ClipboardManager::class.java)
-                    cm
-                        ?.primaryClip
-                        ?.getItemAt(0)
-                        ?.coerceToText(context)
-                        ?.toString()
-                }.getOrNull()
+        val paramsError = validateObjectOrNullParams(req.params)
+        if (paramsError != null) {
+            sendInvalidParams(req.id, paramsError, sendReply)
+            return
+        }
+        postOnMain {
+            val text = runCatching { actions.readClipboardText() }.getOrNull()
             val resp =
                 RpcResponse(
                     id = req.id,
@@ -103,17 +132,18 @@ internal class PluginLocalRpcHandler(
             return
         }
         val text =
-            req.params
-                ?.jsonObject
-                ?.get("text")
-                ?.jsonPrimitive
-                ?.content
-                .orEmpty()
-        mainHandler.post {
-            runCatching {
-                val cm = context.getSystemService(ClipboardManager::class.java)
-                cm?.setPrimaryClip(ClipData.newPlainText("SideVeil Plugin", text))
+            when (val parsed = parseOptionalStringParam(req.params, "text")) {
+                is ParsedStringParam.Valid -> {
+                    parsed.value
+                }
+
+                is ParsedStringParam.Invalid -> {
+                    sendInvalidParams(req.id, parsed.message, sendReply)
+                    return
+                }
             }
+        postOnMain {
+            runCatching { actions.writeClipboardText(text) }
             sendOk(req.id, sendReply)
         }
     }
@@ -128,19 +158,18 @@ internal class PluginLocalRpcHandler(
             return
         }
         val kind =
-            req.params
-                ?.jsonObject
-                ?.get("kind")
-                ?.jsonPrimitive
-                ?.content
-                .orEmpty()
-        mainHandler.post {
-            when (kind) {
-                "click" -> haptics.onThresholdCrossed()
-                "heavy" -> haptics.onRepositionStart()
-                "cancel" -> haptics.onCancel()
-                else -> haptics.onRailSwitch()
+            when (val parsed = parseOptionalStringParam(req.params, "kind")) {
+                is ParsedStringParam.Valid -> {
+                    parsed.value
+                }
+
+                is ParsedStringParam.Invalid -> {
+                    sendInvalidParams(req.id, parsed.message, sendReply)
+                    return
+                }
             }
+        postOnMain {
+            actions.triggerHaptics(kind)
             sendOk(req.id, sendReply)
         }
     }
@@ -164,7 +193,76 @@ internal class PluginLocalRpcHandler(
         capName: String,
         sendReply: (String) -> Unit,
     ) {
-        val denied = RpcResponse(id = id, error = RpcError(-32003, "Plugin '$pluginId' lacks '$capName' capability"))
-        mainHandler.post { sendReply(SideVeilWireJson.encodeToString(denied)) }
+        val denied =
+            RpcResponse(
+                id = id,
+                error = RpcError(SideVeilErrorCodes.PERMISSION_DENIED, "Plugin '$pluginId' lacks '$capName' capability"),
+            )
+        postOnMain { sendReply(SideVeilWireJson.encodeToString(denied)) }
+    }
+
+    private fun sendInvalidParams(
+        id: String,
+        reason: String,
+        sendReply: (String) -> Unit,
+    ) {
+        val invalid = RpcResponse(id = id, error = RpcError(SideVeilErrorCodes.INVALID_PARAMS, reason))
+        postOnMain { sendReply(SideVeilWireJson.encodeToString(invalid)) }
+    }
+
+    companion object {
+        internal fun validateObjectOrNullParams(params: JsonElement?): String? =
+            if (params == null || params is JsonNull || params is JsonObject) {
+                null
+            } else {
+                "RPC params must be a JSON object"
+            }
+
+        internal fun parseOptionalStringParam(
+            params: JsonElement?,
+            key: String,
+        ): ParsedStringParam {
+            if (params == null || params is JsonNull) return ParsedStringParam.Valid("")
+            val obj = params as? JsonObject ?: return ParsedStringParam.Invalid("RPC params must be a JSON object")
+            val field = obj[key]
+            if (field == null || field is JsonNull) return ParsedStringParam.Valid("")
+            val primitive = field as? JsonPrimitive
+            if (primitive == null || !primitive.isString) {
+                return ParsedStringParam.Invalid("Parameter '$key' must be a string")
+            }
+            return ParsedStringParam.Valid(primitive.content)
+        }
+    }
+}
+
+private class AndroidLocalRpcActions(
+    private val context: Context,
+    private val haptics: EdgeHapticsController,
+) : LocalRpcPlatformActions {
+    override fun showToast(message: String) {
+        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+    }
+
+    override fun readClipboardText(): String? {
+        val cm = context.getSystemService(ClipboardManager::class.java)
+        return cm
+            ?.primaryClip
+            ?.getItemAt(0)
+            ?.coerceToText(context)
+            ?.toString()
+    }
+
+    override fun writeClipboardText(text: String) {
+        val cm = context.getSystemService(ClipboardManager::class.java)
+        cm?.setPrimaryClip(ClipData.newPlainText("SideVeil Plugin", text))
+    }
+
+    override fun triggerHaptics(kind: String) {
+        when (kind) {
+            "click" -> haptics.onThresholdCrossed()
+            "heavy" -> haptics.onRepositionStart()
+            "cancel" -> haptics.onCancel()
+            else -> haptics.onRailSwitch()
+        }
     }
 }

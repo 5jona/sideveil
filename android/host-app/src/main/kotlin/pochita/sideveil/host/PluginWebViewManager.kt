@@ -78,6 +78,7 @@ internal class PluginWebViewManager(
     private val webViewDebugging = WebViewDebuggingController()
     private var latestNetworkRoute: NetworkRouteContext = NetworkRouteContext()
     private val lastUrlByPlugin = LinkedHashMap<String, String>()
+    private val crashRecovery = WebViewCrashRecoveryCoordinator()
 
     val webViewDebuggingEnabled: Boolean
         get() = webViewDebugging.effectiveEnabled
@@ -144,23 +145,17 @@ internal class PluginWebViewManager(
         for (item in snapshot.plugins) {
             descriptors[item.id] = item
             val existing = pool.peek(item.id) ?: continue
-            when (existing.updateDescriptor(item)) {
-                DescriptorUpdateOutcome.RECREATE_REQUIRED -> {
-                    if (item.id == pinnedPluginId) pinnedPluginId = null
-                    pool.removeAndDestroy(item.id)
-                    if (item.id == activePluginId) activeNeedsRemount = true
-                }
-
-                DescriptorUpdateOutcome.SURFACE_UPDATED -> {
-                    if (item.id == activePluginId && item.id != pinnedPluginId) {
-                        mountInstance(existing)
-                    } else if (item.id == pinnedPluginId) {
-                        surfaceDelegate.onPluginBackdropChanged(existing.surfaceBackdrop)
-                    }
-                }
-
-                DescriptorUpdateOutcome.UNCHANGED -> {
-                    Unit
+            val outcome = existing.updateDescriptor(item)
+            if (outcome == DescriptorUpdateOutcome.RECREATE_REQUIRED) {
+                crashRecovery.cancel(item.id, resetBackoff = true)
+                if (item.id == pinnedPluginId) pinnedPluginId = null
+                pool.removeAndDestroy(item.id)
+                if (item.id == activePluginId) activeNeedsRemount = true
+            } else if (outcome == DescriptorUpdateOutcome.SURFACE_UPDATED) {
+                if (item.id == activePluginId && item.id != pinnedPluginId) {
+                    mountInstance(existing)
+                } else if (item.id == pinnedPluginId) {
+                    surfaceDelegate.onPluginBackdropChanged(existing.surfaceBackdrop)
                 }
             }
         }
@@ -168,6 +163,7 @@ internal class PluginWebViewManager(
         webViewDebugging.setHasDevServer(descriptors.values.any { !it.devServerUrl.isNullOrBlank() })
 
         val evicted = pool.evictStale { id -> descriptors[id]?.enabled == true }
+        evicted.forEach { crashRecovery.cancel(it, resetBackoff = true) }
         if (pinnedPluginId != null && evicted.contains(pinnedPluginId)) pinnedPluginId = null
 
         matchedPluginIds = snapshot.matchedPluginIds.filter(descriptors::containsKey)
@@ -181,6 +177,7 @@ internal class PluginWebViewManager(
 
     fun selectPlugin(pluginId: String): Boolean {
         if (!descriptors.containsKey(pluginId)) return false
+        crashRecovery.cancel(pluginId, resetBackoff = true)
         activatePlugin(pluginId, forceMount = false)
         notifyRail()
         return true
@@ -273,6 +270,7 @@ internal class PluginWebViewManager(
     }
 
     fun destroyAll() {
+        crashRecovery.clearAll()
         pinnedPluginId = null
         activeHudPluginId = null
         pool.destroyAll()
@@ -380,8 +378,12 @@ internal class PluginWebViewManager(
         if (pluginId == pinnedPluginId) pinnedPluginId = null
         pool.removeAndDestroy(pluginId)
         reportDiagnostics()
-        val descriptor = descriptors[pluginId] ?: return
-        if (pluginId == activePluginId) activatePlugin(descriptor.id, forceMount = true)
+        if (pluginId != activePluginId || !descriptors.containsKey(pluginId)) return
+        crashRecovery.schedule(pluginId) {
+            if (pluginId == activePluginId && descriptors.containsKey(pluginId)) {
+                activatePlugin(pluginId, forceMount = true)
+            }
+        }
     }
 
     private fun notifyRail() = surfaceDelegate.onMatchedPluginsUpdated(matchedPluginIds.mapNotNull(descriptors::get), activePluginId)
