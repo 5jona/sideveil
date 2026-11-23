@@ -1,73 +1,16 @@
 #!/usr/bin/env bash
 #
-# Shared transport, staging, readiness polling, and CDP forwarding helpers for reload.sh.
+# Shared staging, readiness polling, and CDP forwarding helpers for reload.sh.
 #
+
+# shellcheck source=scripts/reload-transport.sh
+source "${SCRIPT_DIR}/scripts/reload-transport.sh"
 
 run_in_env() {
     if command -v mise >/dev/null 2>&1; then
         mise exec -- "$@"
     else
         "$@"
-    fi
-}
-
-run_remote_sh() {
-    if [ -n "$SSH_TARGET" ]; then
-        ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" "host-exec /system/bin/sh -s"
-    elif [ "$LOCAL_TRANSPORT" = "host-exec" ]; then
-        /usr/local/bin/host-exec /system/bin/sh -s
-    else
-        /system/bin/sh -s
-    fi
-}
-
-run_remote_ctl() {
-    local args=""
-    local arg
-    for arg in "$@"; do
-        args="${args} $(printf '%q' "$arg")"
-    done
-    if [ -n "$SSH_TARGET" ]; then
-        ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" "host-exec ${REMOTE_MOD_DIR}/bin/sideveil-ctl${args}"
-    elif [ "$LOCAL_TRANSPORT" = "host-exec" ]; then
-        /usr/local/bin/host-exec "${REMOTE_MOD_DIR}/bin/sideveil-ctl" "$@"
-    else
-        "${REMOTE_MOD_DIR}/bin/sideveil-ctl" "$@"
-    fi
-}
-
-push_stage_dir() {
-    local local_stage="$1"
-    if [ -n "$SSH_TARGET" ]; then
-        tar -C "${local_stage}" -cf - . \
-            | ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" \
-                "rm -rf ${STAGE_DIR} && mkdir -p ${STAGE_DIR} && tar -xf - -C ${STAGE_DIR}"
-    else
-        rm -rf "${STAGE_DIR}" && mkdir -p "${STAGE_DIR}"
-        cp -r "${local_stage}"/. "${STAGE_DIR}/"
-    fi
-}
-
-start_service_detached() {
-    if [ -n "$SSH_TARGET" ]; then
-        echo "[*] Starting SideVeil supervisor detached in root cgroup..."
-        ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" "host-exec /system/bin/sh -c '
-            for cg in /sys/fs/cgroup/cgroup.procs /dev/cpuctl/cgroup.procs /dev/cpuset/cgroup.procs; do
-                [ -w \"\$cg\" ] && printf \"%s\\n\" \"\$\$\" > \"\$cg\" 2>/dev/null || true
-            done
-            nohup /system/bin/sh ${REMOTE_MOD_DIR}/service.sh >/dev/null 2>&1 </dev/null &
-        '"
-    elif [ "$LOCAL_TRANSPORT" = "host-exec" ]; then
-        echo "[*] Starting SideVeil supervisor detached in root cgroup via host-exec..."
-        /usr/local/bin/host-exec /system/bin/sh -c "
-            for cg in /sys/fs/cgroup/cgroup.procs /dev/cpuctl/cgroup.procs /dev/cpuset/cgroup.procs; do
-                [ -w \"\$cg\" ] && printf \"%s\\n\" \"\$\$\" > \"\$cg\" 2>/dev/null || true
-            done
-            nohup /system/bin/sh ${REMOTE_MOD_DIR}/service.sh >/dev/null 2>&1 </dev/null &
-        "
-    else
-        echo "[*] Starting SideVeil supervisor detached..."
-        nohup /system/bin/sh "${REMOTE_MOD_DIR}/service.sh" >/dev/null 2>&1 </dev/null &
     fi
 }
 
@@ -142,12 +85,23 @@ print(f"{pid}\t{sock}")
         echo "[!] Warning: @${socket_name} not yet in /proc/net/unix (no WebView initialized yet)." >&2
     fi
 
-    if [ -n "$SSH_TARGET" ]; then
+    if [ "${ADB_FALLBACK:-0}" -eq 1 ]; then
+        echo "[*] Bridge CDP to http://127.0.0.1:${port}/json via ADB:"
+        echo "    adb -s ${ADB_SERIAL} forward tcp:${port} localabstract:${socket_name}"
+        if [ "$exec_mode" -eq 1 ]; then
+            adb -s "${ADB_SERIAL}" forward "tcp:${port}" "localabstract:${socket_name}"
+        fi
+    elif [ -n "$SSH_TARGET" ]; then
         echo "[*] Bridge CDP to http://127.0.0.1:${port}/json via Strata SSH:"
         echo "    ssh -p ${SSH_PORT} -L ${port}:127.0.0.1:${port} ${SSH_TARGET} \"strata-debug cdp serve --port ${port} --pid ${host_pid}\""
         if [ "$exec_mode" -eq 1 ]; then
-            exec ssh -p "${SSH_PORT}" -L "${port}:127.0.0.1:${port}" "${SSH_TARGET}" \
-                "strata-debug cdp serve --port ${port} --pid ${host_pid}"
+            if [ "${ADB_SSH_ISOLATED:-0}" -eq 1 ]; then
+                ssh "${SSH_OPTS[@]}" -L "${port}:127.0.0.1:${port}" "${SSH_TARGET}" \
+                    "strata-debug cdp serve --port ${port} --pid ${host_pid}"
+            else
+                exec ssh -p "${SSH_PORT}" -L "${port}:127.0.0.1:${port}" "${SSH_TARGET}" \
+                    "strata-debug cdp serve --port ${port} --pid ${host_pid}"
+            fi
         fi
     else
         echo "[*] Serve CDP locally on http://127.0.0.1:${port}/json:"
@@ -235,10 +189,13 @@ cp ${STAGE_DIR}/service.sh ${REMOTE_MOD_DIR}/service.sh
 cp ${STAGE_DIR}/post-fs-data.sh ${REMOTE_MOD_DIR}/post-fs-data.sh
 cp ${STAGE_DIR}/customize.sh ${REMOTE_MOD_DIR}/customize.sh
 cp ${STAGE_DIR}/uninstall.sh ${REMOTE_MOD_DIR}/uninstall.sh
-cp ${STAGE_DIR}/sideveild ${REMOTE_MOD_DIR}/bin/sideveild
-cp ${STAGE_DIR}/sideveil-ctl ${REMOTE_MOD_DIR}/bin/sideveil-ctl
-cp ${STAGE_DIR}/sideveil-example-perf-hud ${REMOTE_MOD_DIR}/bin/sideveil-example-perf-hud
-cp ${STAGE_DIR}/sideveil-sensor.dex ${REMOTE_MOD_DIR}/bin/sideveil-sensor.dex
+for b in sideveild sideveil-ctl sideveil-example-perf-hud; do
+    cp ${STAGE_DIR}/\$b ${REMOTE_MOD_DIR}/bin/\$b.new
+    chmod 0755 ${REMOTE_MOD_DIR}/bin/\$b.new
+    mv -f ${REMOTE_MOD_DIR}/bin/\$b.new ${REMOTE_MOD_DIR}/bin/\$b
+done
+cp ${STAGE_DIR}/sideveil-sensor.dex ${REMOTE_MOD_DIR}/bin/sideveil-sensor.dex.new
+mv -f ${REMOTE_MOD_DIR}/bin/sideveil-sensor.dex.new ${REMOTE_MOD_DIR}/bin/sideveil-sensor.dex
 rm -f ${REMOTE_MOD_DIR}/bin/sideveil-common.sh ${REMOTE_MOD_DIR}/bin/sideveil-daemon.dex ${REMOTE_STATE_DIR}/sideveil-daemon.dex
 cp ${STAGE_DIR}/SideVeilHost.apk ${REMOTE_MOD_DIR}/system/priv-app/SideVeilHost/SideVeilHost.apk
 cp ${STAGE_DIR}/privapp.xml ${REMOTE_MOD_DIR}/system/etc/permissions/privapp-permissions-pochita-sideveil.xml

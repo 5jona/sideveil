@@ -62,6 +62,12 @@ cleanup_and_exit() {
 }
 trap cleanup_and_exit TERM INT
 
+# Escape container or transient cgroups into root cgroup (0::/) before spawning daemons.
+[ -w /sys/fs/cgroup/cgroup.procs ] && printf '%s\n' "$$" > /sys/fs/cgroup/cgroup.procs 2>/dev/null || true
+for cg in /dev/cpuctl/cgroup.procs /dev/cpuset/cgroup.procs; do
+    [ -w "$cg" ] && printf '%s\n' "$$" > "$cg" 2>/dev/null || true
+done
+
 until [ "$(getprop sys.boot_completed)" = "1" ]; do
     sleep 2
 done

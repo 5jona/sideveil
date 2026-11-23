@@ -2,8 +2,9 @@
 #
 # Zero-reboot development deploy & live reload script for SideVeil.
 # Supports full and incremental (--hub-only/--host-only/--sensor-only/--webui-only/--plugin)
-# deployment over Strata container SSH (--ssh <host|user@host> or STRATA_SSH_HOST / SSH_TARGET)
-# or locally on-device (host-exec / Android root), plus --cdp-forward.
+# deployment over Strata container SSH (--ssh <host|user@host> or STRATA_SSH_HOST / SSH_TARGET),
+# ADB (--adb <serial> or STRATA_ADB_SERIAL), or locally on-device (host-exec / Android root),
+# plus --cdp-forward.
 #
 
 set -euo pipefail
@@ -26,9 +27,19 @@ CDP_FORWARD_EXEC=0
 CDP_FORWARD_PORT="9222"
 SSH_TARGET="${SSH_TARGET:-${STRATA_SSH_HOST:-}}"
 SSH_PORT="${SSH_PORT:-${STRATA_SSH_PORT:-2222}}"
+ADB_SERIAL=""
+ADB_LOCAL_PORT=""
+ADB_SSH_ISOLATED=0
+ADB_FALLBACK=0
+TMP_STAGE=""
+TMP_STAGE_TAR=""
+TRANSPORT_LABEL=""
+SSH_OPTS=()
 
 # shellcheck source=scripts/reload-helpers.sh
 source "${SCRIPT_DIR}/scripts/reload-helpers.sh"
+
+trap cleanup_reload EXIT
 
 usage() {
     cat <<'EOF'
@@ -37,6 +48,8 @@ Usage: ./reload.sh [options] [ssh-target]
 Options:
   --ssh <host|user@host>     Deploy and reload over Strata container SSH (host-exec)
   --ssh-port <port>          SSH port (default: $STRATA_SSH_PORT / $SSH_PORT / 2222)
+  --adb <serial>             Deploy via ADB serial (isolated SSH forward or su fallback;
+                             default env: $STRATA_ADB_SERIAL)
   --local                    Deploy locally on-device via host-exec or Android UID 0
   --skip-build               Skip compilation and quality gates
   --reset-config             Overwrite /data/system/sideveil/config.json with repo defaults
@@ -64,9 +77,10 @@ while [ "$#" -gt 0 ]; do
     case "$1" in
         --skip-build) SKIP_BUILD=1; shift ;;
         --reset-config) RESET_CONFIG=1; shift ;;
-        --local) LOCAL_MODE=1; SSH_TARGET=""; shift ;;
-        --ssh) SSH_TARGET="$2"; shift 2 ;;
+        --local) LOCAL_MODE=1; SSH_TARGET=""; ADB_SERIAL=""; shift ;;
+        --ssh) SSH_TARGET="$2"; ADB_SERIAL=""; LOCAL_MODE=0; shift 2 ;;
         --ssh-port) SSH_PORT="$2"; shift 2 ;;
+        --adb) ADB_SERIAL="$2"; SSH_TARGET=""; LOCAL_MODE=0; shift 2 ;;
         --hub-only) set_deploy_mode "hub"; shift ;;
         --host-only) set_deploy_mode "host"; shift ;;
         --sensor-only) set_deploy_mode "sensor"; shift ;;
@@ -83,49 +97,11 @@ while [ "$#" -gt 0 ]; do
             fi
             ;;
         -h|--help) usage; exit 0 ;;
-        *) SSH_TARGET="$1"; shift ;;
+        *) SSH_TARGET="$1"; ADB_SERIAL=""; shift ;;
     esac
 done
 
-if [ "$LOCAL_MODE" -eq 0 ] && [ -z "$SSH_TARGET" ]; then
-    if [ -x /usr/local/bin/host-exec ]; then
-        LOCAL_MODE=1
-        LOCAL_TRANSPORT="host-exec"
-    elif [ -x /system/bin/getprop ] && [ "$(id -u)" -eq 0 ]; then
-        LOCAL_MODE=1
-        LOCAL_TRANSPORT="local"
-    else
-        echo "[!] Error: Specify --ssh <host|user@host> (or set STRATA_SSH_HOST / SSH_TARGET), or run on-device." >&2
-        exit 1
-    fi
-elif [ "$LOCAL_MODE" -eq 1 ]; then
-    if [ -x /usr/local/bin/host-exec ]; then
-        LOCAL_TRANSPORT="host-exec"
-    elif [ -x /system/bin/getprop ] && [ "$(id -u)" -eq 0 ]; then
-        LOCAL_TRANSPORT="local"
-    else
-        echo "[!] Error: --local requires on-device host-exec or Android UID 0." >&2
-        exit 1
-    fi
-fi
-
-if [ -n "$SSH_TARGET" ] && [[ "$SSH_TARGET" != *@* ]]; then
-    SSH_TARGET="root@${SSH_TARGET}"
-fi
-
-SSH_CONTROL_DIR="${XDG_RUNTIME_DIR:-/tmp}/sideveil-ssh-$(id -u)"
-mkdir -p "${SSH_CONTROL_DIR}"
-chmod 0700 "${SSH_CONTROL_DIR}"
-
-SSH_OPTS=(
-    -p "${SSH_PORT}"
-    -o BatchMode=yes
-    -o ConnectTimeout=6
-    -o StrictHostKeyChecking=accept-new
-    -o ControlMaster=auto
-    -o ControlPersist=60
-    -o "ControlPath=${SSH_CONTROL_DIR}/reload-%r@%h:%p"
-)
+resolve_transport_target
 
 if [ "$SKIP_BUILD" -eq 0 ]; then
     case "$DEPLOY_MODE" in
@@ -180,12 +156,10 @@ if [ "$SKIP_BUILD" -eq 0 ]; then
     esac
 fi
 
-TRANSPORT_LABEL="${SSH_TARGET:+SSH (${SSH_TARGET}:${SSH_PORT})}"
-TRANSPORT_LABEL="${TRANSPORT_LABEL:-local (${LOCAL_TRANSPORT})}"
+setup_transport
 echo "[*] Target: ${TRANSPORT_LABEL} | Mode: ${DEPLOY_MODE}"
 
 TMP_STAGE="$(mktemp -d)"
-trap 'rm -rf "${TMP_STAGE}"' EXIT
 
 case "$DEPLOY_MODE" in
     full)
@@ -217,10 +191,11 @@ case "$DEPLOY_MODE" in
         run_remote_sh <<EOF
 set -e
 $(stop_hub_processes_script)
-cp ${STAGE_DIR}/sideveild ${REMOTE_MOD_DIR}/bin/sideveild
-cp ${STAGE_DIR}/sideveil-ctl ${REMOTE_MOD_DIR}/bin/sideveil-ctl
-cp ${STAGE_DIR}/sideveil-example-perf-hud ${REMOTE_MOD_DIR}/bin/sideveil-example-perf-hud
-chmod 0755 ${REMOTE_MOD_DIR}/bin/sideveild ${REMOTE_MOD_DIR}/bin/sideveil-ctl ${REMOTE_MOD_DIR}/bin/sideveil-example-perf-hud
+for b in sideveild sideveil-ctl sideveil-example-perf-hud; do
+    cp ${STAGE_DIR}/\$b ${REMOTE_MOD_DIR}/bin/\$b.new
+    chmod 0755 ${REMOTE_MOD_DIR}/bin/\$b.new
+    mv -f ${REMOTE_MOD_DIR}/bin/\$b.new ${REMOTE_MOD_DIR}/bin/\$b
+done
 rm -f ${REMOTE_STATE_DIR}/run/hub.sock ${REMOTE_STATE_DIR}/run/app.sock ${REMOTE_STATE_DIR}/run/daemon.env
 rm -rf ${STAGE_DIR}
 EOF
