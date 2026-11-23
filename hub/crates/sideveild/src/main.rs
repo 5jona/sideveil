@@ -12,6 +12,7 @@ use sideveild::host_ws::HostWsServer;
 use sideveild::log_ring::LogRing;
 use sideveild::peercred::PeerAuthConfig;
 use sideveild::plugin_registry::PluginRegistry;
+use sideveild::singleton::{LOCK_FILE_NAME, SingletonGuard};
 use sideveild::state::HubState;
 use sideveild::supervisor::{SupervisorConfig, spawn_supervisors};
 use sideveild::uds_gateway::UdsGateway;
@@ -103,6 +104,14 @@ async fn run(args: DaemonArgs) -> io::Result<()> {
     fs::create_dir_all(&data_dir)?;
 
     let logs = Arc::new(LogRing::new());
+    let lock_path = args.run_dir.join(LOCK_FILE_NAME);
+    let singleton_guard = match SingletonGuard::acquire(&lock_path) {
+        Ok(guard) => guard,
+        Err(err) => {
+            logs.error(format!("Singleton lock rejected duplicate startup: {err}"));
+            return Err(err.into());
+        }
+    };
     logs.info(format!(
         "Starting sideveild v{} (pid={}, config={}, run_dir={})",
         env!("CARGO_PKG_VERSION"),
@@ -213,6 +222,7 @@ async fn run(args: DaemonArgs) -> io::Result<()> {
 
     let _ = fs::remove_file(&hub_socket);
     let _ = fs::remove_file(&app_socket);
+    drop(singleton_guard);
     Ok(())
 }
 

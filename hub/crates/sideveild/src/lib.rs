@@ -14,6 +14,7 @@ pub mod plugin_acl;
 pub mod plugin_backends;
 pub mod plugin_registry;
 pub mod rpc;
+pub mod singleton;
 pub mod state;
 pub mod supervisor;
 pub mod telemetry;

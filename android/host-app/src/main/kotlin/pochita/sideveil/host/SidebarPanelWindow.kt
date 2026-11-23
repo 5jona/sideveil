@@ -2,7 +2,6 @@ package pochita.sideveil.host
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.graphics.Rect
 import android.util.Log
 import android.view.ContextThemeWrapper
 import android.view.Window
@@ -40,21 +39,41 @@ class SidebarPanelWindow(
     private var activeEmbedToolbar: EmbedToolbarBinding? = null
     private val embedQuickBar: EmbedQuickBarView by lazy { EmbedQuickBarView(themedContext) }
     private val decorLocation = IntArray(2)
-    var currentState: PanelState = PanelState.CLOSED
-        private set
-    private var closingInProgress = false
+    private val stateMachine = PanelDragStateMachine(onStateChanged = onPanelStateChanged)
+    val currentState: PanelState
+        get() = stateMachine.currentState
+    private val closingInProgress: Boolean
+        get() = stateMachine.closingInProgress
     private var attached = false
 
     private val contentContainer = windowLayout.createContentContainer(themedContext)
 
-    private val scheduler =
+    private val scheduler: PanelOverlayScheduler =
         PanelOverlayScheduler(
             stateProvider = { currentState },
             isClosing = { closingInProgress },
             isRailTouch = shouldIgnoreOutsideTouch,
-            isInnerEdgeBufferTouch = ::isInnerEdgeBufferTouch,
+            isInnerEdgeBufferTouch = { rawX, rawY -> motionDriver.isInnerEdgeBufferTouch(rawX, rawY, decorLocation) },
             onRequestClose = ::close,
             onWarmCollapse = ::collapseToWarmInvisible,
+            onDragWatchdogTimeout = {
+                val progress = motionDriver.currentProgress
+                when (stateMachine.decideDragWatchdog(progress)) {
+                    DragWatchdogAction.OPEN -> {
+                        Log.w(TAG, "Drag watchdog settled stalled drag to OPEN (progress=$progress)")
+                        open()
+                    }
+
+                    DragWatchdogAction.CLOSE -> {
+                        Log.w(TAG, "Drag watchdog settled stalled drag to CLOSE (progress=$progress)")
+                        close()
+                    }
+
+                    DragWatchdogAction.NONE -> {
+                        return@PanelOverlayScheduler
+                    }
+                }
+            },
         )
 
     private val dialog =
@@ -76,7 +95,7 @@ class SidebarPanelWindow(
             windowProvider = { dialog.window },
         )
 
-    private val motionDriver =
+    private val motionDriver: PanelMotionDriver =
         PanelMotionDriver(
             contentContainer = contentContainer,
             surfaceState = surfaceState,
@@ -246,46 +265,67 @@ class SidebarPanelWindow(
 
     fun onGestureStart(startYFraction: Float = 0.5f) {
         prepareAndShow(resetOrigin = true, startYFraction = startYFraction, startProgress = 0f, focusable = false)
-        setState(PanelState.DRAGGING)
+        stateMachine.beginGestureDrag()
+        scheduler.scheduleDragWatchdog(DRAG_WATCHDOG_TIMEOUT_MS)
     }
 
     fun onGestureMove(progress: Float) {
-        if (currentState != PanelState.DRAGGING) onGestureStart()
+        if (stateMachine.shouldRestartDragOnMove()) {
+            val fromClosed = currentState == PanelState.CLOSED
+            prepareAndShow(resetOrigin = fromClosed, startYFraction = 0.5f, startProgress = progress, focusable = false)
+            stateMachine.beginGestureDrag()
+        }
         motionDriver.updateDrag(progress)
+        scheduler.scheduleDragWatchdog(DRAG_WATCHDOG_TIMEOUT_MS)
     }
 
     fun onGestureEnd(
         shouldOpen: Boolean,
         velocityPxPerSec: Float,
-    ) = if (shouldOpen) open(initialVelocityPx = velocityPxPerSec) else close(initialVelocityPx = velocityPxPerSec)
+    ) {
+        scheduler.cancelDragWatchdog()
+        if (shouldOpen) open(initialVelocityPx = velocityPxPerSec) else close(initialVelocityPx = velocityPxPerSec)
+    }
 
     fun open(initialVelocityPx: Float = 0f) {
         val fromClosed = currentState == PanelState.CLOSED
         val startProgress = if (fromClosed) 0f else motionDriver.currentProgress
         prepareAndShow(resetOrigin = fromClosed, startYFraction = 0.5f, startProgress = startProgress, focusable = true)
-        setState(PanelState.OPEN)
+        val token = stateMachine.beginOpen()
         motionDriver.animateOpen(startProgress, initialVelocityPx) {
-            if (currentState == PanelState.OPEN && !closingInProgress) refreshOpenGeometry()
+            if (stateMachine.onOpenSettled(token)) refreshOpenGeometry()
         }
         activeWebView?.requestFocus()
     }
 
-    fun close(initialVelocityPx: Float = 0f) {
-        if (!attached || currentState == PanelState.CLOSED || closingInProgress) return
+    fun close(
+        initialVelocityPx: Float = 0f,
+        forceImmediate: Boolean = false,
+    ) {
+        if (forceImmediate) {
+            cancelPendingTimers()
+            motionDriver.cancelActiveAnimations()
+            if (attached) setImeFocused(false)
+            stateMachine.forceCloseImmediate()
+            motionDriver.resetProgressToClosed()
+            if (attached) collapseToWarmInvisible()
+            return
+        }
+        val token = stateMachine.beginClose(attached = attached) ?: return
         cancelPendingTimers()
-        motionDriver.cancelAndResetBackVisuals()
-        closingInProgress = true
+        motionDriver.cancelActiveAnimations()
         setImeFocused(false)
         motionDriver.recomputeDimensions()
         motionDriver.animateClose(initialVelocityPx) {
-            closingInProgress = false
+            if (!stateMachine.onCloseSettled(token)) return@animateClose
             onRailMotionProgress(0f)
-            setState(PanelState.CLOSED)
             scheduler.scheduleWarmCollapse()
         }
     }
 
-    fun toggle() = if (currentState == PanelState.OPEN && !closingInProgress) close() else open()
+    fun forceCloseImmediate() = close(forceImmediate = true)
+
+    fun toggle() = if (stateMachine.shouldToggleClose()) close() else open()
 
     fun setImeFocused(focused: Boolean) {
         if (!attached || currentState == PanelState.CLOSED) return
@@ -296,7 +336,8 @@ class SidebarPanelWindow(
 
     fun detach() {
         cancelPendingTimers()
-        motionDriver.cancel()
+        motionDriver.cancelActiveAnimations()
+        stateMachine.onDetach()
         backdropController.unregisterBlurListener()
         motionDriver.unregisterBackCallback(dialog)
         if (attached) {
@@ -313,7 +354,8 @@ class SidebarPanelWindow(
     ) {
         if (!attached) attachWarm()
         cancelPendingTimers()
-        closingInProgress = false
+        motionDriver.cancelActiveAnimations()
+        stateMachine.interruptClosing()
         motionDriver.showPreparedFrame(resetOrigin, startYFraction, startProgress, focusable)
     }
 
@@ -326,64 +368,15 @@ class SidebarPanelWindow(
         updateLeftEdgeGestureExclusion()
     }
 
-    private fun isInnerEdgeBufferTouch(
-        rawX: Float,
-        rawY: Float,
-    ): Boolean {
-        val decor = dialog.window?.decorView ?: return false
-        decor.getLocationOnScreen(decorLocation)
-        val left = decorLocation[0]
-        val top = decorLocation[1]
-        val right = left + windowLayout.cachedWidthPx
-        val bottom = top + windowLayout.cachedHeightPx
-        val density =
-            themedContext.resources.displayMetrics.density
-                .coerceAtLeast(1f)
-        return PanelOutsideTouchPolicy.shouldIgnoreInnerEdgeOutsideTouch(
-            edge = surfaceState.edgeSide,
-            rawX = rawX,
-            rawY = rawY,
-            panelBoundsLeft = left,
-            panelBoundsTop = top,
-            panelBoundsRight = right,
-            panelBoundsBottom = bottom,
-            density = density,
-        )
-    }
-
-    private fun updateLeftEdgeGestureExclusion() {
-        val shouldExclude = surfaceState.edgeSide == EdgeSide.LEFT && activeEmbedToolbar != null
-        if (!shouldExclude || windowLayout.cachedHeightPx <= 2) {
-            contentContainer.systemGestureExclusionRects = emptyList()
-            return
-        }
-        val density =
-            themedContext.resources.displayMetrics.density
-                .coerceAtLeast(1f)
-        val edgeWidthPx = OverlayWindowFlags.dp(density, 28f)
-        val maxBandPx = OverlayWindowFlags.dp(density, 180f)
-        val height = windowLayout.cachedHeightPx
-        val bandHeight = minOf(maxBandPx, (height * 0.45f).toInt().coerceAtLeast(1))
-        val top = ((height - bandHeight) / 2).coerceAtLeast(0)
-        contentContainer.systemGestureExclusionRects = listOf(Rect(0, top, edgeWidthPx, top + bandHeight))
-    }
+    private fun updateLeftEdgeGestureExclusion() = motionDriver.updateLeftEdgeGestureExclusion(activeEmbedToolbar != null)
 
     private fun collapseToWarmInvisible() {
-        closingInProgress = false
         scheduler.resetPolicyOnCollapse()
-        if (motionDriver.collapseToWarmInvisible()) {
-            setState(PanelState.CLOSED)
-        }
-    }
-
-    private fun setState(next: PanelState) {
-        if (currentState != next) {
-            currentState = next
-            onPanelStateChanged(next)
-        }
+        stateMachine.onWarmCollapsed(markClosed = motionDriver.collapseToWarmInvisible())
     }
 
     companion object {
         private const val TAG = "SideVeilPanelWindow"
+        const val DRAG_WATCHDOG_TIMEOUT_MS = PanelDragStateMachine.DEFAULT_DRAG_WATCHDOG_TIMEOUT_MS
     }
 }

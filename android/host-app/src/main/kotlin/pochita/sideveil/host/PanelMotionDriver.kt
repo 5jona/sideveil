@@ -1,6 +1,7 @@
 package pochita.sideveil.host
 
 import android.app.Dialog
+import android.graphics.Rect
 import android.view.View
 import android.view.Window
 import android.view.WindowInsets
@@ -28,7 +29,7 @@ internal class PanelSurfaceState {
  * and per-frame window/backdrop/rail motion visuals on behalf of [SidebarPanelWindow].
  */
 internal class PanelMotionDriver(
-    contentContainer: View,
+    private val contentContainer: View,
     private val surfaceState: PanelSurfaceState,
     private val windowLayout: PanelWindowLayout,
     private val backdropController: PanelBackdropController,
@@ -43,6 +44,7 @@ internal class PanelMotionDriver(
     private val onContentAlphaChanged: (Float) -> Unit = {},
 ) {
     private val springController = PanelSpringController()
+    private val animationGuard = PanelAnimationGuard()
     private var gestureStartYFraction = 0.5f
     private var backCallbackRegistered = false
 
@@ -59,6 +61,7 @@ internal class PanelMotionDriver(
             onBackPressedIntercept = onBackPressedIntercept,
             onCommitClose = { backProgress ->
                 if (backProgress > 0.05f) {
+                    animationGuard.invalidate()
                     springController.snapTo((1f - backProgress * 0.35f).coerceIn(0.4f, 1f))
                 }
                 onCommitBackClose()
@@ -81,12 +84,23 @@ internal class PanelMotionDriver(
         }
     }
 
-    fun cancelAndResetBackVisuals() {
+    /**
+     * Cancels all active open/close spring animations and predictive-back reset animations while
+     * invalidating the motion generation token so stale callbacks cannot mutate panel state.
+     */
+    fun cancelActiveAnimations() {
+        animationGuard.invalidate()
         springController.cancel()
         backAnimator.resetVisuals(animated = false)
     }
 
-    fun cancel() = springController.cancel()
+    fun resetProgressToClosed() {
+        cancelActiveAnimations()
+        springController.snapTo(0f)
+        onRailMotionProgress(0f)
+    }
+
+    fun cancel() = cancelActiveAnimations()
 
     fun recomputeDimensions() =
         windowLayout.recomputeDimensions(
@@ -105,7 +119,7 @@ internal class PanelMotionDriver(
         startProgress: Float,
         focusable: Boolean,
     ) {
-        cancelAndResetBackVisuals()
+        cancelActiveAnimations()
         if (resetOrigin) gestureStartYFraction = startYFraction.coerceIn(0f, 1f)
         recomputeDimensions()
         springController.snapTo(startProgress)
@@ -125,6 +139,8 @@ internal class PanelMotionDriver(
     }
 
     fun collapseToWarmInvisible(): Boolean {
+        cancelActiveAnimations()
+        springController.snapTo(0f)
         surfaceState.lastLiveInsets = null
         surfaceState.effectiveImeBottomPx = 0
         val window = windowProvider() ?: return false
@@ -140,6 +156,7 @@ internal class PanelMotionDriver(
     }
 
     fun updateDrag(progress: Float) {
+        animationGuard.invalidate()
         val prev = springController.currentProgress
         val next = springController.updateDrag(progress)
         val approxVel = ((next - prev) * 60f).coerceIn(-6f, 6f)
@@ -154,6 +171,7 @@ internal class PanelMotionDriver(
         initialVelocityPx: Float,
         onSettled: () -> Unit,
     ) {
+        val token = animationGuard.nextToken()
         val width = windowLayout.cachedWidthPx.coerceAtLeast(1).toFloat()
         val velocityNorm = (initialVelocityPx / width).coerceIn(-12f, 12f)
         springController.animateTo(
@@ -162,11 +180,15 @@ internal class PanelMotionDriver(
             startVelocityPerSec = velocityNorm,
             opening = true,
             onUpdate = { progress, velocity ->
-                windowProvider()?.let { win ->
-                    applyMotionVisuals(win, computeFrame(progress, velocity), focusable = true, allowOffscreen = true)
+                animationGuard.runIfActive(token) {
+                    windowProvider()?.let { win ->
+                        applyMotionVisuals(win, computeFrame(progress, velocity), focusable = true, allowOffscreen = true)
+                    }
                 }
             },
-            onSettled = onSettled,
+            onSettled = {
+                animationGuard.runIfActive(token, onSettled)
+            },
         )
     }
 
@@ -174,6 +196,7 @@ internal class PanelMotionDriver(
         initialVelocityPx: Float,
         onSettled: () -> Unit,
     ) {
+        val token = animationGuard.nextToken()
         val outwardPx = if (initialVelocityPx <= 0f) initialVelocityPx else -initialVelocityPx
         val width = windowLayout.cachedWidthPx.coerceAtLeast(1).toFloat()
         val velocityNorm = (outwardPx / width).coerceIn(-12f, 0f)
@@ -183,12 +206,57 @@ internal class PanelMotionDriver(
             startVelocityPerSec = velocityNorm,
             opening = false,
             onUpdate = { progress, velocity ->
-                windowProvider()?.let { win ->
-                    applyMotionVisuals(win, computeFrame(progress, velocity), focusable = false, allowOffscreen = true)
+                animationGuard.runIfActive(token) {
+                    windowProvider()?.let { win ->
+                        applyMotionVisuals(win, computeFrame(progress, velocity), focusable = false, allowOffscreen = true)
+                    }
                 }
             },
-            onSettled = onSettled,
+            onSettled = {
+                animationGuard.runIfActive(token, onSettled)
+            },
         )
+    }
+
+    fun isInnerEdgeBufferTouch(
+        rawX: Float,
+        rawY: Float,
+        decorLocation: IntArray,
+    ): Boolean {
+        val decor = windowProvider()?.decorView ?: return false
+        decor.getLocationOnScreen(decorLocation)
+        val left = decorLocation[0]
+        val top = decorLocation[1]
+        val density =
+            contentContainer.resources.displayMetrics.density
+                .coerceAtLeast(1f)
+        return PanelOutsideTouchPolicy.shouldIgnoreInnerEdgeOutsideTouch(
+            edge = surfaceState.edgeSide,
+            rawX = rawX,
+            rawY = rawY,
+            panelBoundsLeft = left,
+            panelBoundsTop = top,
+            panelBoundsRight = left + windowLayout.cachedWidthPx,
+            panelBoundsBottom = top + windowLayout.cachedHeightPx,
+            density = density,
+        )
+    }
+
+    fun updateLeftEdgeGestureExclusion(hasEmbedToolbar: Boolean) {
+        val shouldExclude = surfaceState.edgeSide == EdgeSide.LEFT && hasEmbedToolbar
+        if (!shouldExclude || windowLayout.cachedHeightPx <= 2) {
+            contentContainer.systemGestureExclusionRects = emptyList()
+            return
+        }
+        val density =
+            contentContainer.resources.displayMetrics.density
+                .coerceAtLeast(1f)
+        val edgeWidthPx = OverlayWindowFlags.dp(density, 28f)
+        val maxBandPx = OverlayWindowFlags.dp(density, 180f)
+        val height = windowLayout.cachedHeightPx
+        val bandHeight = minOf(maxBandPx, (height * 0.45f).toInt().coerceAtLeast(1))
+        val top = ((height - bandHeight) / 2).coerceAtLeast(0)
+        contentContainer.systemGestureExclusionRects = listOf(Rect(0, top, edgeWidthPx, top + bandHeight))
     }
 
     private fun computeFrame(

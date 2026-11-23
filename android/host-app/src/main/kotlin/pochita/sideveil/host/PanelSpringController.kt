@@ -8,6 +8,7 @@ import androidx.dynamicanimation.animation.SpringAnimation
  * decoupled from Android Dialog / WindowManager lifecycle concerns.
  */
 class PanelSpringController {
+    private val animationGuard = PanelAnimationGuard()
     private var activeSpring: SpringAnimation? = null
 
     var currentProgress: Float = 0f
@@ -19,6 +20,7 @@ class PanelSpringController {
     }
 
     fun updateDrag(progress: Float): Float {
+        cancel()
         val clamped = progress.coerceAtLeast(0f)
         currentProgress = clamped
         return clamped
@@ -33,34 +35,42 @@ class PanelSpringController {
         onSettled: () -> Unit,
     ) {
         cancel()
+        val token = animationGuard.nextToken()
         val safeStart = startProgress.coerceAtLeast(0f)
         val safeEnd = endProgress.coerceAtLeast(0f)
         currentProgress = safeStart
         val holder = FloatValueHolder(safeStart * SPRING_SCALE)
-        activeSpring =
+        val springAnim =
             SpringAnimation(holder, safeEnd * SPRING_SCALE).apply {
                 setStartVelocity(startVelocityPerSec * SPRING_SCALE)
                 spring.stiffness = if (opening) OPEN_STIFFNESS else CLOSE_STIFFNESS
                 spring.dampingRatio = if (opening) OPEN_DAMPING else CLOSE_DAMPING
                 addUpdateListener { _, value, velocity ->
-                    val normalized = (value / SPRING_SCALE).coerceAtLeast(0f)
-                    currentProgress = normalized
-                    onUpdate(normalized, velocity / SPRING_SCALE)
-                }
-                addEndListener { _, canceled, _, _ ->
-                    activeSpring = null
-                    if (!canceled) {
-                        currentProgress = safeEnd
-                        onSettled()
+                    animationGuard.runIfActive(token) {
+                        val normalized = (value / SPRING_SCALE).coerceAtLeast(0f)
+                        currentProgress = normalized
+                        onUpdate(normalized, velocity / SPRING_SCALE)
                     }
                 }
-                start()
+                addEndListener { _, canceled, _, _ ->
+                    animationGuard.runIfActive(token) {
+                        activeSpring = null
+                        if (!canceled) {
+                            currentProgress = safeEnd
+                            onSettled()
+                        }
+                    }
+                }
             }
+        activeSpring = springAnim
+        springAnim.start()
     }
 
     fun cancel() {
-        activeSpring?.cancel()
+        animationGuard.invalidate()
+        val spring = activeSpring
         activeSpring = null
+        spring?.cancel()
     }
 
     companion object {

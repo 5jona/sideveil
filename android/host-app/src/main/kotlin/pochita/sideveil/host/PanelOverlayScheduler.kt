@@ -6,8 +6,8 @@ import android.os.SystemClock
 import pochita.sideveil.protocol.PanelState
 
 /**
- * Schedules debounced outside-touch dismissal (backed by [PanelOutsideTouchPolicy]) and
- * post-dismiss warm-retain collapse timers for [SidebarPanelWindow].
+ * Schedules debounced outside-touch dismissal (backed by [PanelOutsideTouchPolicy]),
+ * post-dismiss warm-retain collapse timers, and the `DRAGGING` stall watchdog for [SidebarPanelWindow].
  */
 internal class PanelOverlayScheduler(
     private val stateProvider: () -> PanelState,
@@ -16,11 +16,13 @@ internal class PanelOverlayScheduler(
     private val isInnerEdgeBufferTouch: (Float, Float) -> Boolean = { _, _ -> false },
     private val onRequestClose: () -> Unit,
     private val onWarmCollapse: () -> Unit,
+    private val onDragWatchdogTimeout: () -> Unit = {},
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val outsideTouchPolicy = PanelOutsideTouchPolicy(nowMs = SystemClock::uptimeMillis)
     private var pendingCollapse: Runnable? = null
     private var pendingOutsideClose: Runnable? = null
+    private var pendingDragWatchdog: Runnable? = null
 
     fun onImeInsetsChanged(nextImeBottomPx: Int) {
         outsideTouchPolicy.onImeInsetsChanged(nextImeBottomPx)
@@ -55,12 +57,34 @@ internal class PanelOverlayScheduler(
         mainHandler.postDelayed(task, POST_DISMISS_WARM_RETAIN_MS)
     }
 
-    fun cancelPendingTimers(includeCollapse: Boolean = true) {
+    fun scheduleDragWatchdog(timeoutMs: Long = DRAG_WATCHDOG_TIMEOUT_MS) {
+        cancelDragWatchdog()
+        val task =
+            Runnable {
+                pendingDragWatchdog = null
+                onDragWatchdogTimeout()
+            }
+        pendingDragWatchdog = task
+        mainHandler.postDelayed(task, timeoutMs)
+    }
+
+    fun cancelDragWatchdog() {
+        pendingDragWatchdog?.let(mainHandler::removeCallbacks)
+        pendingDragWatchdog = null
+    }
+
+    fun cancelPendingTimers(
+        includeCollapse: Boolean = true,
+        includeDragWatchdog: Boolean = includeCollapse,
+    ) {
         pendingOutsideClose?.let(mainHandler::removeCallbacks)
         pendingOutsideClose = null
         if (includeCollapse) {
             pendingCollapse?.let(mainHandler::removeCallbacks)
             pendingCollapse = null
+        }
+        if (includeDragWatchdog) {
+            cancelDragWatchdog()
         }
     }
 
@@ -81,5 +105,6 @@ internal class PanelOverlayScheduler(
     companion object {
         private const val POST_DISMISS_WARM_RETAIN_MS = 150L
         private const val OUTSIDE_CLOSE_DEBOUNCE_MS = 72L
+        const val DRAG_WATCHDOG_TIMEOUT_MS = PanelDragStateMachine.DEFAULT_DRAG_WATCHDOG_TIMEOUT_MS
     }
 }

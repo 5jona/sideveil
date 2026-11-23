@@ -12,6 +12,8 @@ RUN_DIR="${STATE_DIR}/run"
 PLUGINS_DIR="${STATE_DIR}/plugins"
 DATA_DIR="${STATE_DIR}/data"
 ROOT_RUN_DIR="/data/adb/sideveil/run"
+SUPERVISOR_PID_FILE="${ROOT_RUN_DIR}/supervisor.pid"
+SUPERVISOR_SCRIPT="/data/adb/modules/sideveil/service.sh"
 LIVE_CONFIG="${STATE_DIR}/config.json"
 MODULE_CONFIG="${MODDIR}/config.json"
 HUB_BIN="${MODDIR}/bin/sideveild"
@@ -62,6 +64,35 @@ terminate_pid_gracefully() {
     fi
 }
 
+remove_own_supervisor_pid() {
+    if [ -f "$SUPERVISOR_PID_FILE" ] && [ ! -L "$SUPERVISOR_PID_FILE" ]; then
+        CURRENT_SUP_PID=$(cat "$SUPERVISOR_PID_FILE" 2>/dev/null || true)
+        if [ "$CURRENT_SUP_PID" = "$$" ]; then
+            rm -f "$SUPERVISOR_PID_FILE"
+        fi
+    fi
+}
+
+stop_existing_supervisors() {
+    if [ -f "$SUPERVISOR_PID_FILE" ] && [ ! -L "$SUPERVISOR_PID_FILE" ]; then
+        OLD_SUP_PID=$(cat "$SUPERVISOR_PID_FILE" 2>/dev/null || true)
+        if [ -n "$OLD_SUP_PID" ] && [ "$OLD_SUP_PID" != "$$" ] && [ "$OLD_SUP_PID" != "$PPID" ]; then
+            log_info "Stopping previous supervisor pid=${OLD_SUP_PID} from pidfile..."
+            terminate_pid_gracefully "$OLD_SUP_PID"
+        fi
+    fi
+    for PROC_PID in $(ps -A -o PID,ARGS 2>/dev/null | grep -F "$SUPERVISOR_SCRIPT" | grep -v grep | while read -r p _rest; do echo "$p"; done); do
+        case "$PROC_PID" in
+            ''|*[!0-9]*) continue ;;
+        esac
+        if [ "$PROC_PID" = "$$" ] || [ "$PROC_PID" = "$PPID" ]; then
+            continue
+        fi
+        log_info "Stopping stale supervisor pid=${PROC_PID}..."
+        terminate_pid_gracefully "$PROC_PID"
+    done
+}
+
 stop_existing_processes() {
     for pidfile in "${ROOT_RUN_DIR}/sideveild.pid" "${ROOT_RUN_DIR}/hostwatch.pid"; do
         if [ -f "$pidfile" ] && [ ! -L "$pidfile" ]; then
@@ -83,6 +114,7 @@ stop_existing_processes() {
 
 cleanup_and_exit() {
     terminate_pid_gracefully "$HUB_PID"
+    remove_own_supervisor_pid
     exit 0
 }
 trap cleanup_and_exit TERM INT
@@ -107,9 +139,11 @@ chmod 0755 "$PLUGINS_DIR"
 chown 0:0 "$DATA_DIR" "/data/adb/sideveil" "$ROOT_RUN_DIR"
 chmod 0700 "$DATA_DIR" "/data/adb/sideveil" "$ROOT_RUN_DIR"
 
-rm -f "${ROOT_RUN_DIR}/supervisor.pid"
-echo "$$" > "${ROOT_RUN_DIR}/supervisor.pid"
-chmod 0600 "${ROOT_RUN_DIR}/supervisor.pid"
+stop_existing_supervisors
+
+rm -f "$SUPERVISOR_PID_FILE"
+echo "$$" > "$SUPERVISOR_PID_FILE"
+chmod 0600 "$SUPERVISOR_PID_FILE"
 
 if [ ! -f "$LIVE_CONFIG" ] && [ -f "$MODULE_CONFIG" ]; then
     cp "$MODULE_CONFIG" "$LIVE_CONFIG"
@@ -167,3 +201,5 @@ while true; do
     HUB_PID=""
     sleep 2
 done
+
+remove_own_supervisor_pid

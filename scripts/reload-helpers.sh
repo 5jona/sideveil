@@ -136,12 +136,27 @@ stop_hub_processes_script() {
 for pidfile in ${REMOTE_ROOT_RUN_DIR}/supervisor.pid ${REMOTE_ROOT_RUN_DIR}/sideveild.pid ${REMOTE_ROOT_RUN_DIR}/hostwatch.pid ${REMOTE_STATE_DIR}/run/hostwatch.pid ${REMOTE_STATE_DIR}/run/supervisor.pid; do
     if [ -f "\$pidfile" ] && [ ! -L "\$pidfile" ]; then
         P=\$(cat "\$pidfile" 2>/dev/null || true)
-        if [ -n "\$P" ]; then
+        if [ -n "\$P" ] && [ "\$P" != "\$\$" ] && [ "\$P" != "\$PPID" ]; then
             kill -TERM "\$P" 2>/dev/null || true
             sleep 0.2
             kill -9 "\$P" 2>/dev/null || true
         fi
     fi
+done
+for P in \$(ps -A -o PID,ARGS 2>/dev/null | grep -F "${REMOTE_MOD_DIR}/service.sh" | grep -v grep | while read -r pid _rest; do echo "\$pid"; done); do
+    case "\$P" in
+        ''|*[!0-9]*) continue ;;
+    esac
+    if [ "\$P" = "\$\$" ] || [ "\$P" = "\$PPID" ]; then
+        continue
+    fi
+    kill -TERM "\$P" 2>/dev/null || true
+    WAIT_STEPS=0
+    while [ "\$WAIT_STEPS" -lt 10 ] && kill -0 "\$P" 2>/dev/null; do
+        sleep 0.2
+        WAIT_STEPS=\$((WAIT_STEPS + 1))
+    done
+    kill -9 "\$P" 2>/dev/null || true
 done
 pkill -l TERM -x "sideveild" 2>/dev/null || true
 pkill -l TERM -x "sideveil-example-perf-hud" 2>/dev/null || true

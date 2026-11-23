@@ -128,9 +128,7 @@ internal class HostServiceBridge(
         latestScopeActive = false
         pluginRail.setPanelOpen(false)
         overlayCoordinator.hideTransientOverlays()
-        if (panelWindow.currentState != PanelState.CLOSED) {
-            panelWindow.close()
-        }
+        panelWindow.forceCloseImmediate()
         refreshEdgeIndicator()
     }
 
