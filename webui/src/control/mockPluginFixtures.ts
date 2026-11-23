@@ -2,7 +2,7 @@ import type {
   NetworkContextSnapshot,
   PluginAuditReport,
   PluginDescriptor,
-} from '@pochita/sideveil-sdk';
+} from '@gojona/sideveil-sdk';
 
 export const MOCK_HOST_PID = 14905;
 

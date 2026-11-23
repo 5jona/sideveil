@@ -8,7 +8,7 @@ import {
   CardTitle,
   SettingRow,
   Switch,
-} from '@pochita/ui';
+} from '@gojona/ui';
 import { AlertTriangle, Bug, Check, Copy } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { DaemonStatus, DebugCdpStatusResult, SideVeilConfig } from '../../shared/types.ts';

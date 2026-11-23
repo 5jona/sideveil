@@ -1,5 +1,5 @@
-import type { PluginAuditReport, PluginsSnapshotPayload } from '@pochita/sideveil-sdk';
-import { Badge, Button, Card, MetricTile } from '@pochita/ui';
+import type { PluginAuditReport, PluginsSnapshotPayload } from '@gojona/sideveil-sdk';
+import { Badge, Button, Card, MetricTile } from '@gojona/ui';
 import { Boxes, EyeOff, Layers, Plus, RefreshCw, Shield, Sparkles, Wrench } from 'lucide-react';
 import { useState } from 'react';
 import { isBuiltinTestPlugin, type RuntimeMode } from '../../shared/types.ts';

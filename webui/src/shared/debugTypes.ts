@@ -2,13 +2,13 @@ import {
   type RuntimeMode,
   SIDEVEIL_BUILTIN_TEST_PLUGINS,
   SIDEVEIL_CONFIG_DEFAULTS,
-} from '@pochita/bridge';
+} from '@gojona/bridge';
 import type {
   DebugGestureStats,
   EdgeSide,
   PanelState,
   PluginsSnapshotPayload,
-} from '@pochita/sideveil-sdk';
+} from '@gojona/sideveil-sdk';
 
 export type { DebugGestureStats };
 

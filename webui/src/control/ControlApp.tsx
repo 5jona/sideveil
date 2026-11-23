@@ -1,4 +1,4 @@
-import { type BridgeOptions, BridgeProvider } from '@pochita/bridge';
+import { type BridgeOptions, BridgeProvider } from '@gojona/bridge';
 import {
   AppShell,
   Badge,
@@ -11,7 +11,7 @@ import {
   ThemeProvider,
   ToastProvider,
   useToast,
-} from '@pochita/ui';
+} from '@gojona/ui';
 import {
   AlertCircle,
   AlertTriangle,

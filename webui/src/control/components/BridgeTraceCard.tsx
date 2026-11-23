@@ -1,5 +1,5 @@
-import type { BridgeClient, BridgeTraceEvent } from '@pochita/bridge';
-import { BridgeTraceInspector } from '@pochita/ui';
+import type { BridgeClient, BridgeTraceEvent } from '@gojona/bridge';
+import { BridgeTraceInspector } from '@gojona/ui';
 import { useEffect, useState } from 'react';
 
 export interface BridgeTraceCardProps {

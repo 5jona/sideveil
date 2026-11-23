@@ -1,9 +1,5 @@
-import type {
-  PluginBackendKind,
-  PluginBackendState,
-  PluginCapability,
-} from '@pochita/sideveil-sdk';
-import { Badge } from '@pochita/ui';
+import type { PluginBackendKind, PluginBackendState, PluginCapability } from '@gojona/sideveil-sdk';
+import { Badge } from '@gojona/ui';
 import {
   Activity,
   Bell,

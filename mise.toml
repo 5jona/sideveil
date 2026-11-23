@@ -67,11 +67,11 @@ run = "cargo build --release --target aarch64-linux-android"
 
 [tasks."contracts:gen"]
 description = "Generate Rust, Kotlin, TypeScript, and JSON Schema contract artifacts from contracts/*.contract.json"
-run = "node ../../../pochita-webui-kit/packages/contracts-gen/src/cli.mjs generate contracts/protocol-constants.contract.json contracts/config-bounds.contract.json contracts/protocol-wire.contract.json contracts/theme-hud.contract.json"
+run = "webui/node_modules/.bin/pochita-contracts-gen generate contracts/protocol-constants.contract.json contracts/config-bounds.contract.json contracts/protocol-wire.contract.json contracts/theme-hud.contract.json"
 
 [tasks."contracts:check"]
 description = "Verify generated contract files have zero drift and validate all golden wire fixtures against JSON Schemas"
-run = "CLI=../../../pochita-webui-kit/packages/contracts-gen/src/cli.mjs && node \"$CLI\" check contracts/protocol-constants.contract.json contracts/config-bounds.contract.json contracts/protocol-wire.contract.json contracts/theme-hud.contract.json && node \"$CLI\" validate-fixtures contracts/schemas/config.schema.json contracts/fixtures/config && node \"$CLI\" validate-fixtures contracts/schemas/protocol-status.schema.json contracts/fixtures/status && node \"$CLI\" validate-fixtures contracts/schemas/protocol-events.schema.json contracts/fixtures/events && node \"$CLI\" validate-fixtures contracts/schemas/protocol-theme-hud.schema.json contracts/fixtures/theme-hud"
+run = "CLI=webui/node_modules/.bin/pochita-contracts-gen && \"$CLI\" check contracts/protocol-constants.contract.json contracts/config-bounds.contract.json contracts/protocol-wire.contract.json contracts/theme-hud.contract.json && \"$CLI\" validate-fixtures contracts/schemas/config.schema.json contracts/fixtures/config && \"$CLI\" validate-fixtures contracts/schemas/protocol-status.schema.json contracts/fixtures/status && \"$CLI\" validate-fixtures contracts/schemas/protocol-events.schema.json contracts/fixtures/events && \"$CLI\" validate-fixtures contracts/schemas/protocol-theme-hud.schema.json contracts/fixtures/theme-hud"
 
 [tasks.check]
 description = "Run all contract, Rust, WebUI, and Android quality gates"

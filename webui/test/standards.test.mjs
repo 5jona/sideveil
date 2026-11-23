@@ -33,7 +33,7 @@ function walkFiles(dir, extensions, out = []) {
   return out;
 }
 
-test('webui source files never bypass @pochita/bridge or hardcode FPS ceilings', () => {
+test('webui source files never bypass @gojona/bridge or hardcode FPS ceilings', () => {
   const files = walkFiles(path.join(WEBUI_ROOT, 'src'), ['.ts', '.tsx', '.css']);
   assert.ok(files.length > 0, 'Expected webui/src source files to exist');
 

@@ -1,4 +1,4 @@
-import { colorWithAlpha, type ResolvedColorScheme, readThemeToken } from '@pochita/ui';
+import { colorWithAlpha, type ResolvedColorScheme, readThemeToken } from '@gojona/ui';
 
 /** Maximum backing texture dimension in physical pixels to keep GPU/2D memory bounded. */
 export const MAX_CANVAS_DIM_PX = 2048;

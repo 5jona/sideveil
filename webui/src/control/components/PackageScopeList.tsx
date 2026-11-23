@@ -1,4 +1,4 @@
-import { Button, Input } from '@pochita/ui';
+import { Button, Input } from '@gojona/ui';
 import { Plus, X } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 

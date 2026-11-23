@@ -1,5 +1,5 @@
 {
-  "$schema": "../../../../pochita-webui-kit/packages/contracts-gen/contract.schema.json",
+  "$schema": "../webui/node_modules/@gojona/contracts-gen/contract.schema.json",
   "schemaVersion": 1,
   "name": "sideveil-config-bounds",
   "description": "Authoritative SideVeil config.json defaults, numeric clamp bounds, and config wire schema.",
@@ -175,7 +175,7 @@
     },
     {
       "target": "ts",
-      "path": "../../../../pochita-webui-kit/packages/bridge/src/generated/sideveilConfig.ts",
+      "path": "generated/ts/sideveilConfig.ts",
       "header": "Source: sideveil/contracts/config-bounds.contract.json",
       "include": { "constants": true, "enums": true }
     },

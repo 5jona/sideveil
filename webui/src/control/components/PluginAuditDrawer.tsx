@@ -1,5 +1,5 @@
-import type { PluginAuditReport } from '@pochita/sideveil-sdk';
-import { Badge, Button, Card } from '@pochita/ui';
+import type { PluginAuditReport } from '@gojona/sideveil-sdk';
+import { Badge, Button, Card } from '@gojona/ui';
 import { Cpu, RefreshCw, ShieldAlert, ShieldCheck } from 'lucide-react';
 
 export interface PluginAuditDrawerProps {

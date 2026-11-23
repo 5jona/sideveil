@@ -1,5 +1,5 @@
-import type { ContainerBackdrop } from '@pochita/bridge';
-import { Button, Card, cn, SettingRow, Switch } from '@pochita/ui';
+import type { ContainerBackdrop } from '@gojona/bridge';
+import { Button, Card, cn, SettingRow, Switch } from '@gojona/ui';
 import { Check, Layers, PanelRight, Pin, Sparkles } from 'lucide-react';
 
 const BACKDROP_OPTIONS: ReadonlyArray<{

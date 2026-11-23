@@ -1,5 +1,5 @@
-import { type BridgeClient, shellQuote } from '@pochita/bridge';
-import { type NetworkContextSnapshot, parseNetworkContextSnapshot } from '@pochita/sideveil-sdk';
+import { type BridgeClient, shellQuote } from '@gojona/bridge';
+import { type NetworkContextSnapshot, parseNetworkContextSnapshot } from '@gojona/sideveil-sdk';
 import { useCallback, useEffect, useState } from 'react';
 import { CTL_BIN, SIDEVEIL_EVENTS, SIDEVEIL_METHODS } from '../../shared/types.ts';
 

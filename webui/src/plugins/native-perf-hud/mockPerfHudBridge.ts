@@ -1,4 +1,4 @@
-import type { MockRpcHandler } from '@pochita/bridge';
+import type { MockRpcHandler } from '@gojona/bridge';
 import { DEFAULT_CONFIG, SIDEVEIL_METHODS } from '../../shared/types.ts';
 
 export interface PerfHudBackendState {

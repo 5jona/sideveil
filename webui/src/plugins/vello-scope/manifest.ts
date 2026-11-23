@@ -1,4 +1,4 @@
-import { definePluginManifest, type PluginManifest } from '@pochita/sideveil-sdk';
+import { definePluginManifest, type PluginManifest } from '@gojona/sideveil-sdk';
 
 export const VELLO_SCOPE_PLUGIN_ID = 'example.vello-scope';
 

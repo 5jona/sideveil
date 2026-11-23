@@ -1,4 +1,4 @@
-import type { BridgeOptions } from '@pochita/bridge';
+import type { BridgeOptions } from '@gojona/bridge';
 import {
   SideVeilPluginProvider,
   useContainerAction,
@@ -6,7 +6,7 @@ import {
   usePluginBackendState,
   usePluginRpc,
   useTelemetry,
-} from '@pochita/sideveil-sdk';
+} from '@gojona/sideveil-sdk';
 import {
   AppShell,
   Badge,
@@ -17,7 +17,7 @@ import {
   SettingRow,
   Switch,
   ThemeProvider,
-} from '@pochita/ui';
+} from '@gojona/ui';
 import { Cpu, Gauge, Thermometer, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSyncedPluginTheme } from '../../shared/useSyncedPluginTheme.ts';

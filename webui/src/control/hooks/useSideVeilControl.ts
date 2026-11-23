@@ -1,5 +1,5 @@
-import { shellQuote, useBridge } from '@pochita/bridge';
-import { type LogEntry, useTheme, useToast } from '@pochita/ui';
+import { shellQuote, useBridge } from '@gojona/bridge';
+import { type LogEntry, useTheme, useToast } from '@gojona/ui';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   CONFIG_PATH,

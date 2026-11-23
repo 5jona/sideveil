@@ -1,5 +1,5 @@
 {
-  "$schema": "../../../../pochita-webui-kit/packages/contracts-gen/contract.schema.json",
+  "$schema": "../webui/node_modules/@gojona/contracts-gen/contract.schema.json",
   "schemaVersion": 1,
   "name": "sideveil-theme-hud",
   "description": "Shared dynamic theme palette and native vector HUD wire contracts for SideVeil.",
@@ -138,7 +138,7 @@
     },
     {
       "target": "ts",
-      "path": "../../../../pochita-webui-kit/packages/sdk/src/generated/sideveilThemeHud.ts",
+      "path": "generated/ts/sideveilThemeHud.ts",
       "header": "Source: sideveil/contracts/theme-hud.contract.json",
       "methodsConstName": "SIDEVEIL_THEME_HUD_METHODS",
       "rpcMapName": "SideVeilThemeHudRpcMethodMap",

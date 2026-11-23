@@ -1,4 +1,4 @@
-import type { LogEntry } from '@pochita/ui';
+import type { LogEntry } from '@gojona/ui';
 import type { DaemonStatus } from '../../shared/types.ts';
 
 export function parseDaemonLogLines(lines: readonly string[]): LogEntry[] {

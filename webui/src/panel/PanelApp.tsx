@@ -1,9 +1,5 @@
-import { type BridgeOptions, type ContainerAction, useContainerThemeSync } from '@pochita/bridge';
-import {
-  BUILTIN_DIAG_PLUGIN_ID,
-  SideVeilPluginProvider,
-  useClipboard,
-} from '@pochita/sideveil-sdk';
+import { type BridgeOptions, type ContainerAction, useContainerThemeSync } from '@gojona/bridge';
+import { BUILTIN_DIAG_PLUGIN_ID, SideVeilPluginProvider, useClipboard } from '@gojona/sideveil-sdk';
 import {
   AppShell,
   Badge,
@@ -20,7 +16,7 @@ import {
   ThemeProvider,
   ThemeSwitcher,
   ToastProvider,
-} from '@pochita/ui';
+} from '@gojona/ui';
 import { Activity, RefreshCw, Sparkles, X, Zap } from 'lucide-react';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useDiagnosticPanel } from './hooks/useDiagnosticPanel.ts';

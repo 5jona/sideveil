@@ -1,6 +1,6 @@
 # SideVeil Reference Example Plugins
 
-This directory contains two bundled reference plugins demonstrating the two complementary Vello / Linebender tracks in SideVeil. Their frontends are authored in `webui/src/plugins/` using React 19 + TypeScript + Tailwind CSS v4 + `@pochita/ui` + `@pochita/sideveil-sdk` and compiled via Vite (`mise run webui:check` / `bash build.sh`) into each plugin's `web/` directory:
+This directory contains two bundled reference plugins demonstrating the two complementary Vello / Linebender tracks in SideVeil. Their frontends are authored in `webui/src/plugins/` using React 19 + TypeScript + Tailwind CSS v4 + `@gojona/ui` + `@gojona/sideveil-sdk` and compiled via Vite (`mise run webui:check` / `bash build.sh`) into each plugin's `web/` directory:
 
 1. **`vello-vector-scope/`** (`example.vello-scope`):
    - Demonstrates **WebGPU + COOP/COEP (`crossOriginIsolated: true`) + live `native-glass` / `transparent` backdrop switching** inside SideVeil's isolated plugin WebView (`https://example.vello-scope.plugins.sideveil.local/`).

@@ -1,4 +1,4 @@
-import { Button } from '@pochita/ui';
+import { Button } from '@gojona/ui';
 import { Code2, RotateCcw, Save } from 'lucide-react';
 import { useState } from 'react';
 

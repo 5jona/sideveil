@@ -2,7 +2,7 @@ import {
   definePluginManifest,
   type PluginManifest,
   SIDEVEIL_BUILTIN_DIAGNOSTIC,
-} from '@pochita/sideveil-sdk';
+} from '@gojona/sideveil-sdk';
 
 export const DIAGNOSTIC_PLUGIN_MANIFEST: PluginManifest = definePluginManifest({
   id: SIDEVEIL_BUILTIN_DIAGNOSTIC.ID,

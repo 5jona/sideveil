@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contracts-and-webui:
+    name: Contracts & WebUI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12.22.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: webui/pnpm-lock.yaml
+
+      - name: Install WebUI dependencies
+        run: pnpm --dir webui install --frozen-lockfile
+
+      - name: Check contracts and validate golden fixtures
+        run: |
+          set -euo pipefail
+          CLI=webui/node_modules/.bin/pochita-contracts-gen
+          "$CLI" check \
+            contracts/protocol-constants.contract.json \
+            contracts/config-bounds.contract.json \
+            contracts/protocol-wire.contract.json \
+            contracts/theme-hud.contract.json
+          "$CLI" validate-fixtures contracts/schemas/config.schema.json contracts/fixtures/config
+          "$CLI" validate-fixtures contracts/schemas/protocol-status.schema.json contracts/fixtures/status
+          "$CLI" validate-fixtures contracts/schemas/protocol-events.schema.json contracts/fixtures/events
+          "$CLI" validate-fixtures contracts/schemas/protocol-theme-hud.schema.json contracts/fixtures/theme-hud
+
+      - name: Check WebUI (lint, typecheck, build, test)
+        run: pnpm --dir webui check
+
+  hub-rust:
+    name: Hub & Example Rust
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: hub
+
+      - name: Check hub workspace
+        working-directory: hub
+        run: |
+          set -euo pipefail
+          cargo fmt --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+
+      - name: Check native-perf-hud example crate
+        working-directory: examples/native-perf-hud
+        run: |
+          set -euo pipefail
+          cargo fmt --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+
+  android:
+    name: Android Protocol, Sensor & Host
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 25
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK components
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --install "platforms;android-37.0" "build-tools;36.0.0"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12.22.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: webui/pnpm-lock.yaml
+
+      - name: Build panel WebUI assets
+        run: |
+          set -euo pipefail
+          pnpm --dir webui install --frozen-lockfile
+          pnpm --dir webui build:panel
+
+      - name: Setup Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Run Android checks and build sensor DEX
+        working-directory: android
+        run: |
+          ./gradlew spotlessCheck detekt :host-app:lintDebug :protocol:test :sensor:test :host-app:testDebugUnitTest :sensor:buildDex

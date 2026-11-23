@@ -6,7 +6,7 @@ import {
   CardHeader,
   CardTitle,
   SettingRow,
-} from '@pochita/ui';
+} from '@gojona/ui';
 import { Plus } from 'lucide-react';
 import type { ScopeConfig, ScopeMode } from '../../shared/types.ts';
 import { PackageScopeList } from './PackageScopeList.tsx';

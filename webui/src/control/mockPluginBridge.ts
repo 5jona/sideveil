@@ -1,4 +1,4 @@
-import type { ExecResult } from '@pochita/bridge';
+import type { ExecResult } from '@gojona/bridge';
 import { SIDEVEIL_METHODS } from '../shared/types.ts';
 import {
   createEmbedPlugin,

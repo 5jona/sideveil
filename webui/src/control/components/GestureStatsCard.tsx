@@ -1,4 +1,4 @@
-import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle } from '@pochita/ui';
+import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle } from '@gojona/ui';
 import { Hand, ShieldAlert } from 'lucide-react';
 import type { DebugGestureStats } from '../../shared/types.ts';
 

@@ -1,5 +1,5 @@
-import type { PluginEmbedPrefs } from '@pochita/sideveil-sdk';
-import { Badge, Button } from '@pochita/ui';
+import type { PluginEmbedPrefs } from '@gojona/sideveil-sdk';
+import { Badge, Button } from '@gojona/ui';
 import { GlobeLock, Pencil, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 

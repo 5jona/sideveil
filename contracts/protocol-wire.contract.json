@@ -1,5 +1,5 @@
 {
-  "$schema": "../../../../pochita-webui-kit/packages/contracts-gen/contract.schema.json",
+  "$schema": "../webui/node_modules/@gojona/contracts-gen/contract.schema.json",
   "schemaVersion": 1,
   "name": "sideveil-protocol-wire",
   "description": "Shared cross-language daemon status, scope, panel visibility, and host diagnostics wire DTOs.",
@@ -227,9 +227,9 @@
     },
     {
       "target": "ts",
-      "path": "../../../../pochita-webui-kit/packages/sdk/src/generated/sideveilWire.ts",
+      "path": "generated/ts/sideveilWire.ts",
       "header": "Source: sideveil/contracts/protocol-wire.contract.json",
-      "imports": ["import type { PanelState } from '@pochita/bridge';"],
+      "imports": ["import type { PanelState } from '@gojona/bridge';"],
       "methodsConstName": "SIDEVEIL_CORE_WIRE_METHODS",
       "rpcMapName": "SideVeilCoreRpcMethodMap",
       "eventsConstName": "SIDEVEIL_CORE_WIRE_EVENTS",

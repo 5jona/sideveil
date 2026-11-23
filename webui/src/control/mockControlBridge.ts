@@ -1,9 +1,9 @@
-import type { ExecResult } from '@pochita/bridge';
+import type { ExecResult } from '@gojona/bridge';
 import type {
   NetworkContextSnapshot,
   PluginDescriptor,
   PluginsSnapshotPayload,
-} from '@pochita/sideveil-sdk';
+} from '@gojona/sideveil-sdk';
 import {
   CONFIG_PATH,
   type DaemonStatus,

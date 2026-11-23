@@ -1,5 +1,5 @@
-import type { BridgeClient } from '@pochita/bridge';
-import type { NetworkContextSnapshot } from '@pochita/sideveil-sdk';
+import type { BridgeClient } from '@gojona/bridge';
+import type { NetworkContextSnapshot } from '@gojona/sideveil-sdk';
 import {
   Badge,
   Button,
@@ -10,7 +10,7 @@ import {
   CardTitle,
   LogConsole,
   type LogEntry,
-} from '@pochita/ui';
+} from '@gojona/ui';
 import { RefreshCw, RotateCcw, Terminal, Zap } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import {

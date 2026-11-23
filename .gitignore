@@ -26,6 +26,9 @@ android/build/
 android/*/build/
 android/local.properties
 android/keystore.properties
+*.jks
+*.keystore
+*.p12
 
 # WebUI dependencies and build artifacts
 webui/node_modules/

@@ -8,7 +8,7 @@ import {
   SegmentedControl,
   type SegmentedControlOption,
   SettingRow,
-} from '@pochita/ui';
+} from '@gojona/ui';
 import { FlaskConical, ShieldCheck, Wrench } from 'lucide-react';
 import type { RuntimeMode } from '../../shared/types.ts';
 

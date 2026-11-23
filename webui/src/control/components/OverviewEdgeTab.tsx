@@ -9,7 +9,7 @@ import {
   SettingRow,
   Slider,
   Switch,
-} from '@pochita/ui';
+} from '@gojona/ui';
 import { Activity, Layers, ShieldCheck } from 'lucide-react';
 import type { DaemonStatus, EdgeSide, SideVeilConfig } from '../../shared/types.ts';
 import { EdgePreviewCanvas } from './EdgePreviewCanvas.tsx';

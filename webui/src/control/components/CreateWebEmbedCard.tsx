@@ -7,7 +7,7 @@ import {
   CardTitle,
   SettingRow,
   Switch,
-} from '@pochita/ui';
+} from '@gojona/ui';
 import { GlobeLock, Plus, X } from 'lucide-react';
 import { useId, useState } from 'react';
 import {

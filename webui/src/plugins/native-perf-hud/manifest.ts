@@ -1,4 +1,4 @@
-import { definePluginManifest, type PluginManifest } from '@pochita/sideveil-sdk';
+import { definePluginManifest, type PluginManifest } from '@gojona/sideveil-sdk';
 
 export const NATIVE_PERF_HUD_PLUGIN_ID = 'example.native-perf-hud';
 

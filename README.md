@@ -24,9 +24,9 @@ For the full repository navigation map, runtime data flows, ABI-pinned FQCNs, an
    - Maintains a click-through `TYPE_APPLICATION_OVERLAY` edge indicator capsule (idle auto-dim/tuck, fullscreen double-swipe pulse, live reposition preview, live status badges), zero-reflow origin-anchored spring panel (`drawer`/`peek`/`wide` + `PinnedContainerWindow` with click-through unlock chip), hardware cross-window blur (`BlurMaskDrawable` + dynamic `Oklch`-tinted AGSL `GlassBackdropDrawable`), IME/cutout/tablet `WindowInsets` avoidance, stepped `VibrationEffect.Composition` haptics, Android 16+ `OnBackAnimationCallback` predictive back preview, synchronized `46dp` frosted-glass **Plugin Rail** (`PluginRailWindow` with SVG icon loading, blind scrubbing, and quick menu), and zero-WebView **`NativeHudWindow`** (`vello_cpu` NEON Bitmap + HWUI `tnum` text).
    - Isolates each plugin in its own warm LRU-cached WebView sandbox under `https://<pluginId>.plugins.sideveil.local/` with `WebMessagePort`, COOP/COEP WebGPU support, loopback Dev Mode proxying, `PluginWebChromeClient` console forwarding, WebGPU VRAM-aware LRU eviction, and `onRenderProcessGone` crash self-healing.
 4. **KernelSU WebUI Control Plane, Built-in Diagnostic Plugin (`webui/`), & Reference Examples (`examples/`)**
-   - Built with `@pochita/ui`, `@pochita/bridge`, `@pochita/sideveil-sdk`, and `@pochita/config` from `pochita-webui-kit`.
+   - Built with published [`@gojona/*`](https://github.com/5jona/pochita-webui-kit) npm packages (`@gojona/ui`, `@gojona/bridge`, `@gojona/sideveil-sdk`, `@gojona/config`, and `@gojona/contracts-gen`).
    - Control Plane (`webui/control` -> `webroot/`) edits `/data/system/sideveil/config.json` atomically (`inotify` hot-reload), manages registered plugins (enable/disable, priority, scope overrides, loopback Dev Mode, Host memory & ACL audit drawer, quick switch), and controls the live sidebar via `/data/adb/modules/sideveil/bin/sideveil-ctl`.
-   - Built-in Diagnostic Plugin (`sideveil.diagnostic`, `webui/panel` -> `assets/panel/`) adheres to the standard `@pochita/sideveil-sdk` plugin contract with live dynamic `Oklch` CSS token sync.
+   - Built-in Diagnostic Plugin (`sideveil.diagnostic`, `webui/panel` -> `assets/panel/`) adheres to the standard `@gojona/sideveil-sdk` plugin contract with live dynamic `Oklch` CSS token sync.
    - Dual reference example plugins live in `examples/` (`vello-vector-scope` for COOP/COEP WebGPU rendering with live glass/transparent toggling and `native-perf-hud` for zero-WebView `uds-native` + `vello_cpu` NEON HUD rendering), with frontends compiled from `webui/src/plugins/`.
 
 ## Security & Runtime Separation
@@ -43,9 +43,11 @@ For the full repository navigation map, runtime data flows, ABI-pinned FQCNs, an
 
 ```text
 sideveil/
+├── contracts/                  # Canonical IDL specs, JSON Schemas, golden fixtures & generated/ts/
 ├── hub/
 │   └── crates/
 │       ├── sideveil-protocol/  # Shared Rust Manifest, JSON-RPC, HUD, Theme, Sensor & UDS types
+│       ├── sideveil-plugin-sdk/# Async Rust SDK for uds-native / uds-app plugin daemons
 │       ├── sideveil-gfx/       # Pure-Rust Linebender core (usvg + vello_cpu NEON + Oklch color)
 │       ├── sideveil-hud-jni/   # arm64 JNI cdylib -> libsideveil_hud.so (zero-WebView HUD)
 │       ├── sideveild/          # Rust core hub daemon -> bin/sideveild
@@ -58,11 +60,14 @@ sideveil/
 ├── docs/
 │   └── architecture-decisions.md # Android 16+ UID 1000 boundaries, rendering notes & ADRs
 ├── examples/                   # Official reference plugins (vello-vector-scope, native-perf-hud)
+├── scripts/                    # Contract sync, reload transport helpers & live E2E harness
 ├── system/                     # KernelSU Magic Mount priv-app & sysconfig XMLs
 ├── webui/                      # React + Vite + Tailwind v4 Control Plane & Panel apps
 ├── build.sh                    # Full Rust + WebUI + Gradle + KernelSU ZIP packager
 ├── reload.sh                   # Zero-reboot SSH / on-device push/install/restart helper
 ├── config.json                 # Default configuration template
+├── CHANGELOG.md
+├── LICENSE                     # GNU General Public License v3.0 (GPL-3.0-only)
 ├── module.prop
 ├── post-fs-data.sh
 ├── service.sh
@@ -75,17 +80,47 @@ sideveil/
 Pinned tool versions live in [`mise.toml`](./mise.toml) (`java = 25`, `android-sdk = 23.0`, `pnpm = 12.22.0`) alongside Rust Edition 2024 (`aarch64-linux-android` via NDK 30).
 
 ```bash
-# Run all Rust, WebUI, and Android quality gates
+# Run all contract, Rust, WebUI, and Android quality gates
 mise run check
 
-# Build everything and generate out/sideveil.zip
-bash build.sh
+# Build a lean release archive (skips bundled example test plugins)
+bash build.sh --mode release
+
+# Build a debug archive (packages bundled example.vello-scope & example.native-perf-hud)
+bash build.sh --mode debug
+
+# Regenerate cross-language contract artifacts and optionally sync TS outputs upstream
+mise run contracts:gen
+bash scripts/sync-kit-contracts.sh [path/to/pochita-webui-kit]
 
 # Build + live-reload onto Android device via Strata container SSH (or on-device --local)
 bash reload.sh --ssh <host|user@host>
 ```
 
+### Build Modes (`--mode release|debug`)
+
+- `--mode release`: Builds a lean KernelSU archive (`out/sideveil.zip`) containing only the Core Hub, System Sensor, Render Host APK, Control Plane WebUI, and built-in diagnostic panel, skipping the source-level reference plugins (`example.vello-scope` and `example.native-perf-hud`).
+- `--mode debug` (default): Also compiles and bundles `example.vello-scope` and `example.native-perf-hud` (toggleable at runtime via `debug.setRuntimeMode`).
+
+### Android Release Signing
+
+`android/host-app` supports formal release APK signing via either an untracked local `android/keystore.properties` file or environment variables:
+
+```properties
+# android/keystore.properties (gitignored)
+storeFile=/path/to/sideveil-release.jks
+storePassword=...
+keyAlias=...
+keyPassword=...
+```
+
+For CI or environment-driven builds, export `KEYSTORE_FILE`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, and `KEY_PASSWORD`. Set `REQUIRE_RELEASE_KEYSTORE=true` to fail the Gradle build if no release keystore is configured instead of falling back to the debug signing config.
+
 ## Runtime Notes
 
 - `/data/adb` is `0700 root:root` on Android/KernelSU; shared runtime state (`config.json`, `run/`, `plugins/`, `data/`, staged `sideveil-sensor.dex`) lives under `/data/system/sideveil/`.
 - `reload.sh` installs `SideVeilHost.apk` via `pm install -r -d` for immediate zero-reboot testing; flashing `out/sideveil.zip` mounts the `priv-app` and whitelist XMLs systemlessly after a reboot.
+
+## License
+
+SideVeil is licensed under the **GNU General Public License v3.0 only (`GPL-3.0-only`)**. See [`LICENSE`](./LICENSE) for the full license text.

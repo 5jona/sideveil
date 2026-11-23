@@ -1,4 +1,4 @@
-import type { ResolvedColorScheme } from '@pochita/ui';
+import type { ResolvedColorScheme } from '@gojona/ui';
 import { readScopeColors, syncCanvasSize } from './scopeColors.ts';
 
 /** Minimal structural subset of WebGPU `GPUBuffer` used by the oscilloscope pipeline. */

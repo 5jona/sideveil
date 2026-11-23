@@ -15,21 +15,18 @@ import {
   SIDEVEIL_METHODS,
   SIDEVEIL_THEMES,
   SIDEVEIL_TIMEOUT_BOUNDS,
-} from '@pochita/bridge';
+} from '@gojona/bridge';
+import {
+  collectFixtureFiles,
+  validateFixtureData,
+  validateFixtureFile,
+} from '@gojona/contracts-gen';
 import { DIAGNOSTIC_PLUGIN_MANIFEST } from '../src/panel/manifest.ts';
 import { DEFAULT_CONFIG, normalizeSideVeilConfig } from '../src/shared/types.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const CONTRACTS_DIR = path.join(REPO_ROOT, 'contracts');
-const KIT_CONTRACTS_GEN = path.resolve(
-  REPO_ROOT,
-  '../../../pochita-webui-kit/packages/contracts-gen/src/validator.mjs',
-);
-
-const { collectFixtureFiles, validateFixtureData, validateFixtureFile } = await import(
-  KIT_CONTRACTS_GEN
-);
 
 test('generated method, event, error code, and theme registries are complete across stacks', () => {
   const constantsSpec = JSON.parse(

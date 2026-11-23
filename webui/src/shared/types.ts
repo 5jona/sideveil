@@ -12,7 +12,7 @@ import {
   SIDEVEIL_EVENTS,
   SIDEVEIL_METHODS,
   SIDEVEIL_THEMES,
-} from '@pochita/bridge';
+} from '@gojona/bridge';
 import type {
   DaemonHealth,
   DaemonStatus,
@@ -23,8 +23,8 @@ import type {
   ScopeChangedPayload,
   SideVeilEventPayloadMap,
   SideVeilRpcMethodMap,
-} from '@pochita/sideveil-sdk';
-import type { ColorMode, ThemeId } from '@pochita/ui';
+} from '@gojona/sideveil-sdk';
+import type { ColorMode, ThemeId } from '@gojona/ui';
 import {
   type DebugConfig,
   type DebugGestureStats,

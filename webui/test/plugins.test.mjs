@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { BUILTIN_DIAG_PLUGIN_ID } from '@pochita/sideveil-sdk';
+import { BUILTIN_DIAG_PLUGIN_ID } from '@gojona/sideveil-sdk';
 import {
   clampEmbedNumber,
   hasRpcErrorPayload,

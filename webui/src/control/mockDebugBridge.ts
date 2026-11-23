@@ -1,5 +1,5 @@
-import type { ExecResult } from '@pochita/bridge';
-import type { PluginsSnapshotPayload } from '@pochita/sideveil-sdk';
+import type { ExecResult } from '@gojona/bridge';
+import type { PluginsSnapshotPayload } from '@gojona/sideveil-sdk';
 import {
   CONFIG_PATH,
   type DebugCdpStatusResult,

@@ -1,4 +1,4 @@
-import { SettingRow, Switch } from '@pochita/ui';
+import { SettingRow, Switch } from '@gojona/ui';
 import { ChevronDown, ChevronUp, SlidersHorizontal } from 'lucide-react';
 import { useId } from 'react';
 

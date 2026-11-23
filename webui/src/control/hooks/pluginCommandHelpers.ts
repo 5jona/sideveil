@@ -1,5 +1,5 @@
-import { shellQuote } from '@pochita/bridge';
-import type { PluginDescriptor, PluginsSnapshotPayload } from '@pochita/sideveil-sdk';
+import { shellQuote } from '@gojona/bridge';
+import type { PluginDescriptor, PluginsSnapshotPayload } from '@gojona/sideveil-sdk';
 import { CTL_BIN, SIDEVEIL_METHODS } from '../../shared/types.ts';
 
 /** Scope override mutation input passed to `plugins.setScopeOverride`. */

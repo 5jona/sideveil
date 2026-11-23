@@ -1,4 +1,4 @@
-import type { NetworkContextSnapshot, NetworkTransportKind } from '@pochita/sideveil-sdk';
+import type { NetworkContextSnapshot, NetworkTransportKind } from '@gojona/sideveil-sdk';
 import {
   Badge,
   Button,
@@ -7,7 +7,7 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from '@pochita/ui';
+} from '@gojona/ui';
 import { Cable, Radio, RefreshCw, Router, Shield, Wifi, WifiOff } from 'lucide-react';
 
 export interface NetworkContextCardProps {

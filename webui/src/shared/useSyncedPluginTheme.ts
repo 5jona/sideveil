@@ -1,11 +1,11 @@
-import { useSyncedPluginTheme as useSdkSyncedPluginTheme } from '@pochita/sideveil-sdk';
+import { useSyncedPluginTheme as useSdkSyncedPluginTheme } from '@gojona/sideveil-sdk';
 import {
   type ColorMode,
   isValidThemeId,
   type ResolvedColorScheme,
   type ThemeId,
   useTheme,
-} from '@pochita/ui';
+} from '@gojona/ui';
 import {
   type ConfigUpdatedEventPayload,
   normalizeSideVeilConfig,
@@ -45,7 +45,7 @@ function toConfigUpdatedPayload(
 }
 
 /**
- * Thin SideVeil-typed wrapper around `@pochita/sideveil-sdk`'s generic `useSyncedPluginTheme`,
+ * Thin SideVeil-typed wrapper around `@gojona/sideveil-sdk`'s generic `useSyncedPluginTheme`,
  * normalizing full `SideVeilConfig` payloads for first-party SideVeil panels and bundled plugins.
  */
 export function useSyncedPluginTheme(

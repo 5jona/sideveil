@@ -1,4 +1,4 @@
-import type { ResolvedColorScheme } from '@pochita/ui';
+import type { ResolvedColorScheme } from '@gojona/ui';
 import { startCanvas2dPipeline } from './scopeCanvas2d.ts';
 import { FPS_WINDOW_MS } from './scopeColors.ts';
 import {

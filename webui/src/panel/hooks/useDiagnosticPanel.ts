@@ -4,8 +4,8 @@ import {
   usePluginBackendState,
   usePluginStorage,
   useSideVeilPlugin,
-} from '@pochita/sideveil-sdk';
-import { type ColorMode, type LogEntry, type ThemeId, useToast } from '@pochita/ui';
+} from '@gojona/sideveil-sdk';
+import { type ColorMode, type LogEntry, type ThemeId, useToast } from '@gojona/ui';
 import { useCallback, useEffect, useState } from 'react';
 import {
   type DaemonStatus,

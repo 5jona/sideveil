@@ -1,5 +1,5 @@
-import type { PluginDescriptor } from '@pochita/sideveil-sdk';
-import { Badge, Button, Card, Switch } from '@pochita/ui';
+import type { PluginDescriptor } from '@gojona/sideveil-sdk';
+import { Badge, Button, Card, Switch } from '@gojona/ui';
 import { CheckCircle2, Code2, Globe, Pencil, Play, Sliders } from 'lucide-react';
 import { useState } from 'react';
 import type {

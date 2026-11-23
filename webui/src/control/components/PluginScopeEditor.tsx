@@ -1,4 +1,4 @@
-import { Button, Input } from '@pochita/ui';
+import { Button, Input } from '@gojona/ui';
 import { Plus, RotateCcw, X } from 'lucide-react';
 import { useState } from 'react';
 import type { PluginScopeOverrideInput } from '../hooks/usePluginsControl.ts';

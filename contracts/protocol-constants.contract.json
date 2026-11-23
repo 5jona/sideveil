@@ -1,5 +1,5 @@
 {
-  "$schema": "../../../../pochita-webui-kit/packages/contracts-gen/contract.schema.json",
+  "$schema": "../webui/node_modules/@gojona/contracts-gen/contract.schema.json",
   "schemaVersion": 1,
   "name": "sideveil-protocol-constants",
   "description": "Canonical SideVeil RPC methods, host/plugin events, JSON-RPC error codes, theme IDs, built-in diagnostic metadata, timeout bounds, and HUD defaults.",
@@ -207,7 +207,7 @@
     },
     {
       "target": "ts",
-      "path": "../../../../pochita-webui-kit/packages/bridge/src/generated/sideveilConstants.ts",
+      "path": "generated/ts/sideveilConstants.ts",
       "header": "Source: sideveil/contracts/protocol-constants.contract.json"
     }
   ]

@@ -1,5 +1,5 @@
-import type { ExecResult } from '@pochita/bridge';
-import type { PluginDescriptor, PluginsSnapshotPayload } from '@pochita/sideveil-sdk';
+import type { ExecResult } from '@gojona/bridge';
+import type { PluginDescriptor, PluginsSnapshotPayload } from '@gojona/sideveil-sdk';
 import { INITIAL_MOCK_PLUGINS } from './mockPluginFixtures.ts';
 
 /** Mutable in-memory plugin registry state used by local Control Plane mock bridge. */

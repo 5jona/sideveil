@@ -1,4 +1,4 @@
-import { type BridgeClient, shellQuote } from '@pochita/bridge';
+import { type BridgeClient, shellQuote } from '@gojona/bridge';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   CTL_BIN,

@@ -6,7 +6,7 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from '@pochita/ui';
+} from '@gojona/ui';
 import { Activity, Cpu, Layers, Monitor, RotateCcw, ScanSearch } from 'lucide-react';
 import type { DebugInspectUiSnapshot, DebugWebViewSnapshot } from '../../shared/types.ts';
 

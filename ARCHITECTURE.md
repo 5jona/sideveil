@@ -35,7 +35,7 @@ SideVeil separates privileges, hidden Android APIs, overlay window rendering, an
 - **Core Hub (`hub/`)**: Sole authority for `/data/system/sideveil/config.json`, plugin manifests and persistent overrides (`plugins.json`), capability ACLs, zero-polling process supervision, and authenticated loopback HTTP/WebSocket serving.
 - **System Sensor (`android/sensor/`)**: Spawned directly by `sideveild` via `pre_exec` UID 1000 drop (`setgroups`/`setgid`/`setuid`) to avoid kernel root-guard warnings. Restricted strictly to hidden framework APIs requiring `UID 1000`.
 - **Render Host (`android/host-app/`)**: AMS-managed `/system/priv-app/SideVeilHost/SideVeilHost.apk` owning `TYPE_APPLICATION_OVERLAY` `Dialog` windows, spring choreography, cross-window blur + AGSL backdrops, isolated plugin WebViews, and zero-WebView native HUD rendering. Never embeds plugin business logic or config disk writes.
-- **WebUI & Plugins (`webui/`, `examples/`)**: First-party UIs and bundled examples use React + TypeScript + Tailwind CSS v4 + `@pochita/*`. Third-party plugins remain framework-agnostic and bind only to `manifest.json` + JSON-RPC 2.0.
+- **WebUI & Plugins (`webui/`, `examples/`)**: First-party UIs and bundled examples use React + TypeScript + Tailwind CSS v4 + `@gojona/*`. Third-party plugins remain framework-agnostic and bind only to `manifest.json` + JSON-RPC 2.0.
 
 ## 2. Repository Navigation Map
 
@@ -43,9 +43,9 @@ SideVeil separates privileges, hidden Android APIs, overlay window rendering, an
 
 | Path | Generator / Gate | Generated Targets & Role |
 | --- | --- | --- |
-| `contracts/*.contract.json` | `@pochita/contracts-gen` (`mise run contracts:check`) | Canonical wire enums, RPC method/event/error constants, config bounds, and theme/HUD contracts. |
+| `contracts/*.contract.json` | `@gojona/contracts-gen` (`mise run contracts:check`) | Canonical wire enums, RPC method/event/error constants, config bounds, and theme/HUD contracts. |
 | `contracts/schemas/*.schema.json` | JSON Schema 2020-12 | Machine-validated config, status, event, and theme/HUD schemas (`contracts/fixtures/` golden tests). |
-| Generated outputs (do not hand-edit) | `mise run contracts:gen` | Rust `hub/crates/sideveil-protocol/src/generated/`, Kotlin `android/protocol/.../generated/`, TS `@pochita/bridge` + `@pochita/sideveil-sdk`. |
+| Generated outputs (do not hand-edit) | `mise run contracts:gen` | Rust `hub/crates/sideveil-protocol/src/generated/`, Kotlin `android/protocol/.../generated/`, and in-repo TS `contracts/generated/ts/` (synced upstream to `pochita-webui-kit` packages `@gojona/bridge` + `@gojona/sideveil-sdk` via `scripts/sync-kit-contracts.sh`). |
 
 ### Rust Workspace & Example Daemons
 
@@ -145,7 +145,7 @@ Native HUD Flow:
    - Each web plugin runs inside an isolated WebView origin `https://<pluginId>.plugins.sideveil.local/` with `allowFileAccess = false` and LRU pool eviction (`plugin/PluginWebViewPool`).
    - `plugin/PluginWebViewClient` intercepts asset requests and delegates to `plugin/PluginAssetFetcher`, fetching from `sideveild`'s authenticated loopback HTTP server (`/plugins/<id>/*`, bounded line/header reads) or a strictly validated loopback Dev Mode URL.
    - Plugin icons (`/plugins/<id>/__icon?size=&theme=`) are rasterized on demand by `sideveil-gfx` (`usvg` + `vello_cpu` NEON) and persisted atomically in `asset_server/icon_cache.rs`.
-   - Runtime RPCs travel from `@pochita/sideveil-sdk` over `WebMessagePort` -> `plugin/PluginWebMessageBridge` -> `plugin/PluginLocalRpcHandler` (container/haptics/toast/clipboard) or `service/DaemonClient` -> `sideveild` `plugin_acl.rs` (manifest capability check, audit ring recording, jailed storage/exec, or backend multiplexing).
+   - Runtime RPCs travel from `@gojona/sideveil-sdk` over `WebMessagePort` -> `plugin/PluginWebMessageBridge` -> `plugin/PluginLocalRpcHandler` (container/haptics/toast/clipboard) or `service/DaemonClient` -> `sideveild` `plugin_acl.rs` (manifest capability check, audit ring recording, jailed storage/exec, or backend multiplexing).
 4. **Native HUD (`vello_cpu` NEON JNI) Pipeline**:
    - A `uds-native` plugin daemon streams `hud.sceneUpdated` JSON frames over `hub.sock`. `sideveild` coalesces frames in the ephemeral outbound lane and forwards them to `HostService`.
    - `hud/NativeHudWindow` / `hud/NativeHudView` submits the scene JSON and a double-buffered `ARGB_8888` `Bitmap` to `NativeHudRenderer` -> `libsideveil_hud.so`.
@@ -188,7 +188,7 @@ Full empirical rationale and Android 16+ test evidence live in [`docs/architectu
 | Goal | Command | What It Verifies / Builds |
 | --- | --- | --- |
 | Full local quality gate | `mise run check` | Runs `contracts:check`, `hub:check`, `webui:check`, and `android:check` with zero warnings or errors. |
-| Cross-language contracts | `mise run contracts:check` | Verifies `@pochita/contracts-gen` outputs (Rust/Kotlin/TS) and golden JSON Schema fixtures are up to date. |
+| Cross-language contracts | `mise run contracts:check` | Verifies `@gojona/contracts-gen` outputs (Rust, Kotlin, `contracts/generated/ts/`) and golden JSON Schema fixtures are up to date; sync TS upstream with `scripts/sync-kit-contracts.sh`. |
 | Rust hub & example daemon | `mise run hub:check` | `cargo fmt --check`, `cargo clippy --all-targets -D warnings`, `cargo test` for `hub/` and `examples/native-perf-hud`. |
 | WebUI & bundled plugins | `mise run webui:check` | Biome lint, `tsc --noEmit`, unit & `standards.test.mjs` checks, all 4 Vite builds. |
 | Android protocol/sensor/host | `mise run android:check` | Spotless, Detekt, Android Lint, JVM unit tests (`:protocol`, `:sensor`, `:host-app`), `:sensor:buildDex`, `:host-app:assembleRelease`. |

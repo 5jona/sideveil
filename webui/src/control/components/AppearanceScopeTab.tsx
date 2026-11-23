@@ -11,7 +11,7 @@ import {
   Switch,
   ThemeSwitcher,
   useTheme,
-} from '@pochita/ui';
+} from '@gojona/ui';
 import type { ScopeConfig, SideVeilConfig } from '../../shared/types.ts';
 import { ActivationScopeCard } from './ActivationScopeCard.tsx';
 

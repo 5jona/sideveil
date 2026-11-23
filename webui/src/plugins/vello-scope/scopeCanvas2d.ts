@@ -1,4 +1,4 @@
-import { colorWithAlpha } from '@pochita/ui';
+import { colorWithAlpha } from '@gojona/ui';
 import { readScopeColors, syncCanvasSize } from './scopeColors.ts';
 import type { ScopeLoopDriver, ScopePipelineHandle } from './scopeWebGpu.ts';
 

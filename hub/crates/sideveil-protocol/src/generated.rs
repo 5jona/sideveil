@@ -1,4 +1,4 @@
-//! Deterministic contract artifacts emitted by `@pochita/contracts-gen`.
+//! Deterministic contract artifacts emitted by `@gojona/contracts-gen`.
 
 pub mod config_bounds;
 pub mod protocol_constants;
