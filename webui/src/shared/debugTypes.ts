@@ -1,4 +1,6 @@
-import type { EdgeSide, PanelState } from './types.ts';
+import type { DebugGestureStats, EdgeSide, PanelState } from '@pochita/sideveil-sdk';
+
+export type { DebugGestureStats };
 
 export interface DebugConfig {
   webviewDebuggingEnabled: boolean;
@@ -16,15 +18,6 @@ export interface DebugCdpStatusResult {
   hostPid: number | null;
   cdpSocket: string | null;
   restartRecommended: boolean;
-}
-
-export interface DebugGestureStats {
-  edgeSwipesTriggered: number;
-  edgeSwipesRejected: number;
-  hotzoneMisses: number;
-  pilferInvocations: number;
-  lastRejectReason?: string | null;
-  lastEventTimestampMs: number;
 }
 
 export interface DebugDisplaySnapshot {

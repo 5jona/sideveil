@@ -3,17 +3,20 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::generated::protocol_constants::timeouts;
+pub use crate::generated::protocol_wire::HostPluginDiagnosticsPayload;
+
 /// Minimum configurable backend RPC timeout for `plugin.invoke` (1 second).
-pub const MIN_PLUGIN_INVOKE_TIMEOUT_MS: u64 = 1_000;
+pub const MIN_PLUGIN_INVOKE_TIMEOUT_MS: u64 = timeouts::MIN_PLUGIN_INVOKE_MS;
 
 /// Default backend RPC timeout for `plugin.invoke` when callers omit `timeoutMs` (8 seconds).
-pub const DEFAULT_PLUGIN_INVOKE_TIMEOUT_MS: u64 = 8_000;
+pub const DEFAULT_PLUGIN_INVOKE_TIMEOUT_MS: u64 = timeouts::DEFAULT_PLUGIN_INVOKE_MS;
 
 /// Maximum configurable backend RPC timeout for `plugin.invoke` (60 seconds).
-pub const MAX_PLUGIN_INVOKE_TIMEOUT_MS: u64 = 60_000;
+pub const MAX_PLUGIN_INVOKE_TIMEOUT_MS: u64 = timeouts::MAX_PLUGIN_INVOKE_MS;
 
 /// Sub-event name emitted inside `plugin.event` when a noisy backend exceeds its event rate budget.
-pub const PLUGIN_EVENT_LAGGED_SUBEVENT: &str = "plugin.eventLagged";
+pub const PLUGIN_EVENT_LAGGED_SUBEVENT: &str = timeouts::PLUGIN_EVENT_LAGGED_SUBEVENT;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -215,20 +218,6 @@ pub struct PluginAuditEntry {
     pub action: String,
     pub allowed: bool,
     pub detail: String,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct HostPluginDiagnosticsPayload {
-    pub warm_plugin_ids: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub active_hud_plugin_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub host_native_heap_kb: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub host_pss_kb: Option<u64>,
-    #[serde(default)]
-    pub webview_crash_count: u32,
 }
 
 #[cfg(test)]

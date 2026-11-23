@@ -1,6 +1,7 @@
 //! Shared wire protocol types for SideVeil Hub, System Sensor, Render Host, and Plugins.
 
 pub mod config;
+pub mod generated;
 pub mod hud;
 pub mod plugin;
 pub mod rpc;

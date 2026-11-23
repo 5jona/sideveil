@@ -1,0 +1,25 @@
+{
+  "$def": "DaemonStatus",
+  "invalid": true,
+  "data": {
+    "pid": 14820,
+    "uid": 0,
+    "uptimeMs": 1200,
+    "configVersion": 1,
+    "enabled": true,
+    "scopeActive": false,
+    "foregroundPackage": "",
+    "hostPackage": "pochita.sideveil.host",
+    "hostConnected": false,
+    "overlayPermissionGranted": false,
+    "gestureMonitorActive": false,
+    "taskListenerActive": false,
+    "panelState": "expanded",
+    "screenWidthPx": 1080,
+    "screenHeightPx": 2400,
+    "density": 2.625,
+    "wsPort": 41928,
+    "sensorConnected": false,
+    "matchedPluginsCount": 0
+  }
+}

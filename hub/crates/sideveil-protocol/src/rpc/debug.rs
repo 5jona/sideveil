@@ -2,14 +2,16 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::generated::protocol_constants::timeouts;
+
 /// Minimum configurable `debug.inspectUi` timeout in milliseconds.
-pub const MIN_INSPECT_UI_TIMEOUT_MS: u64 = 1_000;
+pub const MIN_INSPECT_UI_TIMEOUT_MS: u64 = timeouts::MIN_INSPECT_UI_MS;
 
 /// Default `debug.inspectUi` timeout in milliseconds when omitted.
-pub const DEFAULT_INSPECT_UI_TIMEOUT_MS: u64 = 5_000;
+pub const DEFAULT_INSPECT_UI_TIMEOUT_MS: u64 = timeouts::DEFAULT_INSPECT_UI_MS;
 
 /// Maximum configurable `debug.inspectUi` timeout in milliseconds.
-pub const MAX_INSPECT_UI_TIMEOUT_MS: u64 = 60_000;
+pub const MAX_INSPECT_UI_TIMEOUT_MS: u64 = timeouts::MAX_INSPECT_UI_MS;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]

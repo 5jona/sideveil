@@ -1,0 +1,5 @@
+{
+  "foregroundPackage": "me.weishu.kernelsu",
+  "foregroundActivity": ".ui.MainActivity",
+  "active": true
+}

@@ -30,6 +30,7 @@ spotless {
         )
     kotlin {
         target("protocol/src/**/*.kt", "sensor/src/**/*.kt", "host-app/src/**/*.kt")
+        targetExclude("**/generated/**")
         ktlint()
             .setEditorConfigPath(rootProject.file("../.editorconfig"))
             .editorConfigOverride(ktlintOverrides)

@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "enabled": true,
+  "edge": {
+    "side": "left",
+    "topPercent": 40,
+    "heightDp": 180,
+    "hotzoneWidthDp": 24,
+    "triggerDistanceDp": 40,
+    "edgeOffsetDp": 2,
+    "handleVisible": true,
+    "handleOpacity": 0.75,
+    "dimInFullscreen": false,
+    "doubleSwipeInFullscreen": true,
+    "idleAutoDimMs": 5000
+  },
+  "panel": {
+    "widthDp": 360,
+    "heightPercent": 76,
+    "cornerRadiusDp": 24,
+    "themeId": "modern-saas-dark",
+    "colorMode": "dark",
+    "nativeBlurEnabled": true,
+    "blurRadiusPx": 180,
+    "scrimAlpha": 0.25
+  },
+  "scope": {
+    "mode": "global",
+    "allowlist": [],
+    "denylist": ["com.android.systemui"]
+  },
+  "debug": {
+    "webviewDebuggingEnabled": true
+  }
+}

@@ -3,6 +3,8 @@ package pochita.sideveil.protocol
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
+typealias DebugGestureStats = pochita.sideveil.protocol.generated.DebugGestureStats
+
 @Serializable
 data class DisplayGeometry(
     val widthPx: Int = 1080,
@@ -38,16 +40,6 @@ data class NetworkContextSnapshot(
     val ssid: String? = null,
     val gateway: String? = null,
     val localIpv4: String? = null,
-)
-
-@Serializable
-data class DebugGestureStats(
-    val edgeSwipesTriggered: Long = 0L,
-    val edgeSwipesRejected: Long = 0L,
-    val hotzoneMisses: Long = 0L,
-    val pilferInvocations: Long = 0L,
-    val lastRejectReason: String? = null,
-    val lastEventTimestampMs: Long = 0L,
 )
 
 @Serializable

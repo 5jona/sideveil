@@ -2,8 +2,11 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::{EdgeSide, PanelState, SideVeilConfig};
-use crate::sensor::DebugGestureStats;
+use crate::config::{EdgeSide, SideVeilConfig};
+pub use crate::generated::protocol_wire::{
+    DaemonHealth, DaemonStatus, PanelStateChangedPayload, PanelVisibilityPayload, PingResult,
+    ScopeChangedPayload,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DaemonEndpoint {
@@ -21,61 +24,10 @@ pub enum PanelCommand {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DaemonStatus {
-    pub pid: u32,
-    pub uid: u32,
-    pub uptime_ms: u64,
-    pub config_version: i32,
-    pub enabled: bool,
-    pub scope_active: bool,
-    pub foreground_package: String,
-    pub host_package: String,
-    pub host_connected: bool,
-    pub host_pid: Option<u32>,
-    pub overlay_permission_granted: bool,
-    pub cross_window_blur_supported: Option<bool>,
-    pub gesture_monitor_active: bool,
-    pub task_listener_active: bool,
-    pub panel_state: PanelState,
-    pub screen_width_px: i32,
-    pub screen_height_px: i32,
-    pub density: f32,
-    pub ws_port: u16,
-    pub sensor_connected: bool,
-    pub sensor_pid: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub active_plugin_id: Option<String>,
-    #[serde(default)]
-    pub matched_plugins_count: usize,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub gesture_stats: Option<DebugGestureStats>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DaemonHealth {
-    pub ok: bool,
-    pub pid: u32,
-    pub uptime_ms: u64,
-    pub sensor_connected: bool,
-    pub host_connected: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ConfigUpdatedPayload {
     pub config: SideVeilConfig,
     pub scope_active: bool,
     pub foreground_package: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ScopeChangedPayload {
-    pub foreground_package: String,
-    #[serde(default)]
-    pub foreground_activity: String,
-    pub active: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -179,18 +131,4 @@ pub struct HostHelloPayload {
     pub pid: u32,
     pub version: String,
     pub cross_window_blur_supported: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PanelStateChangedPayload {
-    pub state: PanelState,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PingResult {
-    pub pong: bool,
-    pub daemon_uptime_ms: u64,
-    pub timestamp_ms: u64,
 }

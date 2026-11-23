@@ -1,0 +1,8 @@
+{
+  "$def": "PanelVisibilityPayload",
+  "invalid": true,
+  "data": {
+    "visible": true,
+    "state": "floating"
+  }
+}

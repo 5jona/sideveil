@@ -4,7 +4,9 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 
-const val BUILTIN_DIAG_PLUGIN_ID = "sideveil.diagnostic"
+typealias HostPluginDiagnosticsPayload = pochita.sideveil.protocol.generated.HostPluginDiagnosticsPayload
+
+const val BUILTIN_DIAG_PLUGIN_ID = SideVeilBuiltinDiagnostic.ID
 
 @Serializable
 enum class PluginBackendKind {
@@ -153,14 +155,14 @@ data class PluginDescriptor(
     companion object {
         fun builtinDiagnostic(): PluginDescriptor =
             PluginDescriptor(
-                id = BUILTIN_DIAG_PLUGIN_ID,
-                name = "内置诊断",
-                version = "0.1.0",
-                entry = "index.html",
+                id = SideVeilBuiltinDiagnostic.ID,
+                name = SideVeilBuiltinDiagnostic.NAME,
+                version = SideVeilBuiltinDiagnostic.VERSION,
+                entry = SideVeilBuiltinDiagnostic.ENTRY,
                 builtin = true,
                 enabled = true,
-                priority = 20,
-                global = false,
+                priority = SideVeilBuiltinDiagnostic.PRIORITY,
+                global = SideVeilBuiltinDiagnostic.GLOBAL,
                 capabilities = listOf(PluginCapability.STORAGE, PluginCapability.TOAST),
             )
     }
@@ -173,15 +175,6 @@ data class PluginsSnapshotPayload(
     val activePluginId: String? = null,
     val foregroundPackage: String = "",
     val foregroundActivity: String = "",
-)
-
-@Serializable
-data class HostPluginDiagnosticsPayload(
-    val warmPluginIds: List<String> = emptyList(),
-    val activeHudPluginId: String? = null,
-    val hostNativeHeapKb: Long? = null,
-    val hostPssKb: Long? = null,
-    val webviewCrashCount: Int = 0,
 )
 
 @Serializable

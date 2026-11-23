@@ -18,7 +18,8 @@ fn default_true() -> bool {
 }
 
 /// Canonical identifier for the built-in diagnostic panel plugin.
-pub const BUILTIN_DIAG_PLUGIN_ID: &str = "sideveil.diagnostic";
+pub const BUILTIN_DIAG_PLUGIN_ID: &str =
+    crate::generated::protocol_constants::builtin_diagnostic::ID;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]

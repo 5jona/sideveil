@@ -7,9 +7,18 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 
 pub use self::patches::{AppearancePatchParams, EdgePatchParams};
+use crate::generated::config_bounds::{bounds, defaults};
+pub use crate::generated::protocol_constants::themes::{
+    COLOROS_GLASS as THEME_COLOROS_GLASS, MODERN_SAAS_DARK as THEME_MODERN_SAAS_DARK,
+};
+pub use crate::generated::protocol_wire::PanelState;
 
-pub const THEME_COLOROS_GLASS: &str = "coloros-glass";
-pub const THEME_MODERN_SAAS_DARK: &str = "modern-saas-dark";
+#[allow(clippy::derivable_impls)]
+impl Default for PanelState {
+    fn default() -> Self {
+        Self::Closed
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -25,15 +34,6 @@ pub enum ScopeMode {
     #[default]
     Allowlist,
     Global,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum PanelState {
-    #[default]
-    Closed,
-    Dragging,
-    Open,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -56,16 +56,16 @@ impl Default for EdgeConfig {
     fn default() -> Self {
         Self {
             side: EdgeSide::Right,
-            top_percent: 32,
-            height_dp: 168,
-            hotzone_width_dp: 24,
-            trigger_distance_dp: 36,
-            edge_offset_dp: 1,
-            handle_visible: true,
-            handle_opacity: 0.62,
-            dim_in_fullscreen: true,
-            double_swipe_in_fullscreen: false,
-            idle_auto_dim_ms: 3500,
+            top_percent: defaults::EDGE_TOP_PERCENT,
+            height_dp: defaults::EDGE_HEIGHT_DP,
+            hotzone_width_dp: defaults::EDGE_HOTZONE_WIDTH_DP,
+            trigger_distance_dp: defaults::EDGE_TRIGGER_DISTANCE_DP,
+            edge_offset_dp: defaults::EDGE_OFFSET_DP,
+            handle_visible: defaults::EDGE_HANDLE_VISIBLE,
+            handle_opacity: defaults::EDGE_HANDLE_OPACITY,
+            dim_in_fullscreen: defaults::EDGE_DIM_IN_FULLSCREEN,
+            double_swipe_in_fullscreen: defaults::EDGE_DOUBLE_SWIPE_IN_FULLSCREEN,
+            idle_auto_dim_ms: defaults::EDGE_IDLE_AUTO_DIM_MS,
         }
     }
 }
@@ -74,22 +74,40 @@ impl EdgeConfig {
     #[must_use]
     pub fn sanitized(&self) -> Self {
         let opacity = if self.handle_opacity.is_finite() {
-            self.handle_opacity.clamp(0.1, 1.0)
+            self.handle_opacity.clamp(
+                bounds::EDGE_HANDLE_OPACITY_MIN,
+                bounds::EDGE_HANDLE_OPACITY_MAX,
+            )
         } else {
-            Self::default().handle_opacity
+            defaults::EDGE_HANDLE_OPACITY
         };
         Self {
             side: self.side,
-            top_percent: self.top_percent.clamp(5, 85),
-            height_dp: self.height_dp.clamp(64, 360),
-            hotzone_width_dp: self.hotzone_width_dp.clamp(12, 48),
-            trigger_distance_dp: self.trigger_distance_dp.clamp(18, 96),
-            edge_offset_dp: self.edge_offset_dp.clamp(0, 24),
+            top_percent: self
+                .top_percent
+                .clamp(bounds::EDGE_TOP_PERCENT_MIN, bounds::EDGE_TOP_PERCENT_MAX),
+            height_dp: self
+                .height_dp
+                .clamp(bounds::EDGE_HEIGHT_DP_MIN, bounds::EDGE_HEIGHT_DP_MAX),
+            hotzone_width_dp: self.hotzone_width_dp.clamp(
+                bounds::EDGE_HOTZONE_WIDTH_DP_MIN,
+                bounds::EDGE_HOTZONE_WIDTH_DP_MAX,
+            ),
+            trigger_distance_dp: self.trigger_distance_dp.clamp(
+                bounds::EDGE_TRIGGER_DISTANCE_DP_MIN,
+                bounds::EDGE_TRIGGER_DISTANCE_DP_MAX,
+            ),
+            edge_offset_dp: self
+                .edge_offset_dp
+                .clamp(bounds::EDGE_OFFSET_DP_MIN, bounds::EDGE_OFFSET_DP_MAX),
             handle_visible: self.handle_visible,
             handle_opacity: opacity,
             dim_in_fullscreen: self.dim_in_fullscreen,
             double_swipe_in_fullscreen: self.double_swipe_in_fullscreen,
-            idle_auto_dim_ms: self.idle_auto_dim_ms.clamp(0, 30_000),
+            idle_auto_dim_ms: self.idle_auto_dim_ms.clamp(
+                bounds::EDGE_IDLE_AUTO_DIM_MS_MIN,
+                bounds::EDGE_IDLE_AUTO_DIM_MS_MAX,
+            ),
         }
     }
 }
@@ -110,14 +128,14 @@ pub struct PanelConfig {
 impl Default for PanelConfig {
     fn default() -> Self {
         Self {
-            width_dp: 340,
-            height_percent: 72,
-            corner_radius_dp: 22,
+            width_dp: defaults::PANEL_WIDTH_DP,
+            height_percent: defaults::PANEL_HEIGHT_PERCENT,
+            corner_radius_dp: defaults::PANEL_CORNER_RADIUS_DP,
             theme_id: THEME_COLOROS_GLASS.to_owned(),
-            color_mode: "system".to_owned(),
-            native_blur_enabled: true,
-            blur_radius_px: 160,
-            scrim_alpha: 0.0,
+            color_mode: defaults::PANEL_COLOR_MODE.to_owned(),
+            native_blur_enabled: defaults::PANEL_NATIVE_BLUR_ENABLED,
+            blur_radius_px: defaults::PANEL_BLUR_RADIUS_PX,
+            scrim_alpha: defaults::PANEL_SCRIM_ALPHA,
         }
     }
 }
@@ -131,21 +149,33 @@ impl PanelConfig {
         };
         let color_mode = match self.color_mode.as_str() {
             "light" | "dark" | "system" => self.color_mode.clone(),
-            _ => "system".to_owned(),
+            _ => defaults::PANEL_COLOR_MODE.to_owned(),
         };
         let scrim_alpha = if self.scrim_alpha.is_finite() {
-            self.scrim_alpha.clamp(0.0, 0.75)
+            self.scrim_alpha
+                .clamp(bounds::PANEL_SCRIM_ALPHA_MIN, bounds::PANEL_SCRIM_ALPHA_MAX)
         } else {
-            Self::default().scrim_alpha
+            defaults::PANEL_SCRIM_ALPHA
         };
         Self {
-            width_dp: self.width_dp.clamp(260, 480),
-            height_percent: self.height_percent.clamp(40, 92),
-            corner_radius_dp: self.corner_radius_dp.clamp(8, 36),
+            width_dp: self
+                .width_dp
+                .clamp(bounds::PANEL_WIDTH_DP_MIN, bounds::PANEL_WIDTH_DP_MAX),
+            height_percent: self.height_percent.clamp(
+                bounds::PANEL_HEIGHT_PERCENT_MIN,
+                bounds::PANEL_HEIGHT_PERCENT_MAX,
+            ),
+            corner_radius_dp: self.corner_radius_dp.clamp(
+                bounds::PANEL_CORNER_RADIUS_DP_MIN,
+                bounds::PANEL_CORNER_RADIUS_DP_MAX,
+            ),
             theme_id,
             color_mode,
             native_blur_enabled: self.native_blur_enabled,
-            blur_radius_px: self.blur_radius_px.clamp(0, 300),
+            blur_radius_px: self.blur_radius_px.clamp(
+                bounds::PANEL_BLUR_RADIUS_PX_MIN,
+                bounds::PANEL_BLUR_RADIUS_PX_MAX,
+            ),
             scrim_alpha,
         }
     }
@@ -163,8 +193,8 @@ impl Default for ScopeConfig {
     fn default() -> Self {
         Self {
             mode: ScopeMode::Allowlist,
-            allowlist: vec!["me.weishu.kernelsu".to_owned()],
-            denylist: vec!["com.android.systemui".to_owned()],
+            allowlist: vec![defaults::SCOPE_ALLOWLIST_DEFAULT_PACKAGE.to_owned()],
+            denylist: vec![defaults::SCOPE_DENYLIST_DEFAULT_PACKAGE.to_owned()],
         }
     }
 }
@@ -213,8 +243,8 @@ pub struct SideVeilConfig {
 impl Default for SideVeilConfig {
     fn default() -> Self {
         Self {
-            version: 1,
-            enabled: true,
+            version: defaults::VERSION,
+            enabled: defaults::ENABLED,
             edge: EdgeConfig::default(),
             panel: PanelConfig::default(),
             scope: ScopeConfig::default(),
@@ -227,7 +257,7 @@ impl SideVeilConfig {
     #[must_use]
     pub fn sanitized(&self) -> Self {
         Self {
-            version: self.version.max(1),
+            version: self.version.max(bounds::MIN_VERSION),
             enabled: self.enabled,
             edge: self.edge.sanitized(),
             panel: self.panel.sanitized(),

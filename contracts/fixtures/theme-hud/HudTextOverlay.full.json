@@ -1,0 +1,11 @@
+{
+  "x": 12.0,
+  "y": 20.0,
+  "text": "120 FPS",
+  "sizeSp": 11.5,
+  "colorArgb": 4294047225,
+  "align": "start",
+  "bold": true,
+  "tabularNums": true,
+  "maxWidthDp": 128.0
+}

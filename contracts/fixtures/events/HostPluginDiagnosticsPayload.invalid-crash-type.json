@@ -1,0 +1,8 @@
+{
+  "$def": "HostPluginDiagnosticsPayload",
+  "invalid": true,
+  "data": {
+    "warmPluginIds": ["sideveil.diagnostic"],
+    "webviewCrashCount": "two"
+  }
+}

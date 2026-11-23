@@ -1,0 +1,174 @@
+{
+  "schemaVersion": 1,
+  "name": "sideveil-config-bounds",
+  "description": "Authoritative SideVeil config.json defaults, numeric clamp bounds, and config wire schema.",
+  "constants": {
+    "config_defaults": {
+      "doc": "Default values for SideVeilConfig fields.",
+      "rustMod": "defaults",
+      "kotlinObject": "SideVeilConfigDefaults",
+      "tsName": "SIDEVEIL_CONFIG_DEFAULTS",
+      "items": {
+        "VERSION": { "value": 1, "type": "i32" },
+        "ENABLED": { "value": true, "type": "bool" },
+        "EDGE_TOP_PERCENT": { "value": 32, "type": "i32" },
+        "EDGE_HEIGHT_DP": { "value": 168, "type": "i32" },
+        "EDGE_HOTZONE_WIDTH_DP": { "value": 24, "type": "i32" },
+        "EDGE_TRIGGER_DISTANCE_DP": { "value": 36, "type": "i32" },
+        "EDGE_OFFSET_DP": { "value": 1, "type": "i32" },
+        "EDGE_HANDLE_VISIBLE": { "value": true, "type": "bool" },
+        "EDGE_HANDLE_OPACITY": { "value": 0.62, "type": "f32" },
+        "EDGE_DIM_IN_FULLSCREEN": { "value": true, "type": "bool" },
+        "EDGE_DOUBLE_SWIPE_IN_FULLSCREEN": { "value": false, "type": "bool" },
+        "EDGE_IDLE_AUTO_DIM_MS": { "value": 3500, "type": "i32" },
+        "PANEL_WIDTH_DP": { "value": 340, "type": "i32" },
+        "PANEL_HEIGHT_PERCENT": { "value": 72, "type": "i32" },
+        "PANEL_CORNER_RADIUS_DP": { "value": 22, "type": "i32" },
+        "PANEL_THEME_ID": { "value": "coloros-glass", "type": "string" },
+        "PANEL_COLOR_MODE": { "value": "system", "type": "string" },
+        "PANEL_NATIVE_BLUR_ENABLED": { "value": true, "type": "bool" },
+        "PANEL_BLUR_RADIUS_PX": { "value": 160, "type": "i32" },
+        "PANEL_SCRIM_ALPHA": { "value": 0.0, "type": "f32" },
+        "SCOPE_ALLOWLIST_DEFAULT_PACKAGE": { "value": "me.weishu.kernelsu", "type": "string" },
+        "SCOPE_DENYLIST_DEFAULT_PACKAGE": { "value": "com.android.systemui", "type": "string" },
+        "DEBUG_WEBVIEW_DEBUGGING_ENABLED": { "value": false, "type": "bool" }
+      }
+    },
+    "config_bounds": {
+      "doc": "Inclusive sanitization clamp bounds for SideVeilConfig numeric fields.",
+      "rustMod": "bounds",
+      "kotlinObject": "SideVeilConfigBounds",
+      "tsName": "SIDEVEIL_CONFIG_BOUNDS",
+      "items": {
+        "MIN_VERSION": { "value": 1, "type": "i32" },
+        "EDGE_TOP_PERCENT_MIN": { "value": 5, "type": "i32" },
+        "EDGE_TOP_PERCENT_MAX": { "value": 85, "type": "i32" },
+        "EDGE_HEIGHT_DP_MIN": { "value": 64, "type": "i32" },
+        "EDGE_HEIGHT_DP_MAX": { "value": 360, "type": "i32" },
+        "EDGE_HOTZONE_WIDTH_DP_MIN": { "value": 12, "type": "i32" },
+        "EDGE_HOTZONE_WIDTH_DP_MAX": { "value": 48, "type": "i32" },
+        "EDGE_TRIGGER_DISTANCE_DP_MIN": { "value": 18, "type": "i32" },
+        "EDGE_TRIGGER_DISTANCE_DP_MAX": { "value": 96, "type": "i32" },
+        "EDGE_OFFSET_DP_MIN": { "value": 0, "type": "i32" },
+        "EDGE_OFFSET_DP_MAX": { "value": 24, "type": "i32" },
+        "EDGE_HANDLE_OPACITY_MIN": { "value": 0.1, "type": "f32" },
+        "EDGE_HANDLE_OPACITY_MAX": { "value": 1.0, "type": "f32" },
+        "EDGE_IDLE_AUTO_DIM_MS_MIN": { "value": 0, "type": "i32" },
+        "EDGE_IDLE_AUTO_DIM_MS_MAX": { "value": 30000, "type": "i32" },
+        "PANEL_WIDTH_DP_MIN": { "value": 260, "type": "i32" },
+        "PANEL_WIDTH_DP_MAX": { "value": 480, "type": "i32" },
+        "PANEL_HEIGHT_PERCENT_MIN": { "value": 40, "type": "i32" },
+        "PANEL_HEIGHT_PERCENT_MAX": { "value": 92, "type": "i32" },
+        "PANEL_CORNER_RADIUS_DP_MIN": { "value": 8, "type": "i32" },
+        "PANEL_CORNER_RADIUS_DP_MAX": { "value": 36, "type": "i32" },
+        "PANEL_BLUR_RADIUS_PX_MIN": { "value": 0, "type": "i32" },
+        "PANEL_BLUR_RADIUS_PX_MAX": { "value": 300, "type": "i32" },
+        "PANEL_SCRIM_ALPHA_MIN": { "value": 0.0, "type": "f32" },
+        "PANEL_SCRIM_ALPHA_MAX": { "value": 0.75, "type": "f32" }
+      }
+    }
+  },
+  "enums": {
+    "EdgeSide": {
+      "doc": "Screen edge hosting the SideVeil trigger handle.",
+      "renameAll": "camelCase",
+      "variants": [{ "name": "Left" }, { "name": "Right" }]
+    },
+    "ScopeMode": {
+      "doc": "Foreground package matching strategy for the edge trigger.",
+      "renameAll": "camelCase",
+      "variants": [{ "name": "Allowlist" }, { "name": "Global" }]
+    },
+    "PanelState": {
+      "doc": "Lifecycle state of the primary sidebar overlay panel.",
+      "renameAll": "camelCase",
+      "variants": [{ "name": "Closed" }, { "name": "Dragging" }, { "name": "Open" }]
+    }
+  },
+  "structs": {
+    "EdgeConfig": {
+      "doc": "Edge handle geometry and gesture trigger configuration.",
+      "renameAll": "camelCase",
+      "fields": [
+        { "name": "side", "type": { "ref": "EdgeSide" } },
+        { "name": "top_percent", "type": "i32" },
+        { "name": "height_dp", "type": "i32" },
+        { "name": "hotzone_width_dp", "type": "i32" },
+        { "name": "trigger_distance_dp", "type": "i32" },
+        { "name": "edge_offset_dp", "type": "i32" },
+        { "name": "handle_visible", "type": "bool" },
+        { "name": "handle_opacity", "type": "f32" },
+        { "name": "dim_in_fullscreen", "type": "bool" },
+        { "name": "double_swipe_in_fullscreen", "type": "bool" },
+        { "name": "idle_auto_dim_ms", "type": "i32" }
+      ]
+    },
+    "PanelConfig": {
+      "doc": "Sidebar panel geometry, theme preset, and native blur settings.",
+      "renameAll": "camelCase",
+      "fields": [
+        { "name": "width_dp", "type": "i32" },
+        { "name": "height_percent", "type": "i32" },
+        { "name": "corner_radius_dp", "type": "i32" },
+        { "name": "theme_id", "type": "string" },
+        { "name": "color_mode", "type": "string" },
+        { "name": "native_blur_enabled", "type": "bool" },
+        { "name": "blur_radius_px", "type": "i32" },
+        { "name": "scrim_alpha", "type": "f32" }
+      ]
+    },
+    "ScopeConfig": {
+      "doc": "Package allowlist and denylist scope configuration.",
+      "renameAll": "camelCase",
+      "fields": [
+        { "name": "mode", "type": { "ref": "ScopeMode" } },
+        { "name": "allowlist", "type": { "list": "string" } },
+        { "name": "denylist", "type": { "list": "string" } }
+      ]
+    },
+    "DebugConfig": {
+      "doc": "Runtime debugging switches persisted inside SideVeilConfig.",
+      "renameAll": "camelCase",
+      "fields": [{ "name": "webview_debugging_enabled", "type": "bool", "default": false }]
+    },
+    "SideVeilConfig": {
+      "doc": "Authoritative persisted configuration schema stored at /data/system/sideveil/config.json.",
+      "renameAll": "camelCase",
+      "fields": [
+        { "name": "version", "type": "i32" },
+        { "name": "enabled", "type": "bool" },
+        { "name": "edge", "type": { "ref": "EdgeConfig" } },
+        { "name": "panel", "type": { "ref": "PanelConfig" } },
+        { "name": "scope", "type": { "ref": "ScopeConfig" } },
+        { "name": "debug", "type": { "ref": "DebugConfig" }, "optional": true }
+      ]
+    }
+  },
+  "outputs": [
+    {
+      "target": "rust",
+      "path": "../hub/crates/sideveil-protocol/src/generated/config_bounds.rs",
+      "header": "Source: contracts/config-bounds.contract.json",
+      "include": { "constants": true }
+    },
+    {
+      "target": "kotlin",
+      "path": "../android/protocol/src/main/kotlin/pochita/sideveil/protocol/generated/ConfigBounds.kt",
+      "package": "pochita.sideveil.protocol.generated",
+      "header": "Source: contracts/config-bounds.contract.json",
+      "include": { "constants": true }
+    },
+    {
+      "target": "ts",
+      "path": "../../../../pochita-webui-kit/packages/bridge/src/generated/sideveilConfig.ts",
+      "header": "Source: sideveil/contracts/config-bounds.contract.json",
+      "include": { "constants": true, "enums": true }
+    },
+    {
+      "target": "jsonSchema",
+      "path": "schemas/config.schema.json",
+      "title": "SideVeil Config Schema",
+      "include": { "enums": true, "structs": true }
+    }
+  ]
+}

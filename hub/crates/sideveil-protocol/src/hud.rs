@@ -2,6 +2,16 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::generated::protocol_constants::hud_defaults;
+pub use crate::generated::theme_hud::{HudDismissPayload, HudTextAlign};
+
+#[allow(clippy::derivable_impls)]
+impl Default for HudTextAlign {
+    fn default() -> Self {
+        Self::Start
+    }
+}
+
 /// Background presentation style for a native HUD overlay window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -10,16 +20,6 @@ pub enum HudBackdropKind {
     NativeGlass,
     Transparent,
     Opaque,
-}
-
-/// Horizontal text alignment for HWUI text overlays composited above `vello_cpu` vector layers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum HudTextAlign {
-    #[default]
-    Start,
-    Center,
-    End,
 }
 
 /// Vector drawing primitive rasterized by `sideveil-gfx` (`vello_cpu` NEON SIMD).
@@ -126,6 +126,7 @@ pub struct HudTextOverlay {
     pub text: String,
     #[serde(default = "default_text_sp")]
     pub size_sp: f32,
+    #[serde(default = "default_text_color_argb")]
     pub color_argb: u32,
     #[serde(default)]
     pub align: HudTextAlign,
@@ -157,13 +158,13 @@ impl Default for NativeHudScene {
     fn default() -> Self {
         Self {
             plugin_id: String::new(),
-            width_dp: 200.0,
-            height_dp: 88.0,
-            corner_radius_dp: 18.0,
+            width_dp: hud_defaults::DEFAULT_WIDTH_DP,
+            height_dp: hud_defaults::DEFAULT_HEIGHT_DP,
+            corner_radius_dp: hud_defaults::DEFAULT_CORNER_RADIUS_DP,
             backdrop: HudBackdropKind::NativeGlass,
             click_through: false,
-            anchor_x_percent: 4.0,
-            anchor_y_percent: 12.0,
+            anchor_x_percent: hud_defaults::DEFAULT_ANCHOR_X_PERCENT,
+            anchor_y_percent: hud_defaults::DEFAULT_ANCHOR_Y_PERCENT,
             primitives: Vec::new(),
             texts: Vec::new(),
         }
@@ -175,29 +176,37 @@ impl NativeHudScene {
     #[must_use]
     pub fn sanitized(&self) -> Self {
         let mut out = self.clone();
-        out.width_dp = clamp_finite(out.width_dp, 48.0, 420.0, 200.0);
-        out.height_dp = clamp_finite(out.height_dp, 28.0, 320.0, 88.0);
-        out.corner_radius_dp = clamp_finite(out.corner_radius_dp, 0.0, 40.0, 18.0);
-        out.anchor_x_percent = clamp_finite(out.anchor_x_percent, 0.0, 100.0, 4.0);
-        out.anchor_y_percent = clamp_finite(out.anchor_y_percent, 0.0, 100.0, 12.0);
+        out.width_dp = clamp_finite(out.width_dp, 48.0, 420.0, hud_defaults::DEFAULT_WIDTH_DP);
+        out.height_dp = clamp_finite(out.height_dp, 28.0, 320.0, hud_defaults::DEFAULT_HEIGHT_DP);
+        out.corner_radius_dp = clamp_finite(
+            out.corner_radius_dp,
+            0.0,
+            40.0,
+            hud_defaults::DEFAULT_CORNER_RADIUS_DP,
+        );
+        out.anchor_x_percent = clamp_finite(
+            out.anchor_x_percent,
+            0.0,
+            100.0,
+            hud_defaults::DEFAULT_ANCHOR_X_PERCENT,
+        );
+        out.anchor_y_percent = clamp_finite(
+            out.anchor_y_percent,
+            0.0,
+            100.0,
+            hud_defaults::DEFAULT_ANCHOR_Y_PERCENT,
+        );
         out.primitives.truncate(MAX_HUD_PRIMITIVES);
         out.texts.truncate(MAX_HUD_TEXTS);
         out
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HudDismissPayload {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub plugin_id: Option<String>,
-}
-
-pub const MAX_HUD_PRIMITIVES: usize = 64;
-pub const MAX_HUD_TEXTS: usize = 32;
+pub const MAX_HUD_PRIMITIVES: usize = hud_defaults::MAX_PRIMITIVES;
+pub const MAX_HUD_TEXTS: usize = hud_defaults::MAX_TEXTS;
 
 fn default_stroke_width() -> f32 {
-    1.5
+    hud_defaults::DEFAULT_STROKE_WIDTH
 }
 
 fn default_true() -> bool {
@@ -205,15 +214,19 @@ fn default_true() -> bool {
 }
 
 fn default_gauge_start() -> f32 {
-    135.0
+    hud_defaults::DEFAULT_GAUGE_START_DEG
 }
 
 fn default_gauge_sweep() -> f32 {
-    270.0
+    hud_defaults::DEFAULT_GAUGE_SWEEP_DEG
 }
 
 fn default_text_sp() -> f32 {
-    12.0
+    hud_defaults::DEFAULT_TEXT_SIZE_SP
+}
+
+fn default_text_color_argb() -> u32 {
+    hud_defaults::DEFAULT_TEXT_COLOR_ARGB
 }
 
 fn clamp_finite(val: f32, min: f32, max: f32, fallback: f32) -> f32 {

@@ -140,6 +140,8 @@ export async function handleMockControlExec(cmd: string): Promise<ExecResult> {
       wsPort: 41928,
       sensorConnected: true,
       sensorPid: 14842,
+      activePluginId: mockState.activePluginId,
+      matchedPluginsCount: getMockSnapshot().matchedPluginIds.length,
       gestureStats: {
         edgeSwipesTriggered: 18,
         edgeSwipesRejected: 2,

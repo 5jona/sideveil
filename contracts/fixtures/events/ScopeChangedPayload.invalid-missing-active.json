@@ -1,0 +1,8 @@
+{
+  "$def": "ScopeChangedPayload",
+  "invalid": true,
+  "data": {
+    "foregroundPackage": "me.weishu.kernelsu",
+    "foregroundActivity": ".ui.MainActivity"
+  }
+}

@@ -22,6 +22,7 @@ export function buildMockAuditReport(): PluginAuditReport {
       activeHudPluginId: 'com.gamer.hud',
       hostNativeHeapKb: 16384,
       hostPssKb: 54200,
+      webviewCrashCount: 0,
     },
   };
 }

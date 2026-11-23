@@ -1,0 +1,7 @@
+{
+  "warmPluginIds": ["sideveil.diagnostic", "example.vello-vector-scope"],
+  "activeHudPluginId": "example.native-perf-hud",
+  "hostNativeHeapKb": 16384,
+  "hostPssKb": 54200,
+  "webviewCrashCount": 2
+}

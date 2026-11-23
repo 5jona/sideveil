@@ -3,6 +3,9 @@ package pochita.sideveil.protocol
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
+typealias HudTextAlign = pochita.sideveil.protocol.generated.HudTextAlign
+typealias HudDismissPayload = pochita.sideveil.protocol.generated.HudDismissPayload
+
 @Serializable
 enum class HudBackdropKind {
     @SerialName("native-glass")
@@ -16,24 +19,12 @@ enum class HudBackdropKind {
 }
 
 @Serializable
-enum class HudTextAlign {
-    @SerialName("start")
-    START,
-
-    @SerialName("center")
-    CENTER,
-
-    @SerialName("end")
-    END,
-}
-
-@Serializable
 data class HudTextOverlay(
     val x: Float,
     val y: Float,
     val text: String,
-    val sizeSp: Float = 12f,
-    val colorArgb: Long = 0xFFF1F5F9L,
+    val sizeSp: Float = SideVeilHudDefaults.DEFAULT_TEXT_SIZE_SP,
+    val colorArgb: Long = SideVeilHudDefaults.DEFAULT_TEXT_COLOR_ARGB,
     val align: HudTextAlign = HudTextAlign.START,
     val bold: Boolean = false,
     val tabularNums: Boolean = true,
@@ -48,17 +39,12 @@ data class HudTextOverlay(
 @Serializable
 data class NativeHudSceneHeader(
     val pluginId: String = "",
-    val widthDp: Float = 200f,
-    val heightDp: Float = 88f,
-    val cornerRadiusDp: Float = 18f,
+    val widthDp: Float = SideVeilHudDefaults.DEFAULT_WIDTH_DP,
+    val heightDp: Float = SideVeilHudDefaults.DEFAULT_HEIGHT_DP,
+    val cornerRadiusDp: Float = SideVeilHudDefaults.DEFAULT_CORNER_RADIUS_DP,
     val backdrop: HudBackdropKind = HudBackdropKind.NATIVE_GLASS,
     val clickThrough: Boolean = false,
-    val anchorXPercent: Float = 4f,
-    val anchorYPercent: Float = 12f,
+    val anchorXPercent: Float = SideVeilHudDefaults.DEFAULT_ANCHOR_X_PERCENT,
+    val anchorYPercent: Float = SideVeilHudDefaults.DEFAULT_ANCHOR_Y_PERCENT,
     val texts: List<HudTextOverlay> = emptyList(),
-)
-
-@Serializable
-data class HudDismissPayload(
-    val pluginId: String? = null,
 )

@@ -6,6 +6,7 @@ use std::io;
 use std::path::Path;
 
 use sideveil_protocol::config::{ScopeMode, SideVeilConfig};
+use sideveil_protocol::generated::protocol_constants::builtin_diagnostic as diag;
 use sideveil_protocol::plugin::{
     BUILTIN_DIAG_PLUGIN_ID, PluginBackendKind, PluginBackendState, PluginCapability,
     PluginDescriptor, PluginManifest, PluginOverrideEntry, PluginOverridesFile,
@@ -19,16 +20,16 @@ use crate::log_ring::LogRing;
 pub(super) fn builtin_diag_manifest() -> PluginManifest {
     PluginManifest {
         id: BUILTIN_DIAG_PLUGIN_ID.to_owned(),
-        name: "内置诊断".to_owned(),
+        name: diag::NAME.to_owned(),
         version: env!("CARGO_PKG_VERSION").to_owned(),
         icon: None,
         triggers: PluginTriggers {
             packages: Vec::new(),
             activities: Vec::new(),
-            global: false,
-            priority: 20,
+            global: diag::GLOBAL,
+            priority: diag::PRIORITY,
         },
-        entry: "index.html".to_owned(),
+        entry: diag::ENTRY.to_owned(),
         backend: PluginBackendKind::None,
         capabilities: vec![PluginCapability::Storage, PluginCapability::Toast],
         surface: PluginSurfacePrefs {

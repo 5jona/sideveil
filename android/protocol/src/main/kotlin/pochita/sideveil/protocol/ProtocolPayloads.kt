@@ -3,18 +3,16 @@ package pochita.sideveil.protocol
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
+typealias ScopeChangedPayload = pochita.sideveil.protocol.generated.ScopeChangedPayload
+typealias PanelStateChangedPayload = pochita.sideveil.protocol.generated.PanelStateChangedPayload
+typealias PanelVisibilityPayload = pochita.sideveil.protocol.generated.PanelVisibilityPayload
+typealias PingResult = pochita.sideveil.protocol.generated.PingResult
+
 @Serializable
 data class ConfigUpdatedPayload(
     val config: SideVeilConfig,
     val scopeActive: Boolean,
     val foregroundPackage: String,
-)
-
-@Serializable
-data class ScopeChangedPayload(
-    val foregroundPackage: String,
-    val foregroundActivity: String = "",
-    val active: Boolean,
 )
 
 @Serializable
@@ -109,7 +107,7 @@ data class PanelCommandPayload(
  */
 @Serializable
 data class ContainerThemePayload(
-    val themeId: String = "coloros-glass",
+    val themeId: String = SideVeilThemes.COLOROS_GLASS,
     val colorScheme: String = "dark",
     val wantsNativeBlur: Boolean? = null,
     val cornerRadiusPx: Int? = null,
@@ -146,24 +144,6 @@ data class HostHelloPayload(
     val pid: Int,
     val version: String,
     val crossWindowBlurSupported: Boolean,
-)
-
-@Serializable
-data class PanelStateChangedPayload(
-    val state: PanelState,
-)
-
-@Serializable
-data class PanelVisibilityPayload(
-    val visible: Boolean,
-    val state: PanelState,
-)
-
-@Serializable
-data class PingResult(
-    val pong: Boolean = true,
-    val daemonUptimeMs: Long,
-    val timestampMs: Long,
 )
 
 @Serializable

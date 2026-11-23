@@ -1,22 +1,25 @@
 import {
-  BUILTIN_DIAG_PLUGIN_ID,
   definePluginManifest,
   type PluginManifest,
+  SIDEVEIL_BUILTIN_DIAGNOSTIC,
 } from '@pochita/sideveil-sdk';
 
 export const DIAGNOSTIC_PLUGIN_MANIFEST: PluginManifest = definePluginManifest({
-  id: BUILTIN_DIAG_PLUGIN_ID,
-  name: '内置诊断',
-  version: '0.1.0',
-  entry: 'index.html',
-  backend: 'none',
-  capabilities: ['storage', 'toast'],
+  id: SIDEVEIL_BUILTIN_DIAGNOSTIC.ID,
+  name: SIDEVEIL_BUILTIN_DIAGNOSTIC.NAME,
+  version: SIDEVEIL_BUILTIN_DIAGNOSTIC.VERSION,
+  entry: SIDEVEIL_BUILTIN_DIAGNOSTIC.ENTRY,
+  backend: SIDEVEIL_BUILTIN_DIAGNOSTIC.BACKEND,
+  capabilities: [
+    SIDEVEIL_BUILTIN_DIAGNOSTIC.CAPABILITY_STORAGE,
+    SIDEVEIL_BUILTIN_DIAGNOSTIC.CAPABILITY_TOAST,
+  ],
   triggers: {
     packages: [],
-    global: false,
-    priority: 20,
+    global: SIDEVEIL_BUILTIN_DIAGNOSTIC.GLOBAL,
+    priority: SIDEVEIL_BUILTIN_DIAGNOSTIC.PRIORITY,
   },
   surface: {
-    backdrop: 'native-glass',
+    backdrop: SIDEVEIL_BUILTIN_DIAGNOSTIC.SURFACE_BACKDROP,
   },
 });

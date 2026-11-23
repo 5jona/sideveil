@@ -47,6 +47,8 @@ export function createMockPanelRpcHandler(
         wsPort: 41928,
         sensorConnected: true,
         sensorPid: 14842,
+        activePluginId: 'sideveil.diagnostic',
+        matchedPluginsCount: 1,
       } satisfies DaemonStatus;
     }
 

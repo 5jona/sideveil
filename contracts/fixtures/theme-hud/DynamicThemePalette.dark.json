@@ -1,0 +1,18 @@
+{
+  "themeId": "coloros-glass",
+  "isDark": true,
+  "seedArgb": 4281908728,
+  "lumaHint": 0.35,
+  "glass": {
+    "tintTopArgb": 1276779034,
+    "tintBottomArgb": 1444024854,
+    "rimArgb": 872415231,
+    "accentArgb": 4281908728,
+    "fallbackFillArgb": 4077847066,
+    "fallbackStrokeArgb": 1006632959
+  },
+  "cssTokens": {
+    "--accent": "#38bdf8",
+    "--accent-soft": "rgba(56, 189, 248, 0.16)"
+  }
+}

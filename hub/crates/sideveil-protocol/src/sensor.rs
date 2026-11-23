@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::config::{EdgeSide, PanelState, SideVeilConfig};
+pub use crate::generated::protocol_wire::DebugGestureStats;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -48,19 +49,6 @@ pub struct NetworkContextSnapshot {
     pub gateway: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local_ipv4: Option<String>,
-}
-
-/// Edge-gesture diagnostic counters reported by the UID 1000 `:sensor` process.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct DebugGestureStats {
-    pub edge_swipes_triggered: u64,
-    pub edge_swipes_rejected: u64,
-    pub hotzone_misses: u64,
-    pub pilfer_invocations: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_reject_reason: Option<String>,
-    pub last_event_timestamp_ms: u64,
 }
 
 /// Messages pushed from the UID 1000 Kotlin `:sensor` process to `sideveild`.

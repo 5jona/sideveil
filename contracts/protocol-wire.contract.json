@@ -1,0 +1,262 @@
+{
+  "schemaVersion": 1,
+  "name": "sideveil-protocol-wire",
+  "description": "Shared cross-language daemon status, scope, panel visibility, and host diagnostics wire DTOs.",
+  "enums": {
+    "PanelState": {
+      "doc": "Lifecycle state of the primary sidebar overlay panel.",
+      "renameAll": "camelCase",
+      "variants": [{ "name": "Closed" }, { "name": "Dragging" }, { "name": "Open" }]
+    }
+  },
+  "structs": {
+    "EmptyParams": {
+      "doc": "Empty JSON-RPC parameter object.",
+      "fields": []
+    },
+    "DebugGestureStats": {
+      "doc": "Edge-gesture diagnostic counters reported by the UID 1000 sensor process.",
+      "renameAll": "camelCase",
+      "rustDerives": ["Debug", "Clone", "Default", "PartialEq", "Eq", "Serialize", "Deserialize"],
+      "fields": [
+        { "name": "edge_swipes_triggered", "type": "u64", "default": 0 },
+        { "name": "edge_swipes_rejected", "type": "u64", "default": 0 },
+        { "name": "hotzone_misses", "type": "u64", "default": 0 },
+        { "name": "pilfer_invocations", "type": "u64", "default": 0 },
+        {
+          "name": "last_reject_reason",
+          "type": "string",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        { "name": "last_event_timestamp_ms", "type": "u64", "default": 0 }
+      ]
+    },
+    "DaemonStatus": {
+      "doc": "Live runtime status snapshot returned by daemon.status.",
+      "renameAll": "camelCase",
+      "fields": [
+        { "name": "pid", "type": "u32" },
+        { "name": "uid", "type": "u32" },
+        { "name": "uptime_ms", "type": "u64" },
+        { "name": "config_version", "type": "i32" },
+        { "name": "enabled", "type": "bool" },
+        { "name": "scope_active", "type": "bool" },
+        { "name": "foreground_package", "type": "string" },
+        { "name": "host_package", "type": "string" },
+        { "name": "host_connected", "type": "bool" },
+        { "name": "host_pid", "type": "u32", "optional": true },
+        { "name": "overlay_permission_granted", "type": "bool" },
+        { "name": "cross_window_blur_supported", "type": "bool", "optional": true },
+        { "name": "gesture_monitor_active", "type": "bool" },
+        { "name": "task_listener_active", "type": "bool" },
+        { "name": "panel_state", "type": { "ref": "PanelState" } },
+        { "name": "screen_width_px", "type": "i32" },
+        { "name": "screen_height_px", "type": "i32" },
+        { "name": "density", "type": "f32" },
+        { "name": "ws_port", "type": "u16" },
+        { "name": "sensor_connected", "type": "bool", "default": false },
+        { "name": "sensor_pid", "type": "u32", "optional": true },
+        {
+          "name": "active_plugin_id",
+          "type": "string",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        { "name": "matched_plugins_count", "type": "usize", "default": 0 },
+        {
+          "name": "gesture_stats",
+          "type": { "ref": "DebugGestureStats" },
+          "optional": true,
+          "skipSerializingIfNone": true
+        }
+      ]
+    },
+    "DaemonHealth": {
+      "doc": "Compact liveness probe result returned by daemon.health.",
+      "renameAll": "camelCase",
+      "rustDerives": ["Debug", "Clone", "PartialEq", "Eq", "Serialize", "Deserialize"],
+      "fields": [
+        { "name": "ok", "type": "bool" },
+        { "name": "pid", "type": "u32" },
+        { "name": "uptime_ms", "type": "u64" },
+        { "name": "sensor_connected", "type": "bool" },
+        { "name": "host_connected", "type": "bool" }
+      ]
+    },
+    "PingResult": {
+      "doc": "Round-trip heartbeat response returned by daemon.ping.",
+      "renameAll": "camelCase",
+      "rustDerives": ["Debug", "Clone", "Copy", "PartialEq", "Eq", "Serialize", "Deserialize"],
+      "fields": [
+        { "name": "pong", "type": "bool", "default": true },
+        { "name": "daemon_uptime_ms", "type": "u64" },
+        { "name": "timestamp_ms", "type": "u64" }
+      ]
+    },
+    "ScopeChangedPayload": {
+      "doc": "Foreground application and scope activation event payload for scope.changed.",
+      "renameAll": "camelCase",
+      "rustDerives": ["Debug", "Clone", "PartialEq", "Eq", "Serialize", "Deserialize"],
+      "fields": [
+        { "name": "foreground_package", "type": "string" },
+        { "name": "foreground_activity", "type": "string", "default": "" },
+        { "name": "active", "type": "bool" }
+      ]
+    },
+    "PanelStateChangedPayload": {
+      "doc": "Panel motion state transition event payload for panel.stateChanged.",
+      "renameAll": "camelCase",
+      "rustDerives": ["Debug", "Clone", "Copy", "PartialEq", "Eq", "Serialize", "Deserialize"],
+      "fields": [{ "name": "state", "type": { "ref": "PanelState" } }]
+    },
+    "PanelVisibilityPayload": {
+      "doc": "Panel visibility and state broadcast payload for panel.visibility.",
+      "renameAll": "camelCase",
+      "rustDerives": ["Debug", "Clone", "Copy", "PartialEq", "Eq", "Serialize", "Deserialize"],
+      "fields": [
+        { "name": "visible", "type": "bool" },
+        { "name": "state", "type": { "ref": "PanelState" } }
+      ]
+    },
+    "HostPluginDiagnosticsPayload": {
+      "doc": "Render host WebView LRU, HUD, memory, and crash diagnostics payload.",
+      "renameAll": "camelCase",
+      "rustDerives": ["Debug", "Clone", "Default", "PartialEq", "Eq", "Serialize", "Deserialize"],
+      "fields": [
+        { "name": "warm_plugin_ids", "type": { "list": "string" }, "default": [] },
+        {
+          "name": "active_hud_plugin_id",
+          "type": "string",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "host_native_heap_kb",
+          "type": "u64",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "host_pss_kb",
+          "type": "u64",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        { "name": "webview_crash_count", "type": "i32", "default": 0 }
+      ]
+    }
+  },
+  "rpcs": {
+    "DAEMON_PING": {
+      "method": "daemon.ping",
+      "params": { "ref": "EmptyParams" },
+      "result": { "ref": "PingResult" }
+    },
+    "DAEMON_STATUS": {
+      "method": "daemon.status",
+      "params": { "ref": "EmptyParams" },
+      "result": { "ref": "DaemonStatus" }
+    },
+    "DAEMON_HEALTH": {
+      "method": "daemon.health",
+      "params": { "ref": "EmptyParams" },
+      "result": { "ref": "DaemonHealth" }
+    }
+  },
+  "events": {
+    "SCOPE_CHANGED": {
+      "event": "scope.changed",
+      "payload": { "ref": "ScopeChangedPayload" }
+    },
+    "PANEL_STATE_CHANGED": {
+      "event": "panel.stateChanged",
+      "payload": { "ref": "PanelStateChangedPayload" }
+    },
+    "PANEL_VISIBILITY": {
+      "event": "panel.visibility",
+      "payload": { "ref": "PanelVisibilityPayload" }
+    },
+    "PANEL_VISIBILITY_CHANGED": {
+      "event": "panel.visibilityChanged",
+      "payload": { "ref": "PanelVisibilityPayload" }
+    },
+    "HOST_DIAGNOSTICS": {
+      "event": "host.diagnostics",
+      "payload": { "ref": "HostPluginDiagnosticsPayload" }
+    }
+  },
+  "outputs": [
+    {
+      "target": "rust",
+      "path": "../hub/crates/sideveil-protocol/src/generated/protocol_wire.rs",
+      "header": "Source: contracts/protocol-wire.contract.json",
+      "include": {
+        "enums": true,
+        "structs": [
+          "DebugGestureStats",
+          "DaemonStatus",
+          "DaemonHealth",
+          "PingResult",
+          "ScopeChangedPayload",
+          "PanelStateChangedPayload",
+          "PanelVisibilityPayload",
+          "HostPluginDiagnosticsPayload"
+        ]
+      }
+    },
+    {
+      "target": "kotlin",
+      "path": "../android/protocol/src/main/kotlin/pochita/sideveil/protocol/generated/ProtocolWire.kt",
+      "package": "pochita.sideveil.protocol.generated",
+      "header": "Source: contracts/protocol-wire.contract.json",
+      "include": {
+        "enums": true,
+        "structs": [
+          "DebugGestureStats",
+          "DaemonStatus",
+          "DaemonHealth",
+          "PingResult",
+          "ScopeChangedPayload",
+          "PanelStateChangedPayload",
+          "PanelVisibilityPayload",
+          "HostPluginDiagnosticsPayload"
+        ]
+      }
+    },
+    {
+      "target": "ts",
+      "path": "../../../../pochita-webui-kit/packages/sdk/src/generated/sideveilWire.ts",
+      "header": "Source: sideveil/contracts/protocol-wire.contract.json",
+      "imports": ["import type { PanelState } from '@pochita/bridge';"],
+      "methodsConstName": "SIDEVEIL_CORE_WIRE_METHODS",
+      "rpcMapName": "SideVeilCoreRpcMethodMap",
+      "eventsConstName": "SIDEVEIL_CORE_WIRE_EVENTS",
+      "eventMapName": "SideVeilCoreEventPayloadMap",
+      "include": { "structs": true, "rpcs": true, "events": true }
+    },
+    {
+      "target": "jsonSchema",
+      "path": "schemas/protocol-status.schema.json",
+      "title": "SideVeil Daemon Status & Health Schema",
+      "include": {
+        "enums": ["PanelState"],
+        "structs": ["DebugGestureStats", "DaemonStatus", "DaemonHealth", "PingResult"]
+      }
+    },
+    {
+      "target": "jsonSchema",
+      "path": "schemas/protocol-events.schema.json",
+      "title": "SideVeil Scope, Panel & Diagnostics Event Schema",
+      "include": {
+        "enums": ["PanelState"],
+        "structs": [
+          "ScopeChangedPayload",
+          "PanelStateChangedPayload",
+          "PanelVisibilityPayload",
+          "HostPluginDiagnosticsPayload"
+        ]
+      }
+    }
+  ]
+}

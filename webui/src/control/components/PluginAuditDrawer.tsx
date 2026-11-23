@@ -1,10 +1,6 @@
-import type { HostPluginDiagnosticsPayload, PluginAuditReport } from '@pochita/sideveil-sdk';
+import type { PluginAuditReport } from '@pochita/sideveil-sdk';
 import { Badge, Button, Card } from '@pochita/ui';
 import { Cpu, RefreshCw, ShieldAlert, ShieldCheck } from 'lucide-react';
-
-type ExtendedAuditDiagnostics = HostPluginDiagnosticsPayload & {
-  webviewCrashCount?: number;
-};
 
 export interface PluginAuditDrawerProps {
   report: PluginAuditReport | null;
@@ -18,7 +14,7 @@ function formatKbToMb(kb: number | null | undefined): string {
 }
 
 export function PluginAuditDrawer({ report, loading, onRefresh }: PluginAuditDrawerProps) {
-  const diag = report?.diagnostics as ExtendedAuditDiagnostics | undefined;
+  const diag = report?.diagnostics;
   const webviewCrashCount = diag?.webviewCrashCount ?? 0;
   const entries = report?.entries ?? [];
 
