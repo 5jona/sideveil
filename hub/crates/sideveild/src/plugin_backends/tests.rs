@@ -79,3 +79,38 @@ async fn broadcast_system_event_reaches_native_only_and_never_blocks() {
         backends.broadcast_system_event("appearance.changed", json!({ "seq": i }));
     }
 }
+
+#[tokio::test]
+async fn send_system_event_targets_only_matching_native_session() {
+    let backends = Arc::new(PluginBackends::new());
+    let (native_id, mut native_rx) = backends.register("native.plugin", true);
+    let (app_id, mut app_rx) = backends.register("app.plugin", false);
+
+    backends.send_system_event(
+        "native.plugin",
+        native_id,
+        "network.contextChanged",
+        json!({ "transport": "wifi", "ssid": "HomeLAN" }),
+    );
+    backends.send_system_event(
+        "native.plugin",
+        native_id + 999,
+        "network.contextChanged",
+        json!({ "transport": "cellular" }),
+    );
+    backends.send_system_event(
+        "app.plugin",
+        app_id,
+        "network.contextChanged",
+        json!({ "transport": "wifi" }),
+    );
+
+    let frame = native_rx
+        .try_recv()
+        .expect("matching native session receives initial snapshot");
+    let encoded = serde_json::to_value(&frame).expect("serialize system event");
+    assert_eq!(encoded["event"], "network.contextChanged");
+    assert_eq!(encoded["payload"]["ssid"], "HomeLAN");
+    assert!(native_rx.try_recv().is_err());
+    assert!(app_rx.try_recv().is_err());
+}

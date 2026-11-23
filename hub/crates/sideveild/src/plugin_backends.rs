@@ -70,6 +70,23 @@ impl PluginBackends {
         (session_id, rx)
     }
 
+    /// Pushes a Hub system notification to a specific active `uds-native` backend session without blocking.
+    pub fn send_system_event(&self, plugin_id: &str, session_id: u64, event: &str, payload: Value) {
+        let target = {
+            let guard = self.sessions.read().unwrap_or_else(PoisonError::into_inner);
+            guard
+                .get(plugin_id)
+                .filter(|s| s.session_id == session_id && s.is_native)
+                .cloned()
+        };
+        if let Some(session) = target {
+            let _ = session.tx.try_send(BackendOutboundFrame::SystemEvent {
+                event: event.to_owned(),
+                payload,
+            });
+        }
+    }
+
     /// Pushes a Hub system notification to all connected `uds-native` plugin backends using
     /// non-blocking `try_send` so a stalled backend never blocks the hub.
     pub fn broadcast_system_event(&self, event: &str, payload: Value) {

@@ -8,7 +8,8 @@ use sideveil_protocol::hud::NativeHudScene;
 use sideveil_protocol::plugin::{
     PLUGIN_EVENT_LAGGED_SUBEVENT, PluginBackendEvent, PluginBackendState, PluginCapability,
 };
-use sideveil_protocol::rpc::{RpcResponse, methods};
+use sideveil_protocol::rpc::{RpcResponse, events, methods};
+use sideveil_protocol::sensor::NetworkTransportKind;
 use tokio::io::{AsyncRead, BufReader};
 
 use super::{read_bounded_line, write_json_line};
@@ -80,6 +81,22 @@ pub(super) async fn handle_plugin_backend_session<R: AsyncRead + Unpin>(
         cred.uid, cred.pid, package_name
     ));
     state.emit_plugin_backend_state(&plugin_id, PluginBackendState::Online);
+
+    if is_native {
+        let net_ctx = state.network_context();
+        if (net_ctx.transport != NetworkTransportKind::None
+            || net_ctx.ssid.is_some()
+            || net_ctx.gateway.is_some())
+            && let Ok(val) = serde_json::to_value(&net_ctx)
+        {
+            state.plugin_backends().send_system_event(
+                &plugin_id,
+                session_id,
+                events::NETWORK_CONTEXT_CHANGED,
+                val,
+            );
+        }
+    }
 
     let writer_task = tokio::spawn(async move {
         while let Some(frame) = out_rx.recv().await {
