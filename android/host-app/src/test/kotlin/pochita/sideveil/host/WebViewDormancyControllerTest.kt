@@ -4,6 +4,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import pochita.sideveil.protocol.PluginDescriptor
+import pochita.sideveil.protocol.PluginEmbedPrefs
+import pochita.sideveil.protocol.PluginSurfacePrefs
 
 class WebViewDormancyControllerTest {
     private class FakeScheduler {
@@ -146,5 +149,63 @@ class WebViewDormancyControllerTest {
         controller.onPageFinished()
         assertEquals(0, pauses)
         assertEquals(0, resumes)
+    }
+
+    @Test
+    fun `updateHidePauseDelayMs and resolveHidePauseDelayMs support keepAlive grace window`() {
+        val defaultDesc =
+            PluginDescriptor(
+                id = "com.example.default",
+                name = "Default",
+                version = "1.0.0",
+            )
+        assertEquals(
+            WebViewDormancyController.DEFAULT_HIDE_PAUSE_DELAY_MS,
+            WebViewDormancyController.resolveHidePauseDelayMs(defaultDesc),
+        )
+
+        val keepAliveDefaultGrace =
+            defaultDesc.copy(
+                surface = PluginSurfacePrefs(keepAlive = true),
+                embed = PluginEmbedPrefs(url = "http://homeassistant.local:8123"),
+            )
+        assertEquals(
+            WebViewDormancyController.DEFAULT_KEEP_ALIVE_GRACE_MS,
+            WebViewDormancyController.resolveHidePauseDelayMs(keepAliveDefaultGrace),
+        )
+
+        val keepAliveCustomGrace =
+            defaultDesc.copy(
+                surface = PluginSurfacePrefs(keepAlive = true),
+                embed = PluginEmbedPrefs(url = "http://homeassistant.local:8123", keepAliveGraceSec = 300),
+            )
+        assertEquals(
+            300_000L,
+            WebViewDormancyController.resolveHidePauseDelayMs(keepAliveCustomGrace),
+        )
+
+        val keepAliveClampedGrace =
+            defaultDesc.copy(
+                surface = PluginSurfacePrefs(keepAlive = true),
+                embed = PluginEmbedPrefs(url = "http://homeassistant.local:8123", keepAliveGraceSec = 9999),
+            )
+        assertEquals(
+            1_800_000L,
+            WebViewDormancyController.resolveHidePauseDelayMs(keepAliveClampedGrace),
+        )
+
+        val scheduler = FakeScheduler()
+        val controller =
+            WebViewDormancyController(
+                onPauseWebView = {},
+                onResumeWebView = {},
+                scheduleDelayed = scheduler.schedule,
+            )
+        controller.onLoadStarted()
+        controller.setForeground(true)
+        controller.onPageFinished()
+        controller.updateHidePauseDelayMs(180_000L)
+        controller.setForeground(false)
+        assertEquals(180_000L, scheduler.lastDelayMs)
     }
 }

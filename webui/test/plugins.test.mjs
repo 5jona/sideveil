@@ -2,9 +2,16 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { BUILTIN_DIAG_PLUGIN_ID } from '@pochita/sideveil-sdk';
 import {
+  clampEmbedNumber,
+  normalizeOriginList,
+  normalizeSsidList,
+} from '../src/control/hooks/pluginCommandHelpers.ts';
+import {
   buildCreateWebEmbedCommand,
+  buildCreateWebEmbedParams,
   buildPluginScopeCommand,
   buildSetEmbedConfigCommand,
+  buildSetEmbedConfigParams,
   buildUninstallPluginCommand,
 } from '../src/control/hooks/usePluginsControl.ts';
 import { handleMockControlExec } from '../src/control/mockControlBridge.ts';
@@ -94,16 +101,39 @@ test('handleMockControlExec supports web-embed create, edit, uninstall, and netw
   assert.equal(netSnap.transport, 'wifi');
   assert.equal(typeof netSnap.vpnActive, 'boolean');
 
-  // create web-embed
-  const createCmd = buildCreateWebEmbedCommand({
+  // create web-embed with enhanced Phase 1 fields
+  const createInput = {
     id: 'lan.openclash',
     name: 'OpenClash',
     url: 'http://192.168.1.1:9090/ui',
+    remoteUrl: 'https://clash.example.com:9443/ui',
+    lanSsids: ['Home-5G', ' Home-IoT ', 'Home-5G'],
     allowCleartext: true,
     keepAlive: true,
+    wideViewport: true,
+    allowZoom: false,
+    webHistoryBack: true,
+    textZoom: 95,
+    showToolbar: true,
+    keepAliveGraceSec: 180,
+    widthDp: 400,
+    heightPercent: 82,
     global: true,
     priority: 12,
-  });
+  };
+  const createParams = buildCreateWebEmbedParams(createInput);
+  assert.equal(createParams.remoteUrl, 'https://clash.example.com:9443/ui');
+  assert.deepEqual(createParams.lanSsids, ['Home-5G', 'Home-IoT']);
+  assert.equal(createParams.wideViewport, true);
+  assert.equal(createParams.allowZoom, false);
+  assert.equal(createParams.webHistoryBack, true);
+  assert.equal(createParams.textZoom, 95);
+  assert.equal(createParams.showToolbar, true);
+  assert.equal(createParams.keepAliveGraceSec, 180);
+  assert.equal(createParams.widthDp, 400);
+  assert.equal(createParams.heightPercent, 82);
+
+  const createCmd = buildCreateWebEmbedCommand(createInput);
   const createRes = await handleMockControlExec(createCmd);
   assert.equal(createRes.errno, 0);
   const createdEnvelope = JSON.parse(createRes.stdout);
@@ -111,23 +141,81 @@ test('handleMockControlExec supports web-embed create, edit, uninstall, and netw
     (p) => p.id === 'lan.openclash',
   );
   assert.equal(createdPlugin?.embed?.url, 'http://192.168.1.1:9090/ui');
+  assert.equal(createdPlugin?.embed?.remoteUrl, 'https://clash.example.com:9443/ui');
+  assert.deepEqual(createdPlugin?.embed?.lanSsids, ['Home-5G', 'Home-IoT']);
+  assert.deepEqual(createdPlugin?.embed?.allowedOrigins, [
+    'http://192.168.1.1:9090',
+    'https://clash.example.com:9443',
+  ]);
   assert.equal(createdPlugin?.embed?.allowCleartext, true);
+  assert.equal(createdPlugin?.embed?.wideViewport, true);
+  assert.equal(createdPlugin?.embed?.allowZoom, false);
+  assert.equal(createdPlugin?.embed?.webHistoryBack, true);
+  assert.equal(createdPlugin?.embed?.textZoom, 95);
+  assert.equal(createdPlugin?.embed?.showToolbar, true);
+  assert.equal(createdPlugin?.embed?.keepAliveGraceSec, 180);
   assert.equal(createdPlugin?.surface?.keepAlive, true);
+  assert.equal(createdPlugin?.surface?.widthDp, 400);
+  assert.equal(createdPlugin?.surface?.heightPercent, 82);
 
-  // edit embed config
-  const editCmd = buildSetEmbedConfigCommand('lan.openclash', {
+  // edit embed config including new Phase 1 fields
+  const editInput = {
     embedUrl: 'http://192.168.1.2:9090/ui',
-    allowedOrigins: ['http://192.168.1.2:9090'],
+    remoteUrl: 'https://ha.example.com:8123',
+    lanSsids: ['Office-WiFi'],
+    allowedOrigins: ['http://192.168.1.2:9090', 'https://ha.example.com:8123'],
     allowCleartext: false,
     keepAlive: false,
-  });
+    wideViewport: false,
+    allowZoom: true,
+    webHistoryBack: false,
+    textZoom: 110,
+    showToolbar: false,
+    keepAliveGraceSec: 60,
+    widthDp: 440,
+    heightPercent: 85,
+  };
+  const editParams = buildSetEmbedConfigParams('lan.openclash', editInput);
+  assert.equal(editParams.pluginId, 'lan.openclash');
+  assert.equal(editParams.remoteUrl, 'https://ha.example.com:8123');
+  assert.deepEqual(editParams.lanSsids, ['Office-WiFi']);
+  assert.equal(editParams.wideViewport, false);
+  assert.equal(editParams.allowZoom, true);
+  assert.equal(editParams.webHistoryBack, false);
+  assert.equal(editParams.textZoom, 110);
+  assert.equal(editParams.showToolbar, false);
+  assert.equal(editParams.keepAliveGraceSec, 60);
+  assert.equal(editParams.widthDp, 440);
+  assert.equal(editParams.heightPercent, 85);
+
+  const editCmd = buildSetEmbedConfigCommand('lan.openclash', editInput);
   const editRes = await handleMockControlExec(editCmd);
   assert.equal(editRes.errno, 0);
   const editedEnvelope = JSON.parse(editRes.stdout);
   const editedPlugin = editedEnvelope.result.plugins.find((p) => p.id === 'lan.openclash');
   assert.equal(editedPlugin?.embed?.url, 'http://192.168.1.2:9090/ui');
+  assert.equal(editedPlugin?.embed?.remoteUrl, 'https://ha.example.com:8123');
+  assert.deepEqual(editedPlugin?.embed?.lanSsids, ['Office-WiFi']);
   assert.equal(editedPlugin?.embed?.allowCleartext, false);
+  assert.equal(editedPlugin?.embed?.wideViewport, false);
+  assert.equal(editedPlugin?.embed?.allowZoom, true);
+  assert.equal(editedPlugin?.embed?.webHistoryBack, false);
+  assert.equal(editedPlugin?.embed?.textZoom, 110);
+  assert.equal(editedPlugin?.embed?.showToolbar, false);
+  assert.equal(editedPlugin?.embed?.keepAliveGraceSec, 60);
   assert.equal(editedPlugin?.surface?.keepAlive, false);
+  assert.equal(editedPlugin?.surface?.widthDp, 440);
+  assert.equal(editedPlugin?.surface?.heightPercent, 85);
+
+  // normalizeSsidList, normalizeOriginList, clampEmbedNumber
+  assert.deepEqual(normalizeSsidList('Home-5G, Home-IoT\nHome-5G'), ['Home-5G', 'Home-IoT']);
+  assert.deepEqual(normalizeOriginList('http://127.0.0.1:8123, https://ha.example.com:8123'), [
+    'http://127.0.0.1:8123',
+    'https://ha.example.com:8123',
+  ]);
+  assert.equal(clampEmbedNumber(180, 240, 720, 380), 240);
+  assert.equal(clampEmbedNumber(900, 240, 720, 380), 720);
+  assert.equal(clampEmbedNumber(Number.NaN, 240, 720, 380), 380);
 
   // uninstall
   const uninstallCmd = buildUninstallPluginCommand('lan.openclash');

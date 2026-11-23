@@ -57,22 +57,44 @@ function extractOrigin(url: string): string | null {
   }
 }
 
+function pickBool<T extends boolean | undefined>(val: unknown, fallback: T): boolean | T {
+  return typeof val === 'boolean' ? val : fallback;
+}
+
+function pickInt<T extends number | undefined>(val: unknown, fallback: T): number | T {
+  return typeof val === 'number' && Number.isFinite(val) ? Math.trunc(val) : fallback;
+}
+
+function pickStr(val: unknown): string | undefined {
+  return typeof val === 'string' && val.trim() ? val.trim() : undefined;
+}
+
+function pickStrList(val: unknown): string[] | undefined {
+  return Array.isArray(val)
+    ? val
+        .map(String)
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : undefined;
+}
+
 function createEmbedPlugin(ctx: MockPluginHandlerCtx, params: Record<string, unknown>): ExecResult {
-  const id = typeof params.id === 'string' ? params.id.trim() : '';
-  const name = typeof params.name === 'string' ? params.name.trim() : '';
-  const url = typeof params.url === 'string' ? params.url.trim() : '';
+  const id = pickStr(params.id) ?? '';
+  const name = pickStr(params.name) ?? '';
+  const url = pickStr(params.url) ?? '';
   if (!id || !name || !url) return rpcErr('id、name 与 url 不能为空');
   if (ctx.state.plugins.some((p) => p.id === id)) return rpcErr(`插件 ${id} 已存在`);
 
   const origin = extractOrigin(url);
   if (!origin) return rpcErr(`无效的 URL: ${url}`);
-  const allowedOrigins = Array.isArray(params.allowedOrigins)
-    ? params.allowedOrigins.map(String).filter(Boolean)
-    : [origin];
+  const remoteUrl = pickStr(params.remoteUrl);
+  const remoteOrigin = remoteUrl ? extractOrigin(remoteUrl) : null;
+  if (remoteUrl && !remoteOrigin) return rpcErr(`无效的备选 URL: ${remoteUrl}`);
+  const defaultOrigins =
+    remoteOrigin && remoteOrigin !== origin ? [origin, remoteOrigin] : [origin];
+  const allowedOrigins = pickStrList(params.allowedOrigins) ?? defaultOrigins;
+  const lanSsids = pickStrList(params.lanSsids);
   const allowCleartext = Boolean(params.allowCleartext);
-  const keepAlive = Boolean(params.keepAlive);
-  const global = typeof params.global === 'boolean' ? params.global : true;
-  const priority = typeof params.priority === 'number' ? Math.trunc(params.priority) : 0;
 
   const nextPlugin: PluginDescriptor = {
     id,
@@ -80,25 +102,31 @@ function createEmbedPlugin(ctx: MockPluginHandlerCtx, params: Record<string, unk
     version: '1.0.0',
     embed: {
       url,
-      allowedOrigins: allowedOrigins.length > 0 ? allowedOrigins : [origin],
+      remoteUrl,
+      lanSsids: lanSsids && lanSsids.length > 0 ? lanSsids : undefined,
+      allowedOrigins: allowedOrigins.length > 0 ? allowedOrigins : defaultOrigins,
       allowCleartext,
-      wideViewport: true,
-      webHistoryBack: true,
+      wideViewport: pickBool(params.wideViewport, true),
+      allowZoom: pickBool(params.allowZoom, false),
+      webHistoryBack: pickBool(params.webHistoryBack, true),
+      textZoom: pickInt(params.textZoom, undefined),
+      showToolbar: pickBool(params.showToolbar, undefined),
+      keepAliveGraceSec: pickInt(params.keepAliveGraceSec, undefined),
     },
     builtin: false,
     enabled: true,
-    priority,
+    priority: pickInt(params.priority, 0),
     packages: [],
-    global,
+    global: pickBool(params.global, true),
     hasScopeOverride: false,
     backend: 'none',
     backendState: 'none',
     capabilities: allowCleartext ? ['network-lan', 'network-context'] : ['network-context'],
     surface: {
       backdrop: 'opaque',
-      keepAlive,
-      widthDp: 380,
-      heightPercent: 78,
+      keepAlive: Boolean(params.keepAlive),
+      widthDp: pickInt(params.widthDp, 380),
+      heightPercent: pickInt(params.heightPercent, 78),
     },
   };
   ctx.state.plugins = [...ctx.state.plugins, nextPlugin];
@@ -107,7 +135,7 @@ function createEmbedPlugin(ctx: MockPluginHandlerCtx, params: Record<string, unk
 }
 
 function updateEmbedConfig(ctx: MockPluginHandlerCtx, params: Record<string, unknown>): ExecResult {
-  const pluginId = typeof params.pluginId === 'string' ? params.pluginId.trim() : '';
+  const pluginId = pickStr(params.pluginId) ?? '';
   const target = ctx.state.plugins.find((p) => p.id === pluginId);
   if (!target?.embed) return rpcErr(`未找到网页嵌入插件: ${pluginId}`);
   const clear = Boolean(params.clear);
@@ -116,34 +144,31 @@ function updateEmbedConfig(ctx: MockPluginHandlerCtx, params: Record<string, unk
   ctx.state.plugins = ctx.state.plugins.map((p) => {
     if (p.id !== pluginId || !p.embed) return p;
     if (clear && defaults?.embed) {
-      return {
-        ...p,
-        embed: { ...defaults.embed },
-        surface: { ...p.surface, keepAlive: defaults.surface.keepAlive },
-      };
+      return { ...p, embed: { ...defaults.embed }, surface: { ...p.surface, ...defaults.surface } };
     }
-    const nextUrl =
-      typeof params.embedUrl === 'string' && params.embedUrl.trim()
-        ? params.embedUrl.trim()
-        : p.embed.url;
-    const nextOrigins = Array.isArray(params.allowedOrigins)
-      ? params.allowedOrigins.map(String).filter(Boolean)
-      : p.embed.allowedOrigins;
-    const nextCleartext =
-      typeof params.allowCleartext === 'boolean' ? params.allowCleartext : p.embed.allowCleartext;
-    const nextKeepAlive =
-      typeof params.keepAlive === 'boolean' ? params.keepAlive : p.surface.keepAlive;
+    const nextRemoteUrl =
+      typeof params.remoteUrl === 'string' ? pickStr(params.remoteUrl) : p.embed.remoteUrl;
     return {
       ...p,
       embed: {
         ...p.embed,
-        url: nextUrl,
-        allowedOrigins: nextOrigins,
-        allowCleartext: nextCleartext,
+        url: pickStr(params.embedUrl) ?? p.embed.url,
+        remoteUrl: nextRemoteUrl,
+        lanSsids: pickStrList(params.lanSsids) ?? p.embed.lanSsids,
+        allowedOrigins: pickStrList(params.allowedOrigins) ?? p.embed.allowedOrigins,
+        allowCleartext: pickBool(params.allowCleartext, p.embed.allowCleartext),
+        wideViewport: pickBool(params.wideViewport, p.embed.wideViewport),
+        allowZoom: pickBool(params.allowZoom, p.embed.allowZoom),
+        webHistoryBack: pickBool(params.webHistoryBack, p.embed.webHistoryBack),
+        textZoom: pickInt(params.textZoom, p.embed.textZoom),
+        showToolbar: pickBool(params.showToolbar, p.embed.showToolbar),
+        keepAliveGraceSec: pickInt(params.keepAliveGraceSec, p.embed.keepAliveGraceSec),
       },
       surface: {
         ...p.surface,
-        keepAlive: nextKeepAlive,
+        keepAlive: pickBool(params.keepAlive, p.surface.keepAlive),
+        widthDp: pickInt(params.widthDp, p.surface.widthDp),
+        heightPercent: pickInt(params.heightPercent, p.surface.heightPercent),
       },
     };
   });

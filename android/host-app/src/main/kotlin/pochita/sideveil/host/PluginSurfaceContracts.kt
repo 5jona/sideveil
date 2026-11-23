@@ -12,6 +12,14 @@ data class PluginSizeOverride(
     val heightPercent: Int? = null,
 )
 
+data class EmbedToolbarBinding(
+    val title: String,
+    val onReload: () -> Unit,
+    val onHome: () -> Unit,
+    val onOpenExternal: () -> Unit,
+    val bindStatusListener: (((String?, Boolean) -> Unit)?) -> Unit = {},
+)
+
 internal enum class DescriptorUpdateOutcome {
     UNCHANGED,
     SURFACE_UPDATED,
@@ -66,6 +74,7 @@ interface PluginHostSurfaceDelegate {
         backdrop: PluginSurfaceBackdrop,
         presentationMode: PluginPresentationMode,
         sizeOverride: PluginSizeOverride,
+        embedToolbar: EmbedToolbarBinding? = null,
     )
 
     fun onDismissPanel()

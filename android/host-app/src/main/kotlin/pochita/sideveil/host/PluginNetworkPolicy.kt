@@ -76,6 +76,10 @@ internal object PluginNetworkPolicy {
         val allowedOrigins =
             buildList {
                 NetworkOriginParser.parseOrigin(embed.url)?.let(::add)
+                embed.remoteUrl
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let(NetworkOriginParser::parseOrigin)
+                    ?.let(::add)
                 embed.allowedOrigins.mapNotNullTo(this, NetworkOriginParser::parseOrigin)
             }
         return when (target.scheme) {

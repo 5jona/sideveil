@@ -27,6 +27,24 @@ pub(super) fn create_web_embed_plugin(
         ));
     }
 
+    if let Some(w) = params.width_dp
+        && !(240..=720).contains(&w)
+    {
+        return Err("invalid widthDp: must be within 240..=720".to_owned());
+    }
+    if let Some(h) = params.height_percent
+        && !(30..=100).contains(&h)
+    {
+        return Err("invalid heightPercent: must be within 30..=100".to_owned());
+    }
+
+    let remote_url = params
+        .remote_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|u| !u.is_empty())
+        .map(str::to_owned);
+
     let manifest = PluginManifest {
         id: id.clone(),
         name: params.name.trim().to_owned(),
@@ -48,10 +66,19 @@ pub(super) fn create_web_embed_plugin(
         capabilities: Vec::new(),
         surface: PluginSurfacePrefs {
             keep_alive: params.keep_alive,
+            width_dp: params.width_dp,
+            height_percent: params.height_percent,
             ..PluginSurfacePrefs::default()
         },
         embed: Some(PluginEmbedPrefs {
             url: params.url.trim().to_owned(),
+            remote_url,
+            lan_ssids: params
+                .lan_ssids
+                .iter()
+                .map(|s| s.trim().to_owned())
+                .filter(|s| !s.is_empty())
+                .collect(),
             allowed_origins: params
                 .allowed_origins
                 .iter()
@@ -59,9 +86,12 @@ pub(super) fn create_web_embed_plugin(
                 .filter(|o| !o.is_empty())
                 .collect(),
             allow_cleartext: params.allow_cleartext,
-            wide_viewport: true,
-            allow_zoom: false,
-            web_history_back: true,
+            wide_viewport: params.wide_viewport.unwrap_or(true),
+            allow_zoom: params.allow_zoom.unwrap_or(false),
+            web_history_back: params.web_history_back.unwrap_or(true),
+            text_zoom: params.text_zoom,
+            show_toolbar: params.show_toolbar.unwrap_or(true),
+            keep_alive_grace_sec: params.keep_alive_grace_sec,
         }),
         network: None,
     };

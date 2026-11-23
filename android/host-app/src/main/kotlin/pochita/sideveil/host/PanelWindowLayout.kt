@@ -106,8 +106,7 @@ internal class PanelWindowLayout(
         val window = dialog.window ?: error("Overlay dialog window unavailable")
         window.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
         window.setFormat(PixelFormat.TRANSLUCENT)
-        @Suppress("DEPRECATION")
-        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
         window.decorView.setPadding(0, 0, 0, 0)
         configureInitialWindow(window)
         return dialog
@@ -149,19 +148,39 @@ internal class PanelWindowLayout(
         container: FrameLayout,
         webView: WebView,
         initialAlpha: Float,
+        quickBar: EmbedQuickBarView? = null,
     ) {
         (webView.parent as? ViewGroup)?.removeView(webView)
+        (quickBar?.parent as? ViewGroup)?.removeView(quickBar)
         container.removeAllViews()
-        container.addView(
-            webView,
-            FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT),
-        )
+        val topMarginPx = quickBar?.barHeightPx() ?: 0
+        if (quickBar != null) {
+            container.addView(
+                quickBar,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    topMarginPx,
+                    Gravity.TOP,
+                ),
+            )
+            quickBar.alpha = initialAlpha
+        }
+        val webViewLp =
+            FrameLayout
+                .LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                ).apply {
+                    topMargin = topMarginPx
+                }
+        container.addView(webView, webViewLp)
         container.requestLayout()
+        val targetWebHeight = (cachedHeightPx - topMarginPx).coerceAtLeast(1)
         if (webView.width <= 2 || webView.height <= 2) {
             val wSpec = View.MeasureSpec.makeMeasureSpec(cachedWidthPx, View.MeasureSpec.EXACTLY)
-            val hSpec = View.MeasureSpec.makeMeasureSpec(cachedHeightPx, View.MeasureSpec.EXACTLY)
+            val hSpec = View.MeasureSpec.makeMeasureSpec(targetWebHeight, View.MeasureSpec.EXACTLY)
             webView.measure(wSpec, hSpec)
-            webView.layout(0, 0, cachedWidthPx, cachedHeightPx)
+            webView.layout(0, topMarginPx, cachedWidthPx, cachedHeightPx)
         }
         webView.alpha = initialAlpha
         OverlayWindowFlags.applyHighFrameRate(webView, context, container.display)
@@ -174,8 +193,9 @@ internal class PanelWindowLayout(
         sizeOverride: PluginSizeOverride,
         liveInsets: WindowInsets? = null,
         presentationMode: PluginPresentationMode = PluginPresentationMode.DRAWER,
+        effectiveImeBottomPx: Int? = null,
     ) {
-        val resolved = PanelInsetsCoordinator.resolveBounds(context, windowManager, liveInsets)
+        val resolved = PanelInsetsCoordinator.resolveBounds(context, windowManager, liveInsets, effectiveImeBottomPx)
         safeBounds = resolved
         val (widthPx, heightPx) =
             PanelInsetsCoordinator.computePanelDimensions(

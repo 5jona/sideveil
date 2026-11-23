@@ -56,11 +56,16 @@ fn validates_web_embed_manifest_and_enforces_zero_privilege() {
         },
         embed: Some(PluginEmbedPrefs {
             url: "https://ha.example.com/lovelace".to_owned(),
+            remote_url: Some("https://ha.example.com:8123".to_owned()),
+            lan_ssids: vec!["HomeIoT".to_owned()],
             allowed_origins: vec!["https://auth.example.com".to_owned()],
             allow_cleartext: false,
             wide_viewport: true,
             allow_zoom: false,
             web_history_back: true,
+            text_zoom: Some(100),
+            show_toolbar: true,
+            keep_alive_grace_sec: Some(300),
         }),
         network: None,
     };
@@ -132,6 +137,7 @@ fn enforces_rfc1918_and_lan_cleartext_rules() {
         "http://192.168.1.1/cgi-bin/luci",
         "http://router.lan:8080",
         "http://nas.local",
+        "http://homeassistant.internal:8123",
     ] {
         assert!(
             matches!(
@@ -180,12 +186,110 @@ fn embed_prefs_defaults_serialize_camel_case() {
     let raw = r#"{"url":"https://router.local"}"#;
     let parsed: PluginEmbedPrefs = serde_json::from_str(raw).expect("parse embed prefs");
     assert_eq!(parsed.url, "https://router.local");
+    assert_eq!(parsed.remote_url, None);
+    assert!(parsed.lan_ssids.is_empty());
     assert!(!parsed.allow_cleartext);
     assert!(parsed.wide_viewport);
     assert!(!parsed.allow_zoom);
     assert!(parsed.web_history_back);
+    assert_eq!(parsed.text_zoom, None);
+    assert!(parsed.show_toolbar);
+    assert_eq!(parsed.keep_alive_grace_sec, None);
     assert!(parsed.allowed_origins.is_empty());
+
+    // Old PluginOverrideEntry JSON without Phase 1 fields deserializes cleanly.
+    let legacy_ov =
+        r#"{"enabled":true,"embedUrl":"http://192.168.1.50:8123","allowCleartext":true}"#;
+    let ov: PluginOverrideEntry = serde_json::from_str(legacy_ov).expect("parse legacy override");
+    assert_eq!(ov.embed_url.as_deref(), Some("http://192.168.1.50:8123"));
+    assert_eq!(ov.remote_url, None);
+    assert_eq!(ov.lan_ssids, None);
+    assert_eq!(ov.text_zoom, None);
+    assert_eq!(ov.show_toolbar, None);
+    assert_eq!(ov.keep_alive_grace_sec, None);
+    assert_eq!(ov.width_dp, None);
+    assert_eq!(ov.height_percent, None);
 
     let cap_json = serde_json::to_string(&PluginCapability::NetworkContext).expect("encode cap");
     assert_eq!(cap_json, r#""network-context""#);
+}
+
+#[test]
+fn validates_embed_remote_url_text_zoom_and_grace_bounds() {
+    let base_embed = PluginEmbedPrefs {
+        url: "http://homeassistant.local:8123".to_owned(),
+        remote_url: Some("https://ha.example.com:8123".to_owned()),
+        lan_ssids: vec!["HomeIoT".to_owned()],
+        allowed_origins: vec![],
+        allow_cleartext: true,
+        wide_viewport: true,
+        allow_zoom: false,
+        web_history_back: true,
+        text_zoom: Some(110),
+        show_toolbar: false,
+        keep_alive_grace_sec: Some(300),
+    };
+    let manifest = PluginManifest {
+        id: "embed.ha".to_owned(),
+        name: "Home Assistant".to_owned(),
+        version: "1.0.0".to_owned(),
+        icon: None,
+        triggers: PluginTriggers::default(),
+        entry: String::new(),
+        backend: PluginBackendKind::None,
+        capabilities: vec![],
+        surface: PluginSurfacePrefs::default(),
+        embed: Some(base_embed.clone()),
+        network: None,
+    };
+    assert!(manifest.validate().is_ok());
+
+    // Public cleartext remote_url is rejected even when allow_cleartext=true
+    let bad_remote = PluginManifest {
+        embed: Some(PluginEmbedPrefs {
+            remote_url: Some("http://ha.example.com:8123".to_owned()),
+            ..base_embed.clone()
+        }),
+        ..manifest.clone()
+    };
+    assert!(matches!(
+        bad_remote.validate(),
+        Err(ManifestValidationError::PublicCleartextForbidden(_))
+    ));
+
+    // Out-of-range text_zoom (50..=200) is rejected
+    for invalid_zoom in [49, 201] {
+        let bad_zoom = PluginManifest {
+            embed: Some(PluginEmbedPrefs {
+                text_zoom: Some(invalid_zoom),
+                ..base_embed.clone()
+            }),
+            ..manifest.clone()
+        };
+        assert_eq!(
+            bad_zoom.validate(),
+            Err(ManifestValidationError::InvalidEmbedParam {
+                field: "textZoom".to_owned(),
+                reason: "must be within 50..=200".to_owned(),
+            })
+        );
+    }
+
+    // Out-of-range keep_alive_grace_sec (0..=1800) is rejected
+    for invalid_grace in [-1, 1801] {
+        let bad_grace = PluginManifest {
+            embed: Some(PluginEmbedPrefs {
+                keep_alive_grace_sec: Some(invalid_grace),
+                ..base_embed.clone()
+            }),
+            ..manifest.clone()
+        };
+        assert_eq!(
+            bad_grace.validate(),
+            Err(ManifestValidationError::InvalidEmbedParam {
+                field: "keepAliveGraceSec".to_owned(),
+                reason: "must be within 0..=1800".to_owned(),
+            })
+        );
+    }
 }

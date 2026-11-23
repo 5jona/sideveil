@@ -4,9 +4,11 @@ import android.content.ComponentCallbacks2
 import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
 import pochita.sideveil.protocol.BUILTIN_DIAG_PLUGIN_ID
 import pochita.sideveil.protocol.HostEventEnvelope
+import pochita.sideveil.protocol.NetworkContextSnapshot
 import pochita.sideveil.protocol.PanelState
 import pochita.sideveil.protocol.PluginBackendStatePayload
 import pochita.sideveil.protocol.PluginCapability
@@ -16,6 +18,7 @@ import pochita.sideveil.protocol.PluginScopedEventPayload
 import pochita.sideveil.protocol.PluginsSnapshotPayload
 import pochita.sideveil.protocol.SideVeilEvents
 import pochita.sideveil.protocol.SideVeilWireJson
+import java.util.Locale
 
 /**
  * Coordinates isolated plugin WebView sandboxes, active plugin switching, scoped event routing,
@@ -73,6 +76,8 @@ internal class PluginWebViewManager(
     private var activeHudPluginId: String? = null
     private var panelState: PanelState = PanelState.CLOSED
     private val webViewDebugging = WebViewDebuggingController()
+    private var latestNetworkRoute: NetworkRouteContext = NetworkRouteContext()
+    private val lastUrlByPlugin = LinkedHashMap<String, String>()
 
     val webViewDebuggingEnabled: Boolean
         get() = webViewDebugging.effectiveEnabled
@@ -225,8 +230,23 @@ internal class PluginWebViewManager(
 
     fun routeNetworkContextChanged(envelope: HostEventEnvelope) {
         eventBridge.recordNetworkContextEnvelope(envelope)
+        val snapshot =
+            envelope.payload?.let { payload ->
+                runCatching { SideVeilWireJson.decodeFromJsonElement<NetworkContextSnapshot>(payload) }.getOrNull()
+            }
+        if (snapshot != null) {
+            latestNetworkRoute =
+                NetworkRouteContext(
+                    transport = snapshot.transport.name.lowercase(Locale.ROOT),
+                    wifiSsid = snapshot.ssid,
+                )
+        }
         pool.forEachInstance { inst ->
-            if (!inst.isUntrustedEmbed && inst.descriptor.capabilities.contains(PluginCapability.NETWORK_CONTEXT)) {
+            if (inst.isUntrustedEmbed) {
+                if (snapshot != null) {
+                    inst.updateNetworkRoute(latestNetworkRoute)
+                }
+            } else if (inst.descriptor.capabilities.contains(PluginCapability.NETWORK_CONTEXT)) {
                 inst.pushEnvelope(envelope)
             }
         }
@@ -291,13 +311,35 @@ internal class PluginWebViewManager(
         }
     }
 
-    private fun mountInstance(instance: PluginWebViewInstance) =
+    private fun mountInstance(instance: PluginWebViewInstance) {
+        val embed = instance.descriptor.embed
+        val toolbar =
+            if (instance.isUntrustedEmbed && embed != null && embed.showToolbar) {
+                EmbedToolbarBinding(
+                    title = instance.descriptor.name,
+                    onReload = { instance.reloadEmbed() },
+                    onHome = { instance.navigateEmbedHome() },
+                    onOpenExternal = {
+                        EmbedSessionController.openExternalBrowserUrl(
+                            context,
+                            instance.descriptor.id,
+                            instance.currentExternalUrl(),
+                        ) { surfaceDelegate.onDismissPanel() }
+                    },
+                    bindStatusListener = { listener -> instance.bindEmbedStatusListener(listener) },
+                )
+            } else {
+                instance.bindEmbedStatusListener(null)
+                null
+            }
         surfaceDelegate.mountPluginWebView(
             webView = instance.webView,
             backdrop = instance.surfaceBackdrop,
             presentationMode = instance.presentationMode,
             sizeOverride = instance.sizeOverride,
+            embedToolbar = toolbar,
         )
+    }
 
     private fun getOrCreateInstance(descriptor: PluginDescriptor): PluginWebViewInstance {
         pool.peek(descriptor.id)?.let { existing ->
@@ -318,17 +360,23 @@ internal class PluginWebViewManager(
                 deps = webViewDeps,
                 initialDescriptor = descriptor,
                 callbacks = containerCallbacks,
+                initialNetworkRoute = latestNetworkRoute,
             ).also { created ->
                 val initiallyVisible =
                     (panelState != PanelState.CLOSED && descriptor.id == activePluginId) ||
                         descriptor.id == pinnedPluginId
-                eventBridge.hydrateNewInstance(created, descriptor, panelState, initiallyVisible)
+                val restoreUrl = lastUrlByPlugin.remove(descriptor.id)
+                eventBridge.hydrateNewInstance(created, descriptor, panelState, initiallyVisible, restoreUrl)
             }
         }
     }
 
     private fun recoverCrashedPlugin(pluginId: String) {
         Log.w(TAG, "Recovering crashed WebView instance for plugin=$pluginId")
+        val lastUrl = pool.peek(pluginId)?.webView?.url
+        if (!lastUrl.isNullOrBlank() && (lastUrl.startsWith("http://") || lastUrl.startsWith("https://"))) {
+            lastUrlByPlugin[pluginId] = lastUrl
+        }
         if (pluginId == pinnedPluginId) pinnedPluginId = null
         pool.removeAndDestroy(pluginId)
         reportDiagnostics()

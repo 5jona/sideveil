@@ -19,8 +19,10 @@ import {
 
 export {
   buildCreateWebEmbedCommand,
+  buildCreateWebEmbedParams,
   buildPluginScopeCommand,
   buildSetEmbedConfigCommand,
+  buildSetEmbedConfigParams,
   buildUninstallPluginCommand,
   type CreateWebEmbedInput,
   type PluginEmbedConfigInput,

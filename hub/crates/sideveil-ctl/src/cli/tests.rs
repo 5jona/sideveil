@@ -274,4 +274,58 @@ fn parses_network_and_web_embed_plugin_commands() {
             "keepAlive": true,
         }))
     );
+
+    let create_ha = parse_args(
+        [
+            "plugins",
+            "create-embed",
+            "embed.ha",
+            "Home Assistant",
+            "http://homeassistant.local:8123",
+            "--remote-url",
+            "https://ha.example.com:8123",
+            "--lan-ssid",
+            "HomeWifi",
+            "--lan-ssid",
+            "HomeWifi-5G",
+            "--text-zoom",
+            "110",
+            "--width-dp",
+            "420",
+            "--height-percent",
+            "85",
+            "--keep-alive-grace-sec",
+            "300",
+            "--allow-cleartext",
+            "--keep-alive",
+            "--allow-zoom",
+            "--no-wide-viewport",
+            "--no-web-history-back",
+            "--no-toolbar",
+        ]
+        .into_iter()
+        .map(str::to_owned),
+    )
+    .expect("plugins create-embed ha");
+    let (_, ha_params, _) = unwrap_rpc(create_ha.action);
+    assert_eq!(
+        ha_params,
+        Some(json!({
+            "id": "embed.ha",
+            "name": "Home Assistant",
+            "url": "http://homeassistant.local:8123",
+            "remoteUrl": "https://ha.example.com:8123",
+            "lanSsids": ["HomeWifi", "HomeWifi-5G"],
+            "textZoom": 110,
+            "widthDp": 420,
+            "heightPercent": 85,
+            "keepAliveGraceSec": 300,
+            "allowCleartext": true,
+            "keepAlive": true,
+            "allowZoom": true,
+            "wideViewport": false,
+            "webHistoryBack": false,
+            "showToolbar": false,
+        }))
+    );
 }

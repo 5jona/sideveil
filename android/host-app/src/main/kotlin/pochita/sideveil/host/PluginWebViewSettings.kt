@@ -65,7 +65,7 @@ internal object PluginWebViewSettings {
                 }
             useWideViewPort = wideViewport
             loadWithOverviewMode = wideViewport
-            textZoom = 100
+            textZoom = (embed?.textZoom ?: 100).coerceIn(50, 200)
             setSupportZoom(allowZoom)
             builtInZoomControls = allowZoom
             displayZoomControls = false

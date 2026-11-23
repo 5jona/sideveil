@@ -69,11 +69,16 @@ enum class PluginCapability {
 @Serializable
 data class PluginEmbedPrefs(
     val url: String,
+    val remoteUrl: String? = null,
+    val lanSsids: List<String> = emptyList(),
     val allowedOrigins: List<String> = emptyList(),
     val allowCleartext: Boolean = false,
     val wideViewport: Boolean = true,
     val allowZoom: Boolean = false,
     val webHistoryBack: Boolean = true,
+    val textZoom: Int? = null,
+    val showToolbar: Boolean = true,
+    val keepAliveGraceSec: Int? = null,
 )
 
 @Serializable

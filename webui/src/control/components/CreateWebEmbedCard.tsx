@@ -10,51 +10,19 @@ import {
 } from '@pochita/ui';
 import { GlobeLock, Plus, X } from 'lucide-react';
 import { useId, useState } from 'react';
-import { type CreateWebEmbedInput, normalizeOriginList } from '../hooks/pluginCommandHelpers.ts';
-
-interface EmbedPreset {
-  label: string;
-  id: string;
-  name: string;
-  url: string;
-  allowCleartext: boolean;
-  keepAlive: boolean;
-}
-
-const EMBED_PRESETS: readonly EmbedPreset[] = [
-  {
-    label: 'Home Assistant',
-    id: 'lan.homeassistant',
-    name: 'Home Assistant',
-    url: 'http://192.168.1.10:8123',
-    allowCleartext: true,
-    keepAlive: true,
-  },
-  {
-    label: 'OpenClash',
-    id: 'lan.openclash',
-    name: 'OpenClash',
-    url: 'http://192.168.1.1:9090/ui',
-    allowCleartext: true,
-    keepAlive: true,
-  },
-  {
-    label: 'LuCI',
-    id: 'lan.luci',
-    name: 'OpenWrt LuCI',
-    url: 'http://192.168.1.1/cgi-bin/luci',
-    allowCleartext: true,
-    keepAlive: false,
-  },
-  {
-    label: 'Zashboard',
-    id: 'lan.zashboard',
-    name: 'Zashboard',
-    url: 'http://127.0.0.1:9090/ui',
-    allowCleartext: true,
-    keepAlive: true,
-  },
-];
+import {
+  type CreateWebEmbedInput,
+  clampEmbedNumber,
+  normalizeOriginList,
+  normalizeSsidList,
+} from '../hooks/pluginCommandHelpers.ts';
+import {
+  DEFAULT_WEB_EMBED_ADVANCED,
+  EMBED_PRESETS,
+  type EmbedPreset,
+  WebEmbedAdvancedFields,
+  type WebEmbedAdvancedValues,
+} from './WebEmbedAdvancedFields.tsx';
 
 export interface CreateWebEmbedCardProps {
   isBusy: boolean;
@@ -72,12 +40,19 @@ export function CreateWebEmbedCard({ isBusy, onCreate, onCancel }: CreateWebEmbe
   const [keepAlive, setKeepAlive] = useState(true);
   const [globalScope, setGlobalScope] = useState(true);
   const [priority, setPriority] = useState(0);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [advanced, setAdvanced] = useState<WebEmbedAdvancedValues>(DEFAULT_WEB_EMBED_ADVANCED);
 
   const trimmedId = pluginId.trim();
   const trimmedName = name.trim();
   const trimmedUrl = url.trim();
+  const trimmedRemoteUrl = advanced.remoteUrl.trim();
   const canSubmit =
-    !isBusy && trimmedId.length > 0 && trimmedName.length > 0 && /^https?:\/\/.+/.test(trimmedUrl);
+    !isBusy &&
+    trimmedId.length > 0 &&
+    trimmedName.length > 0 &&
+    /^https?:\/\/.+/.test(trimmedUrl) &&
+    (trimmedRemoteUrl.length === 0 || /^https?:\/\/.+/.test(trimmedRemoteUrl));
 
   const applyPreset = (preset: EmbedPreset) => {
     setPluginId(preset.id);
@@ -86,18 +61,36 @@ export function CreateWebEmbedCard({ isBusy, onCreate, onCancel }: CreateWebEmbe
     setAllowCleartext(preset.allowCleartext);
     setKeepAlive(preset.keepAlive);
     setOriginsText('');
+    setAdvanced({
+      ...DEFAULT_WEB_EMBED_ADVANCED,
+      ...preset.advanced,
+    });
+    if (preset.advanced) {
+      setShowAdvanced(true);
+    }
   };
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
     const origins = normalizeOriginList(originsText);
+    const lanSsids = normalizeSsidList(advanced.lanSsidsText);
     const ok = await onCreate({
       id: trimmedId,
       name: trimmedName,
       url: trimmedUrl,
+      ...(trimmedRemoteUrl.length > 0 ? { remoteUrl: trimmedRemoteUrl } : {}),
+      ...(lanSsids.length > 0 ? { lanSsids } : {}),
       ...(origins.length > 0 ? { allowedOrigins: origins } : {}),
       allowCleartext,
       keepAlive,
+      wideViewport: advanced.wideViewport,
+      allowZoom: advanced.allowZoom,
+      webHistoryBack: advanced.webHistoryBack,
+      textZoom: clampEmbedNumber(advanced.textZoom, 50, 200, 100),
+      showToolbar: advanced.showToolbar,
+      keepAliveGraceSec: clampEmbedNumber(advanced.keepAliveGraceSec, 0, 1800, 180),
+      widthDp: clampEmbedNumber(advanced.widthDp, 240, 720, 380),
+      heightPercent: clampEmbedNumber(advanced.heightPercent, 30, 100, 78),
       global: globalScope,
       priority,
     });
@@ -178,7 +171,7 @@ export function CreateWebEmbedCard({ isBusy, onCreate, onCancel }: CreateWebEmbe
               id={`${formId}-url`}
               type="url"
               aria-label="网页嵌入目标 URL"
-              placeholder="http://192.168.1.10:8123 或 https://panel.example.com"
+              placeholder="http://homeassistant.local:8123 或 https://panel.example.com"
               className="rounded-[var(--radius-control)] border border-[var(--border-hairline)] bg-[var(--surface-elevated)] px-2.5 py-1.5 font-mono text-xs text-[var(--text-primary)]"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
@@ -254,6 +247,16 @@ export function CreateWebEmbedCard({ isBusy, onCreate, onCancel }: CreateWebEmbe
             }
           />
         </div>
+
+        <WebEmbedAdvancedFields
+          labelPrefix="新建网页嵌入"
+          values={advanced}
+          keepAlive={keepAlive}
+          isBusy={isBusy}
+          expanded={showAdvanced}
+          onToggleExpanded={() => setShowAdvanced((prev) => !prev)}
+          onChange={(patch) => setAdvanced((prev) => ({ ...prev, ...patch }))}
+        />
 
         <div className="flex flex-wrap items-center justify-end gap-2">
           <Button size="sm" variant="ghost" aria-label="取消新建网页嵌入" onClick={onCancel}>

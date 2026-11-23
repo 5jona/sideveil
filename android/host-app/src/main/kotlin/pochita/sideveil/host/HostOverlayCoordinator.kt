@@ -161,11 +161,12 @@ internal class HostOverlayCoordinator(
                 backdrop: PluginSurfaceBackdrop,
                 presentationMode: PluginPresentationMode,
                 sizeOverride: PluginSizeOverride,
+                embedToolbar: EmbedToolbarBinding?,
             ) {
                 pinnedWindow.hide()
                 panelWindow.setPluginBackdrop(backdrop)
                 panelWindow.setPluginSizeOverride(sizeOverride, presentationMode)
-                panelWindow.setContentWebView(webView)
+                panelWindow.setContentWebView(webView, embedToolbar)
             }
 
             override fun onDismissPanel() {

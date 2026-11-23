@@ -3,6 +3,7 @@ package pochita.sideveil.host
 import android.os.Handler
 import android.os.Looper
 import android.webkit.WebView
+import pochita.sideveil.protocol.PluginDescriptor
 
 /**
  * Pure-Kotlin state machine coordinating per-instance `WebView.onPause()` / `onResume()`
@@ -15,9 +16,10 @@ internal class WebViewDormancyController(
     private val onPauseWebView: () -> Unit,
     private val onResumeWebView: () -> Unit,
     private val scheduleDelayed: (delayMs: Long, action: () -> Unit) -> () -> Unit,
-    private val hidePauseDelayMs: Long = DEFAULT_HIDE_PAUSE_DELAY_MS,
+    hidePauseDelayMs: Long = DEFAULT_HIDE_PAUSE_DELAY_MS,
     private val settlePauseDelayMs: Long = DEFAULT_SETTLE_PAUSE_DELAY_MS,
 ) {
+    private var hidePauseDelayMs: Long = hidePauseDelayMs.coerceAtLeast(0L)
     private var foreground: Boolean = false
     private var pageLoaded: Boolean = false
     private var paused: Boolean = false
@@ -26,6 +28,10 @@ internal class WebViewDormancyController(
 
     val isPaused: Boolean
         get() = paused
+
+    fun updateHidePauseDelayMs(nextDelayMs: Long) {
+        hidePauseDelayMs = nextDelayMs.coerceAtLeast(0L)
+    }
 
     fun onLoadStarted() {
         if (destroyed) return
@@ -89,10 +95,23 @@ internal class WebViewDormancyController(
     companion object {
         const val DEFAULT_HIDE_PAUSE_DELAY_MS = 400L
         const val DEFAULT_SETTLE_PAUSE_DELAY_MS = 1200L
+        const val DEFAULT_KEEP_ALIVE_GRACE_MS = 180_000L
+
+        fun resolveHidePauseDelayMs(descriptor: PluginDescriptor): Long =
+            if (descriptor.surface.keepAlive) {
+                descriptor.embed
+                    ?.keepAliveGraceSec
+                    ?.coerceIn(0, 1800)
+                    ?.times(1000L)
+                    ?: DEFAULT_KEEP_ALIVE_GRACE_MS
+            } else {
+                DEFAULT_HIDE_PAUSE_DELAY_MS
+            }
 
         fun forWebView(
             webView: WebView,
             mainHandler: Handler,
+            hidePauseDelayMs: Long = DEFAULT_HIDE_PAUSE_DELAY_MS,
         ): WebViewDormancyController =
             WebViewDormancyController(
                 onPauseWebView = { runOnMain(mainHandler) { webView.onPause() } },
@@ -102,6 +121,7 @@ internal class WebViewDormancyController(
                     mainHandler.postDelayed(runnable, delayMs)
                     ({ mainHandler.removeCallbacks(runnable) })
                 },
+                hidePauseDelayMs = hidePauseDelayMs,
             )
 
         private inline fun runOnMain(

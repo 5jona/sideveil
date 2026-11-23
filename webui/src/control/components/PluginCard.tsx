@@ -233,6 +233,7 @@ export function PluginCard({
             {plugin.surface.widthDp ? (
               <span className="inline-flex items-center gap-1 rounded bg-[var(--surface-elevated)] px-1.5 py-0.5 text-[11px] text-[var(--text-secondary)]">
                 {plugin.surface.widthDp}dp
+                {plugin.surface.heightPercent ? ` × ${plugin.surface.heightPercent}%` : ''}
               </span>
             ) : null}
           </div>
@@ -246,6 +247,8 @@ export function PluginCard({
           pluginName={plugin.name}
           embed={plugin.embed}
           initialKeepAlive={Boolean(plugin.surface.keepAlive)}
+          initialWidthDp={plugin.surface.widthDp}
+          initialHeightPercent={plugin.surface.heightPercent}
           isBusy={isBusy}
           onSave={onSetEmbedConfig}
           onCancel={() => setEditingEmbed(false)}

@@ -13,6 +13,7 @@ internal class PanelOverlayScheduler(
     private val stateProvider: () -> PanelState,
     private val isClosing: () -> Boolean,
     private val isRailTouch: (Float, Float) -> Boolean,
+    private val isInnerEdgeBufferTouch: (Float, Float) -> Boolean = { _, _ -> false },
     private val onRequestClose: () -> Unit,
     private val onWarmCollapse: () -> Unit,
 ) {
@@ -74,7 +75,7 @@ internal class PanelOverlayScheduler(
         outsideTouchPolicy.shouldIgnoreOutsideTouch(
             panelOpen = stateProvider() == PanelState.OPEN,
             closingInProgress = isClosing(),
-            isRailTouch = isRailTouch(rawX, rawY),
+            isRailTouch = isRailTouch(rawX, rawY) || isInnerEdgeBufferTouch(rawX, rawY),
         )
 
     companion object {

@@ -30,6 +30,8 @@ pub enum ManifestValidationError {
     EmbedBackendForbidden,
     #[error("web-embed plugins cannot declare privileged capability '{0:?}'")]
     EmbedPrivilegedCapabilityForbidden(PluginCapability),
+    #[error("invalid embed parameter '{field}': {reason}")]
+    InvalidEmbedParam { field: String, reason: String },
 }
 
 /// Validates a plugin identifier for safe use in directory names and isolated virtual origins.
@@ -123,6 +125,7 @@ pub fn is_private_or_lan_host(host: &str) -> bool {
         || has_nonempty_label_before_suffix(&lower, ".localhost")
         || has_nonempty_label_before_suffix(&lower, ".lan")
         || has_nonempty_label_before_suffix(&lower, ".local")
+        || has_nonempty_label_before_suffix(&lower, ".internal")
         || has_nonempty_label_before_suffix(&lower, ".home.arpa")
     {
         return true;
@@ -261,8 +264,27 @@ impl PluginManifest {
                 }
             }
             validate_network_url(&embed.url, embed.allow_cleartext)?;
+            if let Some(remote_url) = &embed.remote_url {
+                validate_network_url(remote_url, embed.allow_cleartext)?;
+            }
             for origin in &embed.allowed_origins {
                 validate_network_url(origin, embed.allow_cleartext)?;
+            }
+            if let Some(text_zoom) = embed.text_zoom
+                && !(50..=200).contains(&text_zoom)
+            {
+                return Err(ManifestValidationError::InvalidEmbedParam {
+                    field: "textZoom".to_owned(),
+                    reason: "must be within 50..=200".to_owned(),
+                });
+            }
+            if let Some(grace) = embed.keep_alive_grace_sec
+                && !(0..=1800).contains(&grace)
+            {
+                return Err(ManifestValidationError::InvalidEmbedParam {
+                    field: "keepAliveGraceSec".to_owned(),
+                    reason: "must be within 0..=1800".to_owned(),
+                });
             }
             if !self.entry.trim().is_empty() && !is_safe_relative_asset_path(&self.entry) {
                 return Err(ManifestValidationError::InvalidEntry(self.entry.clone()));

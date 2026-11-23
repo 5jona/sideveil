@@ -3,6 +3,7 @@ package pochita.sideveil.host
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import pochita.sideveil.protocol.EdgeSide
 
 class PanelOutsideTouchPolicyTest {
     @Test
@@ -73,5 +74,73 @@ class PanelOutsideTouchPolicyTest {
         val policy = PanelOutsideTouchPolicy(postImeHideGraceMs = 250L, nowMs = { 0L })
         assertTrue(policy.shouldIgnoreOutsideTouch(panelOpen = false, closingInProgress = false, isRailTouch = false))
         assertTrue(policy.shouldIgnoreOutsideTouch(panelOpen = true, closingInProgress = true, isRailTouch = false))
+    }
+
+    @Test
+    fun `ignores inner-edge outside touches within 12dp buffer for right and left edges`() {
+        // Right edge: panel bounds [300, 200, 1040, 1800], density 3.0 -> 12dp = 36px buffer -> [264, 300]
+        assertTrue(
+            PanelOutsideTouchPolicy.shouldIgnoreInnerEdgeOutsideTouch(
+                edge = EdgeSide.RIGHT,
+                rawX = 270f,
+                rawY = 600f,
+                panelBoundsLeft = 300,
+                panelBoundsTop = 200,
+                panelBoundsRight = 1040,
+                panelBoundsBottom = 1800,
+                density = 3f,
+            ),
+        )
+        assertFalse(
+            PanelOutsideTouchPolicy.shouldIgnoreInnerEdgeOutsideTouch(
+                edge = EdgeSide.RIGHT,
+                rawX = 260f,
+                rawY = 600f,
+                panelBoundsLeft = 300,
+                panelBoundsTop = 200,
+                panelBoundsRight = 1040,
+                panelBoundsBottom = 1800,
+                density = 3f,
+            ),
+        )
+        // Vertically outside panel bounds must not be ignored by inner-edge buffer
+        assertFalse(
+            PanelOutsideTouchPolicy.shouldIgnoreInnerEdgeOutsideTouch(
+                edge = EdgeSide.RIGHT,
+                rawX = 280f,
+                rawY = 150f,
+                panelBoundsLeft = 300,
+                panelBoundsTop = 200,
+                panelBoundsRight = 1040,
+                panelBoundsBottom = 1800,
+                density = 3f,
+            ),
+        )
+
+        // Left edge: panel bounds [40, 200, 780, 1800], density 3.0 -> 12dp = 36px buffer -> [780, 816]
+        assertTrue(
+            PanelOutsideTouchPolicy.shouldIgnoreInnerEdgeOutsideTouch(
+                edge = EdgeSide.LEFT,
+                rawX = 805f,
+                rawY = 900f,
+                panelBoundsLeft = 40,
+                panelBoundsTop = 200,
+                panelBoundsRight = 780,
+                panelBoundsBottom = 1800,
+                density = 3f,
+            ),
+        )
+        assertFalse(
+            PanelOutsideTouchPolicy.shouldIgnoreInnerEdgeOutsideTouch(
+                edge = EdgeSide.LEFT,
+                rawX = 820f,
+                rawY = 900f,
+                panelBoundsLeft = 40,
+                panelBoundsTop = 200,
+                panelBoundsRight = 780,
+                panelBoundsBottom = 1800,
+                density = 3f,
+            ),
+        )
     }
 }

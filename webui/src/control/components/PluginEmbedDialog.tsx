@@ -2,13 +2,21 @@ import type { PluginEmbedPrefs } from '@pochita/sideveil-sdk';
 import { Button, SettingRow, Switch } from '@pochita/ui';
 import { GlobeLock, RotateCcw, Save } from 'lucide-react';
 import { useId, useState } from 'react';
-import { normalizeOriginList, type PluginEmbedConfigInput } from '../hooks/pluginCommandHelpers.ts';
+import {
+  clampEmbedNumber,
+  normalizeOriginList,
+  normalizeSsidList,
+  type PluginEmbedConfigInput,
+} from '../hooks/pluginCommandHelpers.ts';
+import { WebEmbedAdvancedFields, type WebEmbedAdvancedValues } from './WebEmbedAdvancedFields.tsx';
 
 export interface PluginEmbedDialogProps {
   pluginId: string;
   pluginName: string;
   embed: PluginEmbedPrefs;
   initialKeepAlive: boolean;
+  initialWidthDp?: number;
+  initialHeightPercent?: number;
   isBusy: boolean;
   onSave: (pluginId: string, input: PluginEmbedConfigInput) => Promise<boolean>;
   onCancel: () => void;
@@ -19,6 +27,8 @@ export function PluginEmbedDialog({
   pluginName,
   embed,
   initialKeepAlive,
+  initialWidthDp,
+  initialHeightPercent,
   isBusy,
   onSave,
   onCancel,
@@ -28,17 +38,43 @@ export function PluginEmbedDialog({
   const [originsText, setOriginsText] = useState((embed.allowedOrigins ?? []).join(', '));
   const [allowCleartext, setAllowCleartext] = useState(Boolean(embed.allowCleartext));
   const [keepAlive, setKeepAlive] = useState(initialKeepAlive);
+  const [showAdvanced, setShowAdvanced] = useState(true);
+  const [advanced, setAdvanced] = useState<WebEmbedAdvancedValues>(() => ({
+    remoteUrl: embed.remoteUrl ?? '',
+    lanSsidsText: (embed.lanSsids ?? []).join(', '),
+    widthDp: initialWidthDp ?? 380,
+    heightPercent: initialHeightPercent ?? 78,
+    textZoom: embed.textZoom ?? 100,
+    keepAliveGraceSec: embed.keepAliveGraceSec ?? 180,
+    wideViewport: embed.wideViewport ?? true,
+    allowZoom: embed.allowZoom ?? false,
+    webHistoryBack: embed.webHistoryBack ?? true,
+    showToolbar: embed.showToolbar ?? true,
+  }));
 
   const trimmedUrl = embedUrl.trim();
-  const validUrl = /^https?:\/\/.+/.test(trimmedUrl);
+  const trimmedRemoteUrl = advanced.remoteUrl.trim();
+  const validUrl =
+    /^https?:\/\/.+/.test(trimmedUrl) &&
+    (trimmedRemoteUrl.length === 0 || /^https?:\/\/.+/.test(trimmedRemoteUrl));
 
   const handleSave = async () => {
     if (!validUrl) return;
     const ok = await onSave(pluginId, {
       embedUrl: trimmedUrl,
+      remoteUrl: trimmedRemoteUrl,
+      lanSsids: normalizeSsidList(advanced.lanSsidsText),
       allowedOrigins: normalizeOriginList(originsText),
       allowCleartext,
       keepAlive,
+      wideViewport: advanced.wideViewport,
+      allowZoom: advanced.allowZoom,
+      webHistoryBack: advanced.webHistoryBack,
+      textZoom: clampEmbedNumber(advanced.textZoom, 50, 200, 100),
+      showToolbar: advanced.showToolbar,
+      keepAliveGraceSec: clampEmbedNumber(advanced.keepAliveGraceSec, 0, 1800, 180),
+      widthDp: clampEmbedNumber(advanced.widthDp, 240, 720, 380),
+      heightPercent: clampEmbedNumber(advanced.heightPercent, 30, 100, 78),
     });
     if (ok) onCancel();
   };
@@ -67,7 +103,7 @@ export function PluginEmbedDialog({
             id={`${formId}-url`}
             type="url"
             aria-label={`${pluginName} 目标 URL`}
-            placeholder="http://192.168.1.10:8123"
+            placeholder="http://homeassistant.local:8123"
             className="rounded border border-[var(--border-hairline)] bg-[var(--surface-card)] px-2.5 py-1.5 font-mono text-xs text-[var(--text-primary)]"
             value={embedUrl}
             onChange={(e) => setEmbedUrl(e.target.value)}
@@ -82,7 +118,7 @@ export function PluginEmbedDialog({
             id={`${formId}-origins`}
             type="text"
             aria-label={`${pluginName} 允许源列表`}
-            placeholder="http://192.168.1.10:8123, https://ha.local"
+            placeholder="http://homeassistant.local:8123, https://ha.example.com:8123"
             className="rounded border border-[var(--border-hairline)] bg-[var(--surface-card)] px-2.5 py-1.5 font-mono text-xs text-[var(--text-primary)]"
             value={originsText}
             onChange={(e) => setOriginsText(e.target.value)}
@@ -118,6 +154,16 @@ export function PluginEmbedDialog({
           }
         />
       </div>
+
+      <WebEmbedAdvancedFields
+        labelPrefix={`${pluginName} `}
+        values={advanced}
+        keepAlive={keepAlive}
+        isBusy={isBusy}
+        expanded={showAdvanced}
+        onToggleExpanded={() => setShowAdvanced((prev) => !prev)}
+        onChange={(patch) => setAdvanced((prev) => ({ ...prev, ...patch }))}
+      />
 
       <div className="flex flex-wrap items-center justify-end gap-2">
         <Button

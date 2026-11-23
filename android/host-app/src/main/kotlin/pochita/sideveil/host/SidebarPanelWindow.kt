@@ -2,6 +2,7 @@ package pochita.sideveil.host
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.Rect
 import android.util.Log
 import android.view.ContextThemeWrapper
 import android.view.Window
@@ -36,6 +37,9 @@ class SidebarPanelWindow(
     private val surfaceState = PanelSurfaceState()
 
     private var activeWebView: WebView? = null
+    private var activeEmbedToolbar: EmbedToolbarBinding? = null
+    private val embedQuickBar: EmbedQuickBarView by lazy { EmbedQuickBarView(themedContext) }
+    private val decorLocation = IntArray(2)
     var currentState: PanelState = PanelState.CLOSED
         private set
     private var closingInProgress = false
@@ -48,6 +52,7 @@ class SidebarPanelWindow(
             stateProvider = { currentState },
             isClosing = { closingInProgress },
             isRailTouch = shouldIgnoreOutsideTouch,
+            isInnerEdgeBufferTouch = ::isInnerEdgeBufferTouch,
             onRequestClose = ::close,
             onWarmCollapse = ::collapseToWarmInvisible,
         )
@@ -85,18 +90,36 @@ class SidebarPanelWindow(
             onBackPressedIntercept = onBackPressedIntercept,
             onCommitBackClose = ::close,
             onRailMotionProgress = onRailMotionProgress,
+            onContentAlphaChanged = { alpha ->
+                if (activeEmbedToolbar != null) {
+                    embedQuickBar.alpha = alpha
+                }
+            },
         )
 
     init {
         OverlayWindowFlags.preloadHardwareRenderer()
         dialog.window?.let(backdropController::attachToWindow)
-        contentContainer.setOnApplyWindowInsetsListener { _, insets ->
-            val prevIme = surfaceState.lastLiveInsets?.getInsets(WindowInsets.Type.ime())?.bottom ?: 0
-            val nextIme = insets.getInsets(WindowInsets.Type.ime()).bottom
+        contentContainer.setOnApplyWindowInsetsListener { view, insets ->
+            val prevIme = surfaceState.effectiveImeBottomPx
+            val nextIme =
+                PanelInsetsCoordinator.resolveEffectiveImeFromWindow(
+                    context = themedContext,
+                    windowManager = windowManager,
+                    decorView = dialog.window?.decorView,
+                    decorLocation = decorLocation,
+                    insets = insets,
+                    previousEffectiveImeBottomPx = prevIme,
+                )
             surfaceState.lastLiveInsets = insets
+            surfaceState.effectiveImeBottomPx = nextIme
             scheduler.onImeInsetsChanged(nextIme)
             if (prevIme != nextIme && currentState == PanelState.OPEN && !closingInProgress) {
-                refreshOpenGeometry()
+                view.post {
+                    if (currentState == PanelState.OPEN && !closingInProgress) {
+                        refreshOpenGeometry()
+                    }
+                }
             }
             insets
         }
@@ -122,17 +145,45 @@ class SidebarPanelWindow(
             motionProgress = motionDriver.currentProgress,
         )
 
-    fun setContentWebView(webView: WebView?) {
+    fun setContentWebView(
+        webView: WebView?,
+        embedToolbar: EmbedToolbarBinding? = null,
+    ) {
+        activeEmbedToolbar?.bindStatusListener?.invoke(null)
         if (webView == null) {
             activeWebView = null
+            activeEmbedToolbar = null
             contentContainer.removeAllViews()
+            updateLeftEdgeGestureExclusion()
             return
         }
         motionDriver.recomputeDimensions()
-        if (activeWebView === webView && webView.parent === contentContainer) return
+        val quickBar =
+            if (embedToolbar != null) {
+                embedQuickBar.bind(
+                    title = embedToolbar.title,
+                    onReload = embedToolbar.onReload,
+                    onHome = embedToolbar.onHome,
+                    onOpenExternal = embedToolbar.onOpenExternal,
+                )
+                embedQuickBar.setStatusMessage(null, isError = false)
+                embedToolbar.bindStatusListener { msg, isError ->
+                    embedQuickBar.setStatusMessage(msg, isError)
+                }
+                embedQuickBar
+            } else {
+                null
+            }
+        val toolbarChanged = (activeEmbedToolbar != null) != (embedToolbar != null)
+        activeEmbedToolbar = embedToolbar
+        if (activeWebView === webView && webView.parent === contentContainer && !toolbarChanged) {
+            updateLeftEdgeGestureExclusion()
+            return
+        }
         val initialAlpha = if (currentState == PanelState.OPEN) 1f else motionDriver.currentProgress
-        windowLayout.mountWebView(contentContainer, webView, initialAlpha)
+        windowLayout.mountWebView(contentContainer, webView, initialAlpha, quickBar)
         activeWebView = webView
+        updateLeftEdgeGestureExclusion()
         if (currentState == PanelState.OPEN && attached) webView.requestFocus()
     }
 
@@ -272,6 +323,49 @@ class SidebarPanelWindow(
         } else {
             motionDriver.recomputeDimensions()
         }
+        updateLeftEdgeGestureExclusion()
+    }
+
+    private fun isInnerEdgeBufferTouch(
+        rawX: Float,
+        rawY: Float,
+    ): Boolean {
+        val decor = dialog.window?.decorView ?: return false
+        decor.getLocationOnScreen(decorLocation)
+        val left = decorLocation[0]
+        val top = decorLocation[1]
+        val right = left + windowLayout.cachedWidthPx
+        val bottom = top + windowLayout.cachedHeightPx
+        val density =
+            themedContext.resources.displayMetrics.density
+                .coerceAtLeast(1f)
+        return PanelOutsideTouchPolicy.shouldIgnoreInnerEdgeOutsideTouch(
+            edge = surfaceState.edgeSide,
+            rawX = rawX,
+            rawY = rawY,
+            panelBoundsLeft = left,
+            panelBoundsTop = top,
+            panelBoundsRight = right,
+            panelBoundsBottom = bottom,
+            density = density,
+        )
+    }
+
+    private fun updateLeftEdgeGestureExclusion() {
+        val shouldExclude = surfaceState.edgeSide == EdgeSide.LEFT && activeEmbedToolbar != null
+        if (!shouldExclude || windowLayout.cachedHeightPx <= 2) {
+            contentContainer.systemGestureExclusionRects = emptyList()
+            return
+        }
+        val density =
+            themedContext.resources.displayMetrics.density
+                .coerceAtLeast(1f)
+        val edgeWidthPx = OverlayWindowFlags.dp(density, 28f)
+        val maxBandPx = OverlayWindowFlags.dp(density, 180f)
+        val height = windowLayout.cachedHeightPx
+        val bandHeight = minOf(maxBandPx, (height * 0.45f).toInt().coerceAtLeast(1))
+        val top = ((height - bandHeight) / 2).coerceAtLeast(0)
+        contentContainer.systemGestureExclusionRects = listOf(Rect(0, top, edgeWidthPx, top + bandHeight))
     }
 
     private fun collapseToWarmInvisible() {

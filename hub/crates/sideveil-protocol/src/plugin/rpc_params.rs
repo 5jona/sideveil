@@ -115,11 +115,31 @@ pub struct PluginSetEmbedConfigParams {
     #[serde(default)]
     pub embed_url: Option<String>,
     #[serde(default)]
+    pub remote_url: Option<String>,
+    #[serde(default)]
+    pub lan_ssids: Option<Vec<String>>,
+    #[serde(default)]
     pub allowed_origins: Option<Vec<String>>,
     #[serde(default)]
     pub allow_cleartext: Option<bool>,
     #[serde(default)]
     pub keep_alive: Option<bool>,
+    #[serde(default)]
+    pub wide_viewport: Option<bool>,
+    #[serde(default)]
+    pub allow_zoom: Option<bool>,
+    #[serde(default)]
+    pub web_history_back: Option<bool>,
+    #[serde(default)]
+    pub text_zoom: Option<i32>,
+    #[serde(default)]
+    pub show_toolbar: Option<bool>,
+    #[serde(default)]
+    pub keep_alive_grace_sec: Option<i32>,
+    #[serde(default)]
+    pub width_dp: Option<i32>,
+    #[serde(default)]
+    pub height_percent: Option<i32>,
     #[serde(default)]
     pub clear: bool,
 }
@@ -131,11 +151,31 @@ pub struct PluginCreateWebEmbedParams {
     pub name: String,
     pub url: String,
     #[serde(default)]
+    pub remote_url: Option<String>,
+    #[serde(default)]
+    pub lan_ssids: Vec<String>,
+    #[serde(default)]
     pub allowed_origins: Vec<String>,
     #[serde(default)]
     pub allow_cleartext: bool,
     #[serde(default)]
     pub keep_alive: bool,
+    #[serde(default)]
+    pub wide_viewport: Option<bool>,
+    #[serde(default)]
+    pub allow_zoom: Option<bool>,
+    #[serde(default)]
+    pub web_history_back: Option<bool>,
+    #[serde(default)]
+    pub text_zoom: Option<i32>,
+    #[serde(default)]
+    pub show_toolbar: Option<bool>,
+    #[serde(default)]
+    pub keep_alive_grace_sec: Option<i32>,
+    #[serde(default)]
+    pub width_dp: Option<i32>,
+    #[serde(default)]
+    pub height_percent: Option<i32>,
     #[serde(default)]
     pub packages: Vec<String>,
     #[serde(default = "default_true_param")]

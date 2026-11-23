@@ -184,6 +184,9 @@ internal object NetworkOriginParser {
     private fun isLocalDomainSuffix(host: String): Boolean {
         val base =
             when {
+                host.endsWith(".home.arpa") -> host.removeSuffix(".home.arpa")
+                host.endsWith(".internal") -> host.removeSuffix(".internal")
+                host.endsWith(".localhost") -> host.removeSuffix(".localhost")
                 host.endsWith(".lan") -> host.removeSuffix(".lan")
                 host.endsWith(".local") -> host.removeSuffix(".local")
                 else -> return false

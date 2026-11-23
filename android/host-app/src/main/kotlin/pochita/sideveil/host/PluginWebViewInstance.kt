@@ -44,10 +44,17 @@ internal class PluginWebViewInstance(
     private val deps: PluginWebViewDeps,
     initialDescriptor: PluginDescriptor,
     private val callbacks: PluginContainerCallbacks,
+    initialNetworkRoute: NetworkRouteContext = NetworkRouteContext(),
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
     val webView: WebView = WebView(context)
-    private val dormancy = WebViewDormancyController.forWebView(webView, mainHandler)
+    private val dormancy =
+        WebViewDormancyController.forWebView(
+            webView = webView,
+            mainHandler = mainHandler,
+            hidePauseDelayMs = WebViewDormancyController.resolveHidePauseDelayMs(initialDescriptor),
+        )
+    private val embedSession = EmbedSessionController(webView, mainHandler, initialNetworkRoute)
 
     @Volatile
     var descriptor: PluginDescriptor = initialDescriptor
@@ -109,6 +116,7 @@ internal class PluginWebViewInstance(
                 dormancy = dormancy,
                 onWebViewError = ::emitWebViewError,
                 onRenderProcessGoneEvent = ::handleRenderProcessGone,
+                onMainPageFinished = ::handleMainPageFinished,
             )
         webView.webChromeClient = PluginWebChromeClient({ descriptor.id }, deps.daemonClient)
     }
@@ -119,14 +127,17 @@ internal class PluginWebViewInstance(
         }
         val prev = descriptor
         descriptor = next
+        dormancy.updateHidePauseDelayMs(WebViewDormancyController.resolveHidePauseDelayMs(next))
         if (prev.embed != next.embed || prev.network != next.network || prev.capabilities != next.capabilities) {
             PluginWebViewSettings.applyWebSettings(webView, next)
         }
-        val surfaceChanged = syncSurfaceDefaults(prev, next)
+        val toolbarOrTitleChanged =
+            isUntrustedEmbed && (prev.embed?.showToolbar != next.embed?.showToolbar || prev.name != next.name)
+        val surfaceChanged = syncSurfaceDefaults(prev, next) || toolbarOrTitleChanged
         val needsReload =
             prev.entry != next.entry ||
                 prev.devServerUrl != next.devServerUrl ||
-                prev.embed != next.embed ||
+                EmbedSessionController.didEmbedRoutingChange(prev.embed, next.embed) ||
                 prev.network != next.network ||
                 prev.surface.crossOriginIsolated != next.surface.crossOriginIsolated
         if (needsReload) {
@@ -149,10 +160,14 @@ internal class PluginWebViewInstance(
     }
 
     fun setForegroundPriority(foreground: Boolean) {
+        val wasDormant = dormancy.isPaused
         foregroundPriority = foreground
         val priority = if (foreground) WebView.RENDERER_PRIORITY_IMPORTANT else WebView.RENDERER_PRIORITY_BOUND
         webView.setRendererPriorityPolicy(priority, !foreground)
         dormancy.setForeground(foreground)
+        if (foreground && wasDormant && isUntrustedEmbed) {
+            embedSession.triggerOnlineReconnect()
+        }
     }
 
     fun canConsumeBack(): Boolean = backInterceptEnabled || (descriptor.embed?.webHistoryBack == true && webView.canGoBack())
@@ -200,21 +215,27 @@ internal class PluginWebViewInstance(
             heightPx = webView.height,
         )
 
-    fun loadEntry() {
+    fun loadEntry(restoreUrl: String? = null) {
         dormancy.onLoadStarted()
         messageBridge?.resetBeforeLoad()
-        val embed = descriptor.embed
-        if (embed != null) {
-            if (PluginNetworkPolicy.shouldAllowNativeNetwork(descriptor, embed.url, isMainFrame = true)) {
-                webView.loadUrl(embed.url)
-            } else {
-                Log.w(TAG, "Blocked disallowed embed entry URL for plugin=${descriptor.id}: ${embed.url}")
-                webView.loadUrl("about:blank")
-            }
+        if (descriptor.embed != null) {
+            embedSession.loadInitial(descriptor, restoreUrl)
         } else {
             webView.loadUrl(deps.assetFetcher.entryUrlFor(descriptor))
         }
     }
+
+    fun updateNetworkRoute(network: NetworkRouteContext) {
+        if (isUntrustedEmbed) embedSession.updateNetworkRoute(descriptor, network)
+    }
+
+    fun reloadEmbed() = embedSession.reload(descriptor)
+
+    fun navigateEmbedHome() = embedSession.navigateHome(descriptor)
+
+    fun currentExternalUrl(): String? = embedSession.currentExternalUrl(descriptor)
+
+    fun bindEmbedStatusListener(listener: ((String?, Boolean) -> Unit)?) = embedSession.bindStatusListener(listener)
 
     fun pushEvent(
         event: String,
@@ -258,6 +279,15 @@ internal class PluginWebViewInstance(
             SideVeilEvents.HOST_WEBVIEW_ERROR,
             SideVeilWireJson.encodeToJsonElement(payload),
         )
+        if (isUntrustedEmbed && payload.isMainFrame && payload.kind == "network") {
+            embedSession.handleMainFrameNetworkError(descriptor, payload.url)
+        }
+    }
+
+    private fun handleMainPageFinished(url: String?) {
+        if (!isUntrustedEmbed) return
+        flushCookies()
+        embedSession.handleMainPageFinished(url)
     }
 
     private fun handleRenderProcessGone(

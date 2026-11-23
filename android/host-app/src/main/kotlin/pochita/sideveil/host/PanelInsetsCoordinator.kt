@@ -37,6 +37,7 @@ internal object PanelInsetsCoordinator {
         context: Context,
         windowManager: WindowManager,
         liveInsets: WindowInsets? = null,
+        effectiveImeBottomPx: Int? = null,
     ): PanelSafeBounds {
         val density =
             context.resources.displayMetrics.density
@@ -45,14 +46,19 @@ internal object PanelInsetsCoordinator {
         val screenW = metrics?.bounds?.width() ?: context.resources.displayMetrics.widthPixels
         val screenH = metrics?.bounds?.height() ?: context.resources.displayMetrics.heightPixels
 
-        val insetsSource = liveInsets ?: metrics?.windowInsets
+        val displayInsets = metrics?.windowInsets ?: liveInsets
         val barsAndCutout =
-            insetsSource?.getInsetsIgnoringVisibility(
+            displayInsets?.getInsetsIgnoringVisibility(
                 WindowInsets.Type.statusBars() or
                     WindowInsets.Type.navigationBars() or
                     WindowInsets.Type.displayCutout(),
             )
-        val imeBottom = insetsSource?.getInsets(WindowInsets.Type.ime())?.bottom ?: 0
+        val imeBottom =
+            effectiveImeBottomPx
+                ?: maxOf(
+                    metrics?.windowInsets?.getInsets(WindowInsets.Type.ime())?.bottom ?: 0,
+                    liveInsets?.getInsets(WindowInsets.Type.ime())?.bottom ?: 0,
+                )
         val isTabletLandscape = (screenW / density) >= TABLET_LANDSCAPE_MIN_WIDTH_DP && screenW > screenH
 
         return PanelSafeBounds(
@@ -65,6 +71,61 @@ internal object PanelInsetsCoordinator {
             imeBottomPx = imeBottom.coerceAtLeast(0),
             isTabletLandscape = isTabletLandscape,
         )
+    }
+
+    fun resolveEffectiveImeFromWindow(
+        context: Context,
+        windowManager: WindowManager,
+        decorView: android.view.View?,
+        decorLocation: IntArray,
+        insets: WindowInsets,
+        previousEffectiveImeBottomPx: Int,
+    ): Int {
+        val metrics = runCatching { windowManager.currentWindowMetrics }.getOrNull()
+        val screenH = metrics?.bounds?.height() ?: context.resources.displayMetrics.heightPixels
+        val metricsIme = metrics?.windowInsets?.getInsets(WindowInsets.Type.ime())?.bottom ?: 0
+        val windowBottom =
+            if (decorView != null && decorView.height > 2) {
+                decorView.getLocationOnScreen(decorLocation)
+                decorLocation[1] + decorView.height
+            } else {
+                0
+            }
+        return resolveScreenImeBottomPx(
+            imeVisible = insets.isVisible(WindowInsets.Type.ime()),
+            windowLocalImeBottomPx = insets.getInsets(WindowInsets.Type.ime()).bottom,
+            windowBottomOnScreenPx = windowBottom,
+            screenHeightPx = screenH,
+            metricsImeBottomPx = metricsIme,
+            previousEffectiveImeBottomPx = previousEffectiveImeBottomPx,
+        )
+    }
+
+    /**
+     * Converts window-local IME insets into a stable screen-bottom IME obstruction height.
+     *
+     * When the floating panel moves above the soft keyboard, Android drops the window-local
+     * IME inset to `0` even though the keyboard is still visible (`imeVisible == true`).
+     * Retaining [previousEffectiveImeBottomPx] while `imeVisible` remains `true` prevents an
+     * infinite resize/reposition oscillation loop.
+     */
+    fun resolveScreenImeBottomPx(
+        imeVisible: Boolean,
+        windowLocalImeBottomPx: Int,
+        windowBottomOnScreenPx: Int,
+        screenHeightPx: Int,
+        metricsImeBottomPx: Int,
+        previousEffectiveImeBottomPx: Int,
+    ): Int {
+        if (!imeVisible) return 0
+        val fromWindow =
+            if (windowLocalImeBottomPx > 0 && windowBottomOnScreenPx > 0) {
+                (screenHeightPx - (windowBottomOnScreenPx - windowLocalImeBottomPx)).coerceAtLeast(0)
+            } else {
+                0
+            }
+        val measured = maxOf(metricsImeBottomPx.coerceAtLeast(0), fromWindow)
+        return if (measured > 0) measured else previousEffectiveImeBottomPx.coerceAtLeast(0)
     }
 
     fun computePanelDimensions(

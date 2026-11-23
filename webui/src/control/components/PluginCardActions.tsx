@@ -78,12 +78,23 @@ export function PluginEmbedBanner({
 }: PluginEmbedBannerProps) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius-control)] border border-[var(--border-hairline)] bg-[var(--surface-elevated)] px-2.5 py-1.5 text-xs">
-      <div className="flex min-w-0 items-center gap-1.5">
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
         <GlobeLock className="size-3.5 shrink-0 text-[var(--accent)]" />
         <code className="truncate font-mono text-[11px] text-[var(--text-primary)]">
           {embed.url}
         </code>
+        {embed.remoteUrl ? <Badge variant="accent">双地址切换</Badge> : null}
+        {embed.lanSsids && embed.lanSsids.length > 0 ? (
+          <Badge variant="neutral">SSID ({embed.lanSsids.length})</Badge>
+        ) : null}
         {embed.allowCleartext ? <Badge variant="warning">私网明文 HTTP</Badge> : null}
+        {embed.showToolbar ? <Badge variant="neutral">快捷顶栏</Badge> : null}
+        {embed.textZoom && embed.textZoom !== 100 ? (
+          <Badge variant="neutral">缩放 {embed.textZoom}%</Badge>
+        ) : null}
+        {embed.keepAliveGraceSec && embed.keepAliveGraceSec > 0 ? (
+          <Badge variant="neutral">保活 {embed.keepAliveGraceSec}s</Badge>
+        ) : null}
       </div>
       <button
         type="button"

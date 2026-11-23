@@ -65,6 +65,7 @@ internal class PluginWebViewClient(
     private val dormancy: WebViewDormancyController,
     private val onWebViewError: (HostWebViewErrorPayload) -> Unit,
     private val onRenderProcessGoneEvent: (didCrash: Boolean, rendererPriorityAtExit: Int) -> Unit,
+    private val onMainPageFinished: (url: String?) -> Unit = {},
 ) : WebViewClient() {
     override fun shouldOverrideUrlLoading(
         view: WebView,
@@ -119,6 +120,7 @@ internal class PluginWebViewClient(
             }
         }
         dormancy.onPageFinished()
+        onMainPageFinished(url)
     }
 
     override fun onReceivedError(

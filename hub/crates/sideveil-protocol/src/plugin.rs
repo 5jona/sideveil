@@ -58,6 +58,10 @@ pub enum PluginCapability {
 #[serde(rename_all = "camelCase")]
 pub struct PluginEmbedPrefs {
     pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_url: Option<String>,
+    #[serde(default)]
+    pub lan_ssids: Vec<String>,
     #[serde(default)]
     pub allowed_origins: Vec<String>,
     #[serde(default)]
@@ -68,6 +72,12 @@ pub struct PluginEmbedPrefs {
     pub allow_zoom: bool,
     #[serde(default = "default_true")]
     pub web_history_back: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_zoom: Option<i32>,
+    #[serde(default = "default_true")]
+    pub show_toolbar: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_alive_grace_sec: Option<i32>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -201,11 +211,31 @@ pub struct PluginOverrideEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub embed_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub remote_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lan_ssids: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub allowed_origins: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allow_cleartext: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub keep_alive: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wide_viewport: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allow_zoom: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub web_history_back: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_zoom: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub show_toolbar: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keep_alive_grace_sec: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub width_dp: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub height_percent: Option<i32>,
 }
 
 /// Persisted plugin override and per-app MRU selection state.

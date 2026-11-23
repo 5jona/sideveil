@@ -20,6 +20,7 @@ internal class PanelSurfaceState {
     var pluginSizeOverride: PluginSizeOverride = PluginSizeOverride()
     var presentationMode: PluginPresentationMode = PluginPresentationMode.DRAWER
     var lastLiveInsets: WindowInsets? = null
+    var effectiveImeBottomPx: Int = 0
 }
 
 /**
@@ -39,6 +40,7 @@ internal class PanelMotionDriver(
     onBackPressedIntercept: () -> Boolean,
     onCommitBackClose: () -> Unit,
     private val onRailMotionProgress: (Float) -> Unit,
+    private val onContentAlphaChanged: (Float) -> Unit = {},
 ) {
     private val springController = PanelSpringController()
     private var gestureStartYFraction = 0.5f
@@ -94,6 +96,7 @@ internal class PanelMotionDriver(
             surfaceState.pluginSizeOverride,
             surfaceState.lastLiveInsets,
             surfaceState.presentationMode,
+            surfaceState.effectiveImeBottomPx,
         )
 
     fun showPreparedFrame(
@@ -123,6 +126,7 @@ internal class PanelMotionDriver(
 
     fun collapseToWarmInvisible(): Boolean {
         surfaceState.lastLiveInsets = null
+        surfaceState.effectiveImeBottomPx = 0
         val window = windowProvider() ?: return false
         backdropController.clearWindowBlur(window)
         windowLayout.collapseToWarmInvisible(window)
@@ -130,6 +134,7 @@ internal class PanelMotionDriver(
             it.alpha = 0f
             OverlayWindowFlags.clearHighFrameRate(it)
         }
+        onContentAlphaChanged(0f)
         onRailMotionProgress(0f)
         return true
     }
@@ -209,6 +214,7 @@ internal class PanelMotionDriver(
     ) {
         windowLayout.updatePosition(window, surfaceState.panelConfig, frame, focusable, allowOffscreen)
         activeWebViewProvider()?.alpha = frame.contentAlpha
+        onContentAlphaChanged(frame.contentAlpha)
         backdropController.applyMotionFrame(window, frame)
         onRailMotionProgress(frame.railProgress)
     }

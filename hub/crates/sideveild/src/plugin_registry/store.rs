@@ -80,16 +80,46 @@ pub(super) fn build_descriptor(
     if let Some(keep_alive) = ov.and_then(|o| o.keep_alive) {
         surface.keep_alive = keep_alive;
     }
+    if let Some(width_dp) = ov.and_then(|o| o.width_dp) {
+        surface.width_dp = Some(width_dp);
+    }
+    if let Some(height_percent) = ov.and_then(|o| o.height_percent) {
+        surface.height_percent = Some(height_percent);
+    }
 
     let embed = loaded.manifest.embed.clone().map(|mut e| {
         if let Some(url) = ov.and_then(|o| o.embed_url.as_ref()) {
             e.url = url.clone();
+        }
+        if let Some(remote_url) = ov.and_then(|o| o.remote_url.as_ref()) {
+            e.remote_url = Some(remote_url.clone());
+        }
+        if let Some(lan_ssids) = ov.and_then(|o| o.lan_ssids.as_ref()) {
+            e.lan_ssids = lan_ssids.clone();
         }
         if let Some(origins) = ov.and_then(|o| o.allowed_origins.as_ref()) {
             e.allowed_origins = origins.clone();
         }
         if let Some(allow_cleartext) = ov.and_then(|o| o.allow_cleartext) {
             e.allow_cleartext = allow_cleartext;
+        }
+        if let Some(wide_viewport) = ov.and_then(|o| o.wide_viewport) {
+            e.wide_viewport = wide_viewport;
+        }
+        if let Some(allow_zoom) = ov.and_then(|o| o.allow_zoom) {
+            e.allow_zoom = allow_zoom;
+        }
+        if let Some(web_history_back) = ov.and_then(|o| o.web_history_back) {
+            e.web_history_back = web_history_back;
+        }
+        if let Some(text_zoom) = ov.and_then(|o| o.text_zoom) {
+            e.text_zoom = Some(text_zoom);
+        }
+        if let Some(show_toolbar) = ov.and_then(|o| o.show_toolbar) {
+            e.show_toolbar = show_toolbar;
+        }
+        if let Some(keep_alive_grace_sec) = ov.and_then(|o| o.keep_alive_grace_sec) {
+            e.keep_alive_grace_sec = Some(keep_alive_grace_sec);
         }
         e
     });

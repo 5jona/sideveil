@@ -1,5 +1,7 @@
 package pochita.sideveil.host
 
+import pochita.sideveil.protocol.EdgeSide
+
 /**
  * Pure policy governing whether `MotionEvent.ACTION_OUTSIDE` should dismiss [SidebarPanelWindow].
  *
@@ -59,5 +61,34 @@ internal class PanelOutsideTouchPolicy(
 
     companion object {
         const val DEFAULT_POST_IME_HIDE_GRACE_MS = 250L
+        const val DEFAULT_INNER_EDGE_BUFFER_DP = 12f
+
+        fun shouldIgnoreInnerEdgeOutsideTouch(
+            edge: EdgeSide,
+            rawX: Float,
+            rawY: Float,
+            panelBoundsLeft: Int,
+            panelBoundsTop: Int,
+            panelBoundsRight: Int,
+            panelBoundsBottom: Int,
+            density: Float,
+            bufferDp: Float = DEFAULT_INNER_EDGE_BUFFER_DP,
+        ): Boolean {
+            if (bufferDp <= 0f || density <= 0f) return false
+            if (panelBoundsBottom < panelBoundsTop) return false
+            if (rawY !in panelBoundsTop.toFloat()..panelBoundsBottom.toFloat()) return false
+            val bufferPx = bufferDp * density
+            return when (edge) {
+                EdgeSide.RIGHT -> {
+                    val innerEdge = panelBoundsLeft.toFloat()
+                    rawX in (innerEdge - bufferPx)..innerEdge
+                }
+
+                EdgeSide.LEFT -> {
+                    val innerEdge = panelBoundsRight.toFloat()
+                    rawX in innerEdge..(innerEdge + bufferPx)
+                }
+            }
+        }
     }
 }

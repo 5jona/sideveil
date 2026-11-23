@@ -61,6 +61,10 @@ class PluginNetworkPolicyTest {
                 "router.lan",
                 "homeassistant.local",
                 "sub.box.local",
+                "dev.localhost",
+                "ha.internal",
+                "gateway.home.arpa",
+                "sub.ha.home.arpa",
             )
         for (host in allowed) {
             assertTrue("expected private/loopback for $host", PluginNetworkPolicy.isPrivateOrLoopbackHost(host))
@@ -86,6 +90,9 @@ class PluginNetworkPolicyTest {
                 "::",
                 ".local",
                 ".lan",
+                ".internal",
+                ".home.arpa",
+                ".localhost",
                 "example.local.evil.com",
                 "plugins.sideveil.local",
                 "sideveil.diagnostic.plugins.sideveil.local",
@@ -140,6 +147,24 @@ class PluginNetworkPolicyTest {
                 allowCleartext = false,
             )
         assertFalse(PluginNetworkPolicy.shouldAllowNativeNetwork(lanCleartextDisabled, "http://192.168.1.1:9090/ui", true))
+
+        val dualOriginHa =
+            PluginDescriptor(
+                id = "com.example.ha",
+                name = "Home Assistant",
+                version = "1.0.0",
+                embed =
+                    PluginEmbedPrefs(
+                        url = "http://homeassistant.local:8123",
+                        remoteUrl = "https://ha.example.com:8123",
+                        allowCleartext = true,
+                    ),
+            )
+        assertTrue(PluginNetworkPolicy.shouldAllowNativeNetwork(dualOriginHa, "http://homeassistant.local:8123/lovelace", true))
+        assertTrue(PluginNetworkPolicy.shouldAllowNativeNetwork(dualOriginHa, "ws://homeassistant.local:8123/api/websocket", false))
+        assertTrue(PluginNetworkPolicy.shouldAllowNativeNetwork(dualOriginHa, "https://ha.example.com:8123/lovelace", true))
+        assertTrue(PluginNetworkPolicy.shouldAllowNativeNetwork(dualOriginHa, "wss://ha.example.com:8123/api/websocket", false))
+        assertFalse(PluginNetworkPolicy.shouldAllowNativeNetwork(dualOriginHa, "wss://evil.example.com:8123/api/websocket", false))
     }
 
     @Test

@@ -39,8 +39,9 @@ internal class PluginWebViewEventBridge(
         descriptor: PluginDescriptor,
         panelState: PanelState,
         initiallyVisible: Boolean,
+        restoreUrl: String? = null,
     ) {
-        instance.loadEntry()
+        instance.loadEntry(restoreUrl)
         lastConfigEnvelope?.let(instance::pushEnvelope)
         lastPaletteEnvelope?.let(instance::pushEnvelope)
         if (!instance.isUntrustedEmbed && descriptor.capabilities.contains(PluginCapability.NETWORK_CONTEXT)) {
