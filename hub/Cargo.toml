@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "crates/sideveil-protocol",
+    "crates/sideveil-plugin-sdk",
     "crates/sideveil-gfx",
     "crates/sideveil-hud-jni",
     "crates/sideveild",
@@ -25,6 +26,7 @@ libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sideveil-gfx = { path = "crates/sideveil-gfx" }
+sideveil-plugin-sdk = { path = "crates/sideveil-plugin-sdk" }
 sideveil-protocol = { path = "crates/sideveil-protocol" }
 thiserror = "2"
 tokio = { version = "1", features = [
@@ -42,6 +44,7 @@ tokio = { version = "1", features = [
 tokio-tungstenite = { version = "0.30", default-features = false, features = [
     "handshake",
 ] }
+tokio-util = { version = "0.7", features = ["codec", "rt"] }
 usvg = { version = "0.50", default-features = false }
 vello_cpu = { version = "0.4", default-features = false, features = [
     "std",
