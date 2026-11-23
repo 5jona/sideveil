@@ -1,0 +1,11 @@
+# SideVeil Android Host, Sensor & Protocol Guidelines
+
+Applies to `android/host-app`, `android/sensor`, `android/protocol`, and Gradle configs. See `docs/architecture-decisions.md` for AOSP 16+ rendering details.
+
+- **Role Boundaries**: `android/sensor` (`UID 1000` single DEX) must never include native libraries, UI views, or config persistence. `android/host-app` must never embed plugin business logic or direct disk config authority.
+- **Blur vs. Backdrop Separation**: Any translucent overlay window supporting `native-glass` (`SidebarPanelWindow`, `PluginRailWindow`, `PinnedContainerWindow`, `NativeHudWindow`) must use a `Dialog` (never raw `WindowManager.addView`) whose `Window` background is an immutable `BlurMaskDrawable(cornerPx)` and whose content container binds `GlassBackdropDrawable`. Never attach stateful `RuntimeShader` drawables directly to `Window.setBackgroundDrawable(...)`.
+- **Zero-Reflow Motion**: Keep overlay windows warm-attached (`1x1` `INVISIBLE` when closed) with `PRIVATE_FLAG_NO_MOVE_ANIMATION`. Lock `WindowManager.LayoutParams` dimensions during animations so embedded WebViews never suffer viewport reflows.
+- **Uncapped Adaptive Refresh Rate**: Apply `OverlayWindowFlags.applyPreferredMaxRefreshRate(...)` (and `View.REQUESTED_FRAME_RATE_CATEGORY_HIGH`) when overlay windows become visible and `clearPreferredRefreshRate(...)` (`0f` / `0`) when collapsed or hidden. Never hardcode refresh-rate ceilings. Keep active pinned plugin WebViews at `WebView.RENDERER_PRIORITY_IMPORTANT` while visible.
+- **Single-Layer Pinned Chrome**: `PinnedContainerWindow` must only expose a minimal centered bottom drag handle bar (hidden during click-through) and a themed unlock chip. Do not add native close or unpin buttons that duplicate plugin controls. Synchronize click-through and presentation state via `SideVeilEvents` constants in `Protocol.kt`.
+- **WebView Sandbox**: Isolate each plugin under `https://<pluginId>.plugins.sideveil.local/` with `allowFileAccess = false`, bounded LRU caching, loopback-only Dev Mode, and `onRenderProcessGone` crash recovery.
+- **Modularity & Verification**: Keep source files `<= 300` lines (hard limit `400`), reuse shared `OverlayWindowFlags` / density helpers rather than duplicating `dp()`, and verify with `mise run android:check`.
