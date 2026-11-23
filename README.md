@@ -5,6 +5,8 @@ Target baseline: Android 16+ (API 36+, arm64) on Linux GKI 6.12+. Built around a
 
 ## Architecture
 
+For the full repository navigation map, runtime data flows, ABI-pinned FQCNs, and 7 protocol trust boundaries, see [`ARCHITECTURE.md`](./ARCHITECTURE.md). Empirical Android 16+ platform findings and ADRs live in [`docs/architecture-decisions.md`](./docs/architecture-decisions.md).
+
 1. **Rust Core Hub (`hub/crates/sideveild`, `sideveil-gfx`, `sideveil-hud-jni`, `sideveil-ctl`)**
    - Supervises `sideveil-sensor` directly (`UID 1000` drop via `pre_exec`) and `SideVeilHost` via Linux `pidfd_open` + Tokio `AsyncFd` (`epoll`) with zero shell/curl polling.
    - Manages `/data/system/sideveil/config.json` with atomic persistence and `inotify` hot-reload.

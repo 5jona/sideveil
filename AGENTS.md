@@ -1,6 +1,6 @@
 # SideVeil — Agent Guidelines
 
-For empirical Android 16+ (API 36+, arm64) platform constraints and rendering decisions, see `docs/architecture-decisions.md`. Subsystem-specific rules live in `hub/AGENTS.md`, `android/AGENTS.md`, and `webui/AGENTS.md`.
+For the full repository navigation map, runtime data flows, ABI-pinned FQCNs, and protocol trust boundaries, see `ARCHITECTURE.md`. For empirical Android 16+ (API 36+, arm64) platform constraints and rendering decisions, see `docs/architecture-decisions.md`. Subsystem-specific rules live in `hub/AGENTS.md`, `android/AGENTS.md`, and `webui/AGENTS.md`.
 
 ## Architecture & Role Boundaries
 SideVeil enforces strict separation across four layers:
