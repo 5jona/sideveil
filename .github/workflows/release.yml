@@ -38,7 +38,7 @@ jobs:
           workspaces: hub
 
       - name: Setup Java 25
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 25
@@ -55,15 +55,17 @@ jobs:
           cache: pnpm
           cache-dependency-path: webui/pnpm-lock.yaml
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install Android SDK & NDK components
         run: |
           set -euo pipefail
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager --install "platforms;android-37.0" "build-tools;36.0.0" "ndk;30.0.16248370"
-          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/30.0.16248370" >> "${GITHUB_ENV}"
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          SDKMANAGER="$(find "${SDK_ROOT}/cmdline-tools" -name sdkmanager -type f | sort -V | tail -n 1)"
+          echo "Using sdkmanager: ${SDKMANAGER} (SDK_ROOT=${SDK_ROOT})"
+          yes | "${SDKMANAGER}" --sdk_root="${SDK_ROOT}" --licenses >/dev/null || true
+          "${SDKMANAGER}" --sdk_root="${SDK_ROOT}" --install "platforms;android-37.0" "build-tools;36.0.0" "ndk;30.0.16248370"
+          echo "ANDROID_HOME=${SDK_ROOT}" >> "${GITHUB_ENV}"
+          echo "ANDROID_SDK_ROOT=${SDK_ROOT}" >> "${GITHUB_ENV}"
+          echo "ANDROID_NDK_HOME=${SDK_ROOT}/ndk/30.0.16248370" >> "${GITHUB_ENV}"
 
       - name: Setup Gradle cache
         uses: gradle/actions/setup-gradle@v4
