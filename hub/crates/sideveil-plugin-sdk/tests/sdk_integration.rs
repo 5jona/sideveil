@@ -1,4 +1,5 @@
 //! End-to-end integration tests for `sideveil-plugin-sdk` against a temporary mock UDS Hub.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::path::PathBuf;
 use std::sync::Arc;

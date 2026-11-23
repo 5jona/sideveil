@@ -1,4 +1,5 @@
 //! Cross-stack golden wire fixture round-trip tests for `sideveil-protocol`.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::fs;
 use std::path::PathBuf;

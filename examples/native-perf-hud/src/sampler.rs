@@ -8,12 +8,12 @@ const THERMAL_SYSFS_ROOT: &str = "/sys/class/thermal";
 static THERMAL_PATHS: Mutex<Option<Vec<PathBuf>>> = Mutex::new(None);
 
 #[derive(Default)]
-pub struct CpuPrev {
+pub(crate) struct CpuPrev {
     idle: u64,
     total: u64,
 }
 
-pub fn read_cpu() -> Option<CpuPrev> {
+pub(crate) fn read_cpu() -> Option<CpuPrev> {
     let text = fs::read_to_string("/proc/stat").ok()?;
     let nums: Vec<u64> = text
         .lines()
@@ -30,7 +30,7 @@ pub fn read_cpu() -> Option<CpuPrev> {
     Some(CpuPrev { idle, total })
 }
 
-pub fn sample_cpu(prev: &mut CpuPrev) -> f32 {
+pub(crate) fn sample_cpu(prev: &mut CpuPrev) -> f32 {
     let Some(cur) = read_cpu() else {
         return 0.0;
     };
@@ -44,7 +44,7 @@ pub fn sample_cpu(prev: &mut CpuPrev) -> f32 {
     }
 }
 
-pub fn sample_mem_mb() -> (u64, u64) {
+pub(crate) fn sample_mem_mb() -> (u64, u64) {
     let Ok(raw) = fs::read_to_string("/proc/meminfo") else {
         return (0, 0);
     };
@@ -209,7 +209,7 @@ fn read_max_temp_c(paths: &[PathBuf]) -> Option<f32> {
     peak.map(|c| (c * 10.0).round() / 10.0)
 }
 
-pub fn sample_temp_c() -> Option<f32> {
+pub(crate) fn sample_temp_c() -> Option<f32> {
     let mut guard = THERMAL_PATHS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);

@@ -1,5 +1,6 @@
 //! End-to-end integration tests covering UDS `SO_PEERCRED` auth, Sensor -> Hub -> Host WS routing,
 //! anti-CSWSH WebSocket handshakes, and dual-priority gesture delivery.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::fs;
 use std::path::PathBuf;

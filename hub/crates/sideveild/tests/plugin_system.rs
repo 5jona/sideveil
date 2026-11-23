@@ -1,5 +1,6 @@
 //! End-to-end integration tests for Phase 2 Open Plugin System:
 //! inotify discovery, MRU selection, isolated HTTP static assets, UDS backend RPC, and ACLs.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::fs;
 use std::os::unix::fs::symlink;

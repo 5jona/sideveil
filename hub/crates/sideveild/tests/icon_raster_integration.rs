@@ -1,4 +1,5 @@
 //! Integration tests for `/plugins/<id>/__icon` SVG rasterization & disk caching.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::fs;
 use std::sync::Arc;
