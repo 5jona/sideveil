@@ -3,16 +3,10 @@
 # Shared staging, readiness polling, and CDP forwarding helpers for reload.sh.
 #
 
+# shellcheck source=scripts/lib/module-env.sh
+source "${SCRIPT_DIR}/scripts/lib/module-env.sh"
 # shellcheck source=scripts/reload-transport.sh
 source "${SCRIPT_DIR}/scripts/reload-transport.sh"
-
-run_in_env() {
-    if command -v mise >/dev/null 2>&1; then
-        mise exec -- "$@"
-    else
-        "$@"
-    fi
-}
 
 wait_for_ready() {
     local max_wait_ms="${1:-12000}"

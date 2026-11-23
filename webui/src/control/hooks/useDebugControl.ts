@@ -33,6 +33,7 @@ function unwrapRpcOutput<T>(stdout: string): { result?: T; errorMessage?: string
   }
 }
 
+/** Options passed to {@link useDebugControl}. */
 export interface UseDebugControlOptions {
   bridge: BridgeClient;
   pushToast: PushToast;
@@ -40,6 +41,10 @@ export interface UseDebugControlOptions {
   onRefreshLogs: () => Promise<void>;
 }
 
+/**
+ * Manages developer debugging RPCs: WebView CDP toggling, overlay UI hierarchy snapshots,
+ * and frame-timing metric resets.
+ */
 export function useDebugControl({
   bridge,
   pushToast,

@@ -3,6 +3,7 @@ import test from 'node:test';
 import { BUILTIN_DIAG_PLUGIN_ID } from '@pochita/sideveil-sdk';
 import {
   clampEmbedNumber,
+  hasRpcErrorPayload,
   normalizeOriginList,
   normalizeSsidList,
 } from '../src/control/hooks/pluginCommandHelpers.ts';
@@ -228,4 +229,23 @@ test('handleMockControlExec supports web-embed create, edit, uninstall, and netw
     afterUninstall.result.snapshot.plugins.some((p) => p.id === 'lan.openclash'),
     false,
   );
+});
+
+test('hasRpcErrorPayload inspects top-level JSON error without substring false positives', () => {
+  assert.equal(
+    hasRpcErrorPayload(JSON.stringify({ jsonrpc: '2.0', id: '1', error: { message: 'denied' } })),
+    true,
+  );
+  assert.equal(
+    hasRpcErrorPayload(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: '1',
+        result: { ok: true, note: 'contains literal "error" text inside result' },
+      }),
+    ),
+    false,
+  );
+  assert.equal(hasRpcErrorPayload(''), false);
+  assert.equal(hasRpcErrorPayload('not-json'), false);
 });

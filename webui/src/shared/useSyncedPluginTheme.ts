@@ -12,12 +12,14 @@ import {
   type SideVeilConfig,
 } from './types.ts';
 
+/** Callback options for synchronizing SideVeil daemon appearance and config snapshots. */
 export interface UseSyncedPluginThemeOptions {
   onConfigLoaded?: (config: SideVeilConfig) => void;
   onConfigUpdated?: (config: SideVeilConfig, payload: ConfigUpdatedEventPayload) => void;
   onError?: (message: string) => void;
 }
 
+/** Reactive theme state synchronized with the authoritative SideVeil host configuration. */
 export interface UseSyncedPluginThemeResult {
   hydrated: boolean;
   isNativeHost: boolean;
@@ -25,6 +27,21 @@ export interface UseSyncedPluginThemeResult {
   colorMode: ColorMode;
   resolvedScheme: ResolvedColorScheme;
   isDark: boolean;
+}
+
+function toConfigUpdatedPayload(
+  rawConfig: Partial<SideVeilConfig> | null,
+  eventPayload: Record<string, unknown>,
+): ConfigUpdatedEventPayload {
+  return {
+    config: rawConfig ?? undefined,
+    foregroundPackage:
+      typeof eventPayload.foregroundPackage === 'string'
+        ? eventPayload.foregroundPackage
+        : undefined,
+    scopeActive:
+      typeof eventPayload.scopeActive === 'boolean' ? eventPayload.scopeActive : undefined,
+  };
 }
 
 /**
@@ -44,7 +61,7 @@ export function useSyncedPluginTheme(
     onConfigUpdated: (raw, _appearance, eventPayload) => {
       options.onConfigUpdated?.(
         normalizeSideVeilConfig(raw),
-        eventPayload as unknown as ConfigUpdatedEventPayload,
+        toConfigUpdatedPayload(raw, eventPayload),
       );
     },
     onError: options.onError,

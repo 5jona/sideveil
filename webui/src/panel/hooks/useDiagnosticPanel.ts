@@ -17,6 +17,7 @@ import {
 } from '../../shared/types.ts';
 import { useSyncedPluginTheme } from '../../shared/useSyncedPluginTheme.ts';
 
+/** Options passed to {@link useDiagnosticPanel}. */
 export interface UseDiagnosticPanelOptions {
   onAppendLog: (level: LogEntry['level'], message: string) => void;
   onHydrated: () => void;
@@ -24,6 +25,10 @@ export interface UseDiagnosticPanelOptions {
 
 const INITIAL_STORED_PREF: { lastCheckedAt?: number } = {};
 
+/**
+ * Coordinates the built-in diagnostic panel state: daemon status/ping checks,
+ * live theme/blur sync, IME focus probe, plugin storage test, and container actions.
+ */
 export function useDiagnosticPanel({ onAppendLog, onHydrated }: UseDiagnosticPanelOptions) {
   const { bridge, pluginId } = useSideVeilPlugin();
   const backendState = usePluginBackendState();

@@ -12,10 +12,10 @@ import {
   ThemeSwitcher,
   useTheme,
 } from '@pochita/ui';
-import { Plus } from 'lucide-react';
-import type { ScopeMode, SideVeilConfig } from '../../shared/types.ts';
-import { PackageScopeList } from './PackageScopeList.tsx';
+import type { ScopeConfig, SideVeilConfig } from '../../shared/types.ts';
+import { ActivationScopeCard } from './ActivationScopeCard.tsx';
 
+/** Props for the Control Plane appearance, blur geometry, and scope settings tab. */
 export interface AppearanceScopeTabProps {
   config: SideVeilConfig;
   foregroundPackage: string;
@@ -23,6 +23,9 @@ export interface AppearanceScopeTabProps {
   onChange: (updater: (prev: SideVeilConfig) => SideVeilConfig) => void;
 }
 
+/**
+ * Renders theme preset switching, panel geometry/blur sliders, and the activation scope editor.
+ */
 export function AppearanceScopeTab({
   config,
   foregroundPackage,
@@ -44,68 +47,12 @@ export function AppearanceScopeTab({
     }));
   };
 
-  const setScopeMode = (mode: ScopeMode) => {
+  const updateScope = (updater: (prev: ScopeConfig) => ScopeConfig) => {
     onChange((prev) => ({
       ...prev,
-      scope: {
-        ...prev.scope,
-        mode,
-      },
+      scope: updater(prev.scope),
     }));
   };
-
-  const addAllowPackage = (pkgRaw: string) => {
-    const pkg = pkgRaw.trim();
-    if (!pkg) return;
-    onChange((prev) => ({
-      ...prev,
-      scope: {
-        ...prev.scope,
-        allowlist: prev.scope.allowlist.includes(pkg)
-          ? prev.scope.allowlist
-          : [...prev.scope.allowlist, pkg],
-      },
-    }));
-  };
-
-  const removeAllowPackage = (pkg: string) => {
-    onChange((prev) => ({
-      ...prev,
-      scope: {
-        ...prev.scope,
-        allowlist: prev.scope.allowlist.filter((item) => item !== pkg),
-      },
-    }));
-  };
-
-  const addDenyPackage = (pkgRaw: string) => {
-    const pkg = pkgRaw.trim();
-    if (!pkg) return;
-    onChange((prev) => ({
-      ...prev,
-      scope: {
-        ...prev.scope,
-        denylist: prev.scope.denylist.includes(pkg)
-          ? prev.scope.denylist
-          : [...prev.scope.denylist, pkg],
-      },
-    }));
-  };
-
-  const removeDenyPackage = (pkg: string) => {
-    onChange((prev) => ({
-      ...prev,
-      scope: {
-        ...prev.scope,
-        denylist: prev.scope.denylist.filter((item) => item !== pkg),
-      },
-    }));
-  };
-
-  const canQuickAddFg =
-    Boolean(foregroundPackage) &&
-    foregroundPackage !== 'me.weishu.kernelsu' &&
-    !config.scope.allowlist.includes(foregroundPackage);
 
   return (
     <div className="space-y-4">
@@ -240,76 +187,11 @@ export function AppearanceScopeTab({
         </Card>
       </div>
 
-      <Card>
-        <CardHeader>
-          <div>
-            <CardTitle>激活作用域</CardTitle>
-            <CardDescription>控制允许激活边缘触发条的前台应用</CardDescription>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <SettingRow
-            variant="plain"
-            title="匹配模式"
-            description="白名单仅在指定应用中生效；全局模式除黑名单外全部生效"
-            control={
-              <div className="flex items-center gap-1.5">
-                <Button
-                  size="sm"
-                  variant={config.scope.mode === 'allowlist' ? 'primary' : 'secondary'}
-                  onClick={() => setScopeMode('allowlist')}
-                >
-                  白名单
-                </Button>
-                <Button
-                  size="sm"
-                  variant={config.scope.mode === 'global' ? 'primary' : 'secondary'}
-                  onClick={() => setScopeMode('global')}
-                >
-                  全局模式
-                </Button>
-              </div>
-            }
-          />
-
-          <PackageScopeList
-            title="激活白名单"
-            description="默认包含 KernelSU 管理器（me.weishu.kernelsu），方便边调参边直接滑出测试"
-            emptyText="暂无白名单包名"
-            packages={config.scope.allowlist}
-            inputId="allowlist-pkg-input"
-            inputName="allowlistPackage"
-            inputPlaceholder="输入包名，例如 com.example.app"
-            inputAriaLabel="新增白名单包名"
-            removeAriaPrefix="移除"
-            submitLabel="添加"
-            headerAction={
-              canQuickAddFg ? (
-                <Button size="sm" variant="pill" onClick={() => addAllowPackage(foregroundPackage)}>
-                  <Plus className="size-3.5" />
-                  加入当前前台 ({foregroundPackage})
-                </Button>
-              ) : undefined
-            }
-            onAddPackage={addAllowPackage}
-            onRemovePackage={removeAllowPackage}
-          />
-
-          <PackageScopeList
-            title="排除黑名单"
-            description="无论何种模式，下列系统进程界面中始终禁用侧边栏热区"
-            packages={config.scope.denylist}
-            inputId="denylist-pkg-input"
-            inputName="denylistPackage"
-            inputPlaceholder="输入排除包名"
-            inputAriaLabel="新增排除包名"
-            removeAriaPrefix="移除排除项"
-            submitLabel="排除"
-            onAddPackage={addDenyPackage}
-            onRemovePackage={removeDenyPackage}
-          />
-        </CardContent>
-      </Card>
+      <ActivationScopeCard
+        scope={config.scope}
+        foregroundPackage={foregroundPackage}
+        onChangeScope={updateScope}
+      />
     </div>
   );
 }

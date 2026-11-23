@@ -1,13 +1,15 @@
 import { shellQuote } from '@pochita/bridge';
-import type { PluginsSnapshotPayload } from '@pochita/sideveil-sdk';
+import type { PluginDescriptor, PluginsSnapshotPayload } from '@pochita/sideveil-sdk';
 import { CTL_BIN, SIDEVEIL_METHODS } from '../../shared/types.ts';
 
+/** Scope override mutation input passed to `plugins.setScopeOverride`. */
 export interface PluginScopeOverrideInput {
   global?: boolean;
   packages?: readonly string[];
   clear?: boolean;
 }
 
+/** Creation parameters for zero-privilege `web-embed` plugins. */
 export interface CreateWebEmbedInput {
   id: string;
   name: string;
@@ -29,6 +31,7 @@ export interface CreateWebEmbedInput {
   priority?: number;
 }
 
+/** Override mutation parameters for an existing `web-embed` plugin. */
 export interface PluginEmbedConfigInput {
   embedUrl?: string;
   remoteUrl?: string;
@@ -47,6 +50,7 @@ export interface PluginEmbedConfigInput {
   clear?: boolean;
 }
 
+/** Splits comma/newline-delimited origin strings into a trimmed, deduplicated list. */
 export function normalizeOriginList(raw: string): string[] {
   return Array.from(
     new Set(
@@ -58,10 +62,12 @@ export function normalizeOriginList(raw: string): string[] {
   );
 }
 
+/** Splits comma/newline-delimited Wi-Fi SSID strings into a trimmed, deduplicated list. */
 export function normalizeSsidList(raw: string): string[] {
   return normalizeOriginList(raw);
 }
 
+/** Truncates and clamps an optional finite integer parameter within `[min, max]`. */
 export function clampEmbedNumber(
   value: number | undefined,
   min: number,
@@ -72,21 +78,49 @@ export function clampEmbedNumber(
   return Math.min(max, Math.max(min, Math.trunc(value)));
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isPluginDescriptor(value: unknown): value is PluginDescriptor {
+  return isRecord(value) && typeof value.id === 'string' && typeof value.name === 'string';
+}
+
+function toPluginsSnapshot(record: Record<string, unknown>): PluginsSnapshotPayload | null {
+  if (!Array.isArray(record.plugins)) return null;
+  const plugins = record.plugins.filter(isPluginDescriptor);
+  const matchedPluginIds = Array.isArray(record.matchedPluginIds)
+    ? record.matchedPluginIds.filter((item): item is string => typeof item === 'string')
+    : [];
+  const activePluginId = typeof record.activePluginId === 'string' ? record.activePluginId : null;
+  const foregroundPackage =
+    typeof record.foregroundPackage === 'string' ? record.foregroundPackage : '';
+  const foregroundActivity =
+    typeof record.foregroundActivity === 'string' ? record.foregroundActivity : undefined;
+  return {
+    plugins,
+    matchedPluginIds,
+    activePluginId,
+    foregroundPackage,
+    ...(foregroundActivity !== undefined ? { foregroundActivity } : {}),
+  };
+}
+
+/** Unwraps a `PluginsSnapshotPayload` from either a direct snapshot or a JSON-RPC result envelope. */
 export function extractSnapshotPayload(value: unknown): PluginsSnapshotPayload | null {
-  if (!value || typeof value !== 'object') return null;
-  const record = value as Record<string, unknown>;
-  if (Array.isArray(record.plugins)) {
-    return record as unknown as PluginsSnapshotPayload;
+  if (!isRecord(value)) return null;
+  const direct = toPluginsSnapshot(value);
+  if (direct) return direct;
+  if (isRecord(value.snapshot)) {
+    return extractSnapshotPayload(value.snapshot);
   }
-  if (record.snapshot && typeof record.snapshot === 'object') {
-    return extractSnapshotPayload(record.snapshot);
-  }
-  if (record.result && typeof record.result === 'object') {
-    return extractSnapshotPayload(record.result);
+  if (isRecord(value.result)) {
+    return extractSnapshotPayload(value.result);
   }
   return null;
 }
 
+/** Parses JSON stdout returned by `sideveil-ctl` into a `PluginsSnapshotPayload`. */
 export function parsePluginsSnapshot(stdout: string): PluginsSnapshotPayload | null {
   const trimmed = stdout.trim();
   if (!trimmed) return null;
@@ -97,13 +131,30 @@ export function parsePluginsSnapshot(stdout: string): PluginsSnapshotPayload | n
   }
 }
 
+/**
+ * Inspects JSON stdout from `sideveil-ctl` and returns `true` only when the top-level
+ * JSON-RPC envelope contains a truthy `error` field.
+ */
+export function hasRpcErrorPayload(stdout: string): boolean {
+  const trimmed = stdout.trim();
+  if (!trimmed) return false;
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    return isRecord(parsed) && Boolean(parsed.error);
+  } catch {
+    return false;
+  }
+}
+
+/** Extracts the human-readable error message from a failed `sideveil-ctl` JSON-RPC response. */
 export function extractRpcErrorMessage(stdout: string, stderr: string): string {
   const trimmed = stdout.trim();
   if (trimmed) {
     try {
-      const parsed = JSON.parse(trimmed) as { error?: { message?: string } };
-      if (typeof parsed?.error?.message === 'string' && parsed.error.message.trim()) {
-        return parsed.error.message.trim();
+      const parsed: unknown = JSON.parse(trimmed);
+      if (isRecord(parsed) && isRecord(parsed.error) && typeof parsed.error.message === 'string') {
+        const msg = parsed.error.message.trim();
+        if (msg) return msg;
       }
     } catch {
       // Fall through to raw stderr/stdout.
@@ -112,6 +163,7 @@ export function extractRpcErrorMessage(stdout: string, stderr: string): string {
   return stderr.trim() || trimmed || '未知错误';
 }
 
+/** Builds the shell-quoted `sideveil-ctl plugins scope` CLI command for a scope override. */
 export function buildPluginScopeCommand(
   pluginId: string,
   override: PluginScopeOverrideInput,
@@ -142,6 +194,7 @@ function finiteInt(value: number | undefined): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? Math.trunc(value) : undefined;
 }
 
+/** Builds normalized JSON-RPC parameters for `plugins.createWebEmbed`. */
 export function buildCreateWebEmbedParams(input: CreateWebEmbedInput): Record<string, unknown> {
   const remoteUrl = input.remoteUrl?.trim();
   const lanSsids = cleanStringArray(input.lanSsids);
@@ -174,6 +227,7 @@ export function buildCreateWebEmbedParams(input: CreateWebEmbedInput): Record<st
   };
 }
 
+/** Builds normalized JSON-RPC parameters for `plugins.setEmbedConfig`. */
 export function buildSetEmbedConfigParams(
   pluginId: string,
   input: PluginEmbedConfigInput,
@@ -207,11 +261,13 @@ export function buildSetEmbedConfigParams(
   };
 }
 
+/** Builds the shell-quoted `sideveil-ctl rpc plugins.createWebEmbed` CLI command. */
 export function buildCreateWebEmbedCommand(input: CreateWebEmbedInput): string {
   const payload = JSON.stringify(buildCreateWebEmbedParams(input));
   return `${shellQuote(CTL_BIN)} rpc ${SIDEVEIL_METHODS.PLUGINS_CREATE_WEB_EMBED} ${shellQuote(payload)}`;
 }
 
+/** Builds the shell-quoted `sideveil-ctl rpc plugins.setEmbedConfig` CLI command. */
 export function buildSetEmbedConfigCommand(
   pluginId: string,
   input: PluginEmbedConfigInput,
@@ -220,6 +276,7 @@ export function buildSetEmbedConfigCommand(
   return `${shellQuote(CTL_BIN)} rpc ${SIDEVEIL_METHODS.PLUGINS_SET_EMBED_CONFIG} ${shellQuote(payload)}`;
 }
 
+/** Builds the shell-quoted `sideveil-ctl plugins uninstall` CLI command. */
 export function buildUninstallPluginCommand(pluginId: string): string {
   return `${shellQuote(CTL_BIN)} plugins uninstall ${shellQuote(pluginId)}`;
 }

@@ -1,34 +1,17 @@
 import type { ExecResult } from '@pochita/bridge';
-import type { PluginDescriptor, PluginsSnapshotPayload } from '@pochita/sideveil-sdk';
 import { SIDEVEIL_METHODS } from '../shared/types.ts';
+import {
+  createEmbedPlugin,
+  type MockPluginHandlerCtx,
+  type MockPluginState,
+  okJson,
+  rpcOk,
+  uninstallMockPlugin,
+  updateEmbedConfig,
+} from './mockPluginEmbedHandlers.ts';
 import { buildMockAuditReport, INITIAL_MOCK_PLUGINS } from './mockPluginFixtures.ts';
 
-export interface MockPluginState {
-  activePluginId: string;
-  plugins: PluginDescriptor[];
-}
-
-export interface MockPluginHandlerCtx {
-  state: MockPluginState;
-  getSnapshot: () => PluginsSnapshotPayload;
-  appendLog: (msg: string) => void;
-}
-
-function okJson(payload: unknown): ExecResult {
-  return { errno: 0, stdout: JSON.stringify(payload), stderr: '' };
-}
-
-function rpcOk(result: unknown): ExecResult {
-  return okJson({ jsonrpc: '2.0', id: 'ctl', result });
-}
-
-function rpcErr(message: string): ExecResult {
-  return {
-    errno: 1,
-    stdout: JSON.stringify({ jsonrpc: '2.0', id: 'ctl', error: { code: -32602, message } }),
-    stderr: message,
-  };
-}
+export type { MockPluginHandlerCtx, MockPluginState };
 
 function parseRawRpcCall(cmd: string): { method: string; params: Record<string, unknown> } | null {
   const match = cmd.match(/sideveil-ctl['"]?\s+rpc\s+['"]?([a-zA-Z0-9_.]+)['"]?\s+([\s\S]+)$/);
@@ -49,145 +32,10 @@ function parseRawRpcCall(cmd: string): { method: string; params: Record<string, 
   }
 }
 
-function extractOrigin(url: string): string | null {
-  try {
-    return new URL(url).origin;
-  } catch {
-    return null;
-  }
-}
-
-function pickBool<T extends boolean | undefined>(val: unknown, fallback: T): boolean | T {
-  return typeof val === 'boolean' ? val : fallback;
-}
-
-function pickInt<T extends number | undefined>(val: unknown, fallback: T): number | T {
-  return typeof val === 'number' && Number.isFinite(val) ? Math.trunc(val) : fallback;
-}
-
-function pickStr(val: unknown): string | undefined {
-  return typeof val === 'string' && val.trim() ? val.trim() : undefined;
-}
-
-function pickStrList(val: unknown): string[] | undefined {
-  return Array.isArray(val)
-    ? val
-        .map(String)
-        .map((s) => s.trim())
-        .filter(Boolean)
-    : undefined;
-}
-
-function createEmbedPlugin(ctx: MockPluginHandlerCtx, params: Record<string, unknown>): ExecResult {
-  const id = pickStr(params.id) ?? '';
-  const name = pickStr(params.name) ?? '';
-  const url = pickStr(params.url) ?? '';
-  if (!id || !name || !url) return rpcErr('id、name 与 url 不能为空');
-  if (ctx.state.plugins.some((p) => p.id === id)) return rpcErr(`插件 ${id} 已存在`);
-
-  const origin = extractOrigin(url);
-  if (!origin) return rpcErr(`无效的 URL: ${url}`);
-  const remoteUrl = pickStr(params.remoteUrl);
-  const remoteOrigin = remoteUrl ? extractOrigin(remoteUrl) : null;
-  if (remoteUrl && !remoteOrigin) return rpcErr(`无效的备选 URL: ${remoteUrl}`);
-  const defaultOrigins =
-    remoteOrigin && remoteOrigin !== origin ? [origin, remoteOrigin] : [origin];
-  const allowedOrigins = pickStrList(params.allowedOrigins) ?? defaultOrigins;
-  const lanSsids = pickStrList(params.lanSsids);
-  const allowCleartext = Boolean(params.allowCleartext);
-
-  const nextPlugin: PluginDescriptor = {
-    id,
-    name,
-    version: '1.0.0',
-    embed: {
-      url,
-      remoteUrl,
-      lanSsids: lanSsids && lanSsids.length > 0 ? lanSsids : undefined,
-      allowedOrigins: allowedOrigins.length > 0 ? allowedOrigins : defaultOrigins,
-      allowCleartext,
-      wideViewport: pickBool(params.wideViewport, true),
-      allowZoom: pickBool(params.allowZoom, false),
-      webHistoryBack: pickBool(params.webHistoryBack, true),
-      textZoom: pickInt(params.textZoom, undefined),
-      showToolbar: pickBool(params.showToolbar, undefined),
-      keepAliveGraceSec: pickInt(params.keepAliveGraceSec, undefined),
-    },
-    builtin: false,
-    enabled: true,
-    priority: pickInt(params.priority, 0),
-    packages: [],
-    global: pickBool(params.global, true),
-    hasScopeOverride: false,
-    backend: 'none',
-    backendState: 'none',
-    capabilities: allowCleartext ? ['network-lan', 'network-context'] : ['network-context'],
-    surface: {
-      backdrop: 'opaque',
-      keepAlive: Boolean(params.keepAlive),
-      widthDp: pickInt(params.widthDp, 380),
-      heightPercent: pickInt(params.heightPercent, 78),
-    },
-  };
-  ctx.state.plugins = [...ctx.state.plugins, nextPlugin];
-  ctx.appendLog(`Created web-embed plugin ${id} (${url})`);
-  return rpcOk({ ok: true, pluginId: id, snapshot: ctx.getSnapshot() });
-}
-
-function updateEmbedConfig(ctx: MockPluginHandlerCtx, params: Record<string, unknown>): ExecResult {
-  const pluginId = pickStr(params.pluginId) ?? '';
-  const target = ctx.state.plugins.find((p) => p.id === pluginId);
-  if (!target?.embed) return rpcErr(`未找到网页嵌入插件: ${pluginId}`);
-  const clear = Boolean(params.clear);
-  const defaults = INITIAL_MOCK_PLUGINS.find((p) => p.id === pluginId);
-
-  ctx.state.plugins = ctx.state.plugins.map((p) => {
-    if (p.id !== pluginId || !p.embed) return p;
-    if (clear && defaults?.embed) {
-      return { ...p, embed: { ...defaults.embed }, surface: { ...p.surface, ...defaults.surface } };
-    }
-    const nextRemoteUrl =
-      typeof params.remoteUrl === 'string' ? pickStr(params.remoteUrl) : p.embed.remoteUrl;
-    return {
-      ...p,
-      embed: {
-        ...p.embed,
-        url: pickStr(params.embedUrl) ?? p.embed.url,
-        remoteUrl: nextRemoteUrl,
-        lanSsids: pickStrList(params.lanSsids) ?? p.embed.lanSsids,
-        allowedOrigins: pickStrList(params.allowedOrigins) ?? p.embed.allowedOrigins,
-        allowCleartext: pickBool(params.allowCleartext, p.embed.allowCleartext),
-        wideViewport: pickBool(params.wideViewport, p.embed.wideViewport),
-        allowZoom: pickBool(params.allowZoom, p.embed.allowZoom),
-        webHistoryBack: pickBool(params.webHistoryBack, p.embed.webHistoryBack),
-        textZoom: pickInt(params.textZoom, p.embed.textZoom),
-        showToolbar: pickBool(params.showToolbar, p.embed.showToolbar),
-        keepAliveGraceSec: pickInt(params.keepAliveGraceSec, p.embed.keepAliveGraceSec),
-      },
-      surface: {
-        ...p.surface,
-        keepAlive: pickBool(params.keepAlive, p.surface.keepAlive),
-        widthDp: pickInt(params.widthDp, p.surface.widthDp),
-        heightPercent: pickInt(params.heightPercent, p.surface.heightPercent),
-      },
-    };
-  });
-  ctx.appendLog(`Updated embed config for ${pluginId}`);
-  return rpcOk(ctx.getSnapshot());
-}
-
-function uninstallMockPlugin(ctx: MockPluginHandlerCtx, pluginId: string): ExecResult {
-  const target = ctx.state.plugins.find((p) => p.id === pluginId);
-  if (!target) return rpcErr(`未找到插件: ${pluginId}`);
-  if (target.builtin) return rpcErr('内置插件不允许卸载');
-  ctx.state.plugins = ctx.state.plugins.filter((p) => p.id !== pluginId);
-  if (ctx.state.activePluginId === pluginId) {
-    ctx.state.activePluginId = 'sideveil.diagnostic';
-  }
-  ctx.appendLog(`Uninstalled plugin ${pluginId}`);
-  return rpcOk({ ok: true, pluginId, snapshot: ctx.getSnapshot() });
-}
-
+/**
+ * Simulates `sideveil-ctl plugins ...` and raw `sideveil-ctl rpc plugins.*` commands
+ * in browser preview and unit test environments without a live daemon socket.
+ */
 export function handleMockPluginExec(
   rawCmd: string,
   normalized: string,

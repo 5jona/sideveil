@@ -22,13 +22,8 @@ DEX_DST="${SCRIPT_DIR}/bin/sideveil-sensor.dex"
 OUTPUT_DIR="${SCRIPT_DIR}/out"
 PACKAGE_NAME="sideveil.zip"
 
-run_in_env() {
-    if command -v mise >/dev/null 2>&1; then
-        mise exec -- "$@"
-    else
-        "$@"
-    fi
-}
+# shellcheck source=scripts/lib/module-env.sh
+source "${SCRIPT_DIR}/scripts/lib/module-env.sh"
 
 echo "[*] Checking & cross-compiling Rust hub + HUD JNI (sideveild + sideveil-ctl + libsideveil_hud.so for aarch64-linux-android)..."
 (
@@ -83,7 +78,7 @@ chmod 0644 "${APK_DST}" "${DEX_DST}"
 echo "[*] Packaging KernelSU archive -> ${OUTPUT_DIR}/${PACKAGE_NAME}..."
 rm -f "${OUTPUT_DIR}/${PACKAGE_NAME}"
 
-python3 - <<EOF
+BUNDLED_PLUGINS_SPEC="$(printf '%s\n' "${BUNDLED_PLUGINS[@]}")" python3 - <<EOF
 import os
 import stat
 import zipfile
@@ -104,10 +99,13 @@ explicit_files = [
     ("bin/sideveil-sensor.dex", 0o644),
 ]
 
-bundled_plugins = [
-    ("examples/vello-vector-scope", "plugins/example.vello-scope"),
-    ("examples/native-perf-hud", "plugins/example.native-perf-hud"),
-]
+bundled_plugins = []
+for raw_entry in os.environ.get("BUNDLED_PLUGINS_SPEC", "").splitlines():
+    entry = raw_entry.strip()
+    if not entry:
+        continue
+    src_rel, plugin_id = entry.split(":", 1)
+    bundled_plugins.append((src_rel, f"plugins/{plugin_id}"))
 
 def write_file(zf, src_path, arcname, mode):
     with open(src_path, "rb") as f:

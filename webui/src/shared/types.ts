@@ -63,6 +63,7 @@ export {
   SIDEVEIL_THEMES,
 };
 
+/** Edge gesture hotzone geometry, indicator appearance, and fullscreen trigger settings. */
 export interface EdgeConfig {
   side: EdgeSide;
   topPercent: number;

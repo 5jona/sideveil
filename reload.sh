@@ -36,6 +36,8 @@ TMP_STAGE_TAR=""
 TRANSPORT_LABEL=""
 SSH_OPTS=()
 
+# shellcheck source=scripts/lib/module-env.sh
+source "${SCRIPT_DIR}/scripts/lib/module-env.sh"
 # shellcheck source=scripts/reload-helpers.sh
 source "${SCRIPT_DIR}/scripts/reload-helpers.sh"
 
@@ -172,11 +174,15 @@ case "$DEPLOY_MODE" in
         cp "${SCRIPT_DIR}/system/etc/permissions/privapp-permissions-pochita-sideveil.xml" "${TMP_STAGE}/privapp.xml"
         cp "${SCRIPT_DIR}/system/etc/sysconfig/sideveil-allowlist.xml" "${TMP_STAGE}/sysconfig.xml"
         cp -r "${SCRIPT_DIR}/webroot" "${TMP_STAGE}/webroot"
-        mkdir -p "${TMP_STAGE}/plugins/example.vello-scope" "${TMP_STAGE}/plugins/example.native-perf-hud"
-        cp "${SCRIPT_DIR}/examples/vello-vector-scope/manifest.json" "${TMP_STAGE}/plugins/example.vello-scope/"
-        cp -r "${SCRIPT_DIR}/examples/vello-vector-scope/web" "${TMP_STAGE}/plugins/example.vello-scope/web"
-        cp "${SCRIPT_DIR}/examples/native-perf-hud/manifest.json" "${TMP_STAGE}/plugins/example.native-perf-hud/"
-        cp -r "${SCRIPT_DIR}/examples/native-perf-hud/web" "${TMP_STAGE}/plugins/example.native-perf-hud/web"
+        for entry in "${BUNDLED_PLUGINS[@]}"; do
+            src_rel="${entry%%:*}"
+            plugin_id="${entry#*:}"
+            mkdir -p "${TMP_STAGE}/plugins/${plugin_id}"
+            cp "${SCRIPT_DIR}/${src_rel}/manifest.json" "${TMP_STAGE}/plugins/${plugin_id}/"
+            if [ -d "${SCRIPT_DIR}/${src_rel}/web" ]; then
+                cp -r "${SCRIPT_DIR}/${src_rel}/web" "${TMP_STAGE}/plugins/${plugin_id}/web"
+            fi
+        done
 
         stop_and_prepare_script | run_remote_sh
         push_stage_dir "${TMP_STAGE}"

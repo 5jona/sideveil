@@ -12,6 +12,7 @@ import {
   type CreateWebEmbedInput,
   extractRpcErrorMessage,
   extractSnapshotPayload,
+  hasRpcErrorPayload,
   type PluginEmbedConfigInput,
   type PluginScopeOverrideInput,
   parsePluginsSnapshot,
@@ -31,6 +32,10 @@ export {
 
 type PushToast = (message: string, variant?: 'info' | 'success' | 'warning' | 'danger') => void;
 
+/**
+ * Manages plugin registry polling, enable/priority/scope/dev-mode overrides,
+ * web-embed lifecycle mutations, and security audit report refreshes.
+ */
 export function usePluginsControl(bridge: BridgeClient, pushToast: PushToast) {
   const [pluginsSnapshot, setPluginsSnapshot] = useState<PluginsSnapshotPayload | null>(null);
   const [auditReport, setAuditReport] = useState<PluginAuditReport | null>(null);
@@ -203,7 +208,7 @@ export function usePluginsControl(bridge: BridgeClient, pushToast: PushToast) {
           return true;
         }
         const res = await bridge.exec(execCmd);
-        if (res.errno === 0 && !res.stdout.includes('"error"')) {
+        if (res.errno === 0 && !hasRpcErrorPayload(res.stdout)) {
           pushToast(successMsg, 'success');
           await applySnapshotOrRefresh(res.stdout);
           return true;
