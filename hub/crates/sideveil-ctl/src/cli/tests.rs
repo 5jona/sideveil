@@ -329,3 +329,20 @@ fn parses_network_and_web_embed_plugin_commands() {
         }))
     );
 }
+
+#[test]
+fn parses_open_subcommand_with_optional_plugin_id() {
+    let bare = parse_args(["open".to_owned()]).expect("open without plugin");
+    let (method, params, output_mode) = unwrap_rpc(bare.action);
+    assert_eq!(method, methods::PANEL_OPEN);
+    assert_eq!(params, None);
+    assert_eq!(output_mode, OutputMode::FullEnvelope);
+
+    let with_plugin =
+        parse_args(["open".to_owned(), "lan.homeassistant".to_owned()]).expect("open with plugin");
+    let (method, params, _) = unwrap_rpc(with_plugin.action);
+    assert_eq!(method, methods::PANEL_OPEN);
+    assert_eq!(params, Some(json!({ "pluginId": "lan.homeassistant" })));
+
+    assert!(parse_args(["open".to_owned(), "a".to_owned(), "b".to_owned()]).is_err());
+}

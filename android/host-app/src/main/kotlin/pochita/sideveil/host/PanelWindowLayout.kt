@@ -139,6 +139,7 @@ internal class PanelWindowLayout(
         lp.height = 1
         lp.flags = BASE_INVISIBLE_FLAGS
         lp.dimAmount = 0f
+        OverlayWindowFlags.applyTouchSafeAlpha(lp)
         OverlayWindowFlags.clearPreferredRefreshRate(lp)
         OverlayWindowFlags.disableMoveAnimation(lp)
         window.attributes = lp
@@ -243,6 +244,7 @@ internal class PanelWindowLayout(
         lp.y = frame.windowY + safeCenterOffsetY
         lp.flags = computeInteractiveFlags(panelConfig, focusable, allowOffscreen)
         lp.dimAmount = panelConfig.scrimAlpha.coerceIn(0f, 0.75f)
+        OverlayWindowFlags.applyTouchSafeAlpha(lp)
         OverlayWindowFlags.applyPreferredMaxRefreshRate(context, lp, window.decorView.display)
         OverlayWindowFlags.disableMoveAnimation(lp)
         window.attributes = lp
@@ -261,14 +263,16 @@ internal class PanelWindowLayout(
         val xPx = frame.windowX
         val yPx = frame.windowY + safeCenterOffsetY
         val nextFlags = computeInteractiveFlags(panelConfig, focusable, allowOffscreen)
+        val nextAlpha = OverlayWindowFlags.resolveWindowAlpha(nextFlags)
         val geometryChanged =
             lp.x != xPx || lp.y != yPx || lp.width != cachedWidthPx || lp.height != cachedHeightPx
-        if (geometryChanged || lp.flags != nextFlags) {
+        if (geometryChanged || lp.flags != nextFlags || lp.alpha != nextAlpha) {
             lp.x = xPx
             lp.y = yPx
             lp.width = cachedWidthPx
             lp.height = cachedHeightPx
             lp.flags = nextFlags
+            lp.alpha = nextAlpha
             lp.dimAmount = panelConfig.scrimAlpha.coerceIn(0f, 0.75f)
             window.attributes = lp
         }
@@ -282,8 +286,10 @@ internal class PanelWindowLayout(
     ) {
         val lp = window.attributes
         val nextFlags = computeInteractiveFlags(panelConfig, focusable, allowOffscreen)
-        if (lp.flags != nextFlags) {
+        val nextAlpha = OverlayWindowFlags.resolveWindowAlpha(nextFlags)
+        if (lp.flags != nextFlags || lp.alpha != nextAlpha) {
             lp.flags = nextFlags
+            lp.alpha = nextAlpha
             window.attributes = lp
         }
     }
@@ -299,6 +305,7 @@ internal class PanelWindowLayout(
         lp.y = 0
         lp.dimAmount = 0f
         lp.flags = BASE_INVISIBLE_FLAGS
+        OverlayWindowFlags.applyTouchSafeAlpha(lp)
         OverlayWindowFlags.clearPreferredRefreshRate(lp)
         OverlayWindowFlags.disableMoveAnimation(lp)
         window.attributes = lp
@@ -328,7 +335,12 @@ internal class PanelWindowLayout(
     fun openMarginPx(
         edgeSide: EdgeSide,
         railInsetDp: Int,
-    ): Int = dp((12 + railInsetDp).toFloat()) + PanelInsetsCoordinator.edgeCutoutInsetPx(safeBounds, edgeSide)
+    ): Int {
+        val horizontal = PanelInsetsCoordinator.resolveHorizontalMetrics(safeBounds.screenWidthPx, currentDensity)
+        val effectiveRailInsetDp = if (railInsetDp > 0) horizontal.railInsetDp else 0
+        return dp((horizontal.edgeMarginDp + effectiveRailInsetDp).toFloat()) +
+            PanelInsetsCoordinator.edgeCutoutInsetPx(safeBounds, edgeSide)
+    }
 
     fun hiddenOffsetX(): Int = -(cachedWidthPx + dp(24f))
 

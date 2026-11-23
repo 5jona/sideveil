@@ -117,11 +117,12 @@ function NativePerfHudWorkbench() {
       <AppShell
         variant="drawer"
         title="性能监控"
-        className={
+        className={cn(
+          'sideveil-drawer-panel',
           isNativeHost
             ? 'h-full min-h-0 flex-1'
-            : 'min-h-[calc(100dvh-1rem)] flex-1 rounded-[var(--radius-panel)]'
-        }
+            : 'min-h-[calc(100dvh-1rem)] flex-1 rounded-[var(--radius-panel)]',
+        )}
         headerLeading={
           <div className="flex size-7 items-center justify-center rounded-[var(--radius-control)] bg-[var(--accent-soft)] text-[var(--accent)]">
             <Gauge className="size-3.5" />
@@ -144,7 +145,7 @@ function NativePerfHudWorkbench() {
         }
       >
         <div className="flex flex-col gap-2.5">
-          <div className="grid grid-cols-2 gap-2">
+          <div className="sideveil-compact-metrics grid grid-cols-2 gap-2">
             <MetricTile
               label="CPU"
               value={snapshot ? snapshot.cpuPercent.toFixed(1) : '--'}
@@ -169,7 +170,7 @@ function NativePerfHudWorkbench() {
             <SettingRow
               variant="plain"
               title="HUD 悬浮窗"
-              description="零 WebView 原生矢量浮窗（支持拖拽）"
+              description="零 WebView 原生浮窗，支持拖拽"
               control={
                 <Switch
                   checked={hudEnabled}
@@ -182,7 +183,7 @@ function NativePerfHudWorkbench() {
             <SettingRow
               variant="plain"
               title="点击穿透"
-              description="开启后全部触摸事件直达底层应用"
+              description="开启后触摸事件直达底层应用"
               control={
                 <Switch
                   checked={clickThrough}
@@ -198,7 +199,7 @@ function NativePerfHudWorkbench() {
               <span className="text-xs font-medium text-[var(--text-primary)]">原生渲染管线</span>
               <Badge variant={hudEnabled ? 'success' : 'neutral'}>{hudStatusText}</Badge>
             </div>
-            <p className="mt-1.5 text-[11px] leading-relaxed text-[var(--text-secondary)]">
+            <p className="mt-1.5 text-pretty text-[11px] leading-relaxed text-[var(--text-secondary)]">
               Rust 后端直连 hub.sock 采样 CPU / RAM / 温度，通过 libsideveil_hud.so
               在原生跨窗模糊之上渲染矢量曲线与等宽数字，并自动跟随系统明暗主题配色。
             </p>

@@ -137,6 +137,7 @@ internal class PinnedWindowLayout(
         lp.x = x
         lp.y = y
         lp.flags = computeFlags(clickThrough = clickThrough, imeFocused = imeFocused)
+        OverlayWindowFlags.applyTouchSafeAlpha(lp)
         OverlayWindowFlags.applyPreferredMaxRefreshRate(context, lp, window.decorView.display)
         OverlayWindowFlags.disableMoveAnimation(lp)
         window.attributes = lp
@@ -156,6 +157,7 @@ internal class PinnedWindowLayout(
         lp.x = 0
         lp.y = 0
         lp.flags = INVISIBLE_FLAGS
+        OverlayWindowFlags.applyTouchSafeAlpha(lp)
         OverlayWindowFlags.clearPreferredRefreshRate(lp)
         OverlayWindowFlags.disableMoveAnimation(lp)
         window.attributes = lp

@@ -22,8 +22,10 @@ val moduleVersionName: String =
         ?.trim()
         ?.removePrefix("v")
         ?.ifEmpty { "0.1.0" } ?: "0.1.0"
+val hostApkMinVersionCode = 200
 val moduleVersionCode: Int =
-    moduleProps.getProperty("versionCode")?.trim()?.toIntOrNull() ?: 100
+    (moduleProps.getProperty("versionCode")?.trim()?.toIntOrNull() ?: hostApkMinVersionCode)
+        .coerceAtLeast(hostApkMinVersionCode)
 
 val keystoreProps =
     Properties().apply {

@@ -107,6 +107,7 @@ internal class NativeHudWindow(
         lp.width = 1
         lp.height = 1
         lp.flags = INVISIBLE_FLAGS
+        OverlayWindowFlags.applyTouchSafeAlpha(lp)
         OverlayWindowFlags.disableMoveAnimation(lp)
         window.attributes = lp
     }
@@ -214,6 +215,7 @@ internal class NativeHudWindow(
         val heightPx = dp(currentHeader.heightDp.coerceIn(28f, 320f))
         val lp = window.attributes
         val nextFlags = if (currentHeader.clickThrough) CLICK_THROUGH_FLAGS else INTERACTIVE_FLAGS
+        val nextAlpha = OverlayWindowFlags.resolveWindowAlpha(nextFlags)
         val maxX = (safe.screenWidthPx - widthPx).coerceAtLeast(0)
         val maxY = (safe.screenHeightPx - safe.safeBottomPx - heightPx).coerceAtLeast(safe.safeTopPx)
         val targetX =
@@ -230,7 +232,7 @@ internal class NativeHudWindow(
             }
 
         val geometryChanged = lp.width != widthPx || lp.height != heightPx || lp.x != targetX || lp.y != targetY
-        val flagsOrRateChanged = lp.flags != nextFlags || lp.preferredRefreshRate <= 0f
+        val flagsOrRateChanged = lp.flags != nextFlags || lp.alpha != nextAlpha || lp.preferredRefreshRate <= 0f
         if (geometryChanged || flagsOrRateChanged) {
             lp.gravity = Gravity.TOP or Gravity.LEFT
             lp.width = widthPx
@@ -238,6 +240,7 @@ internal class NativeHudWindow(
             lp.x = targetX
             lp.y = targetY
             lp.flags = nextFlags
+            lp.alpha = nextAlpha
             OverlayWindowFlags.applyPreferredMaxRefreshRate(context, lp, window.decorView.display)
             OverlayWindowFlags.disableMoveAnimation(lp)
             window.attributes = lp
@@ -259,6 +262,7 @@ internal class NativeHudWindow(
         lp.x = 0
         lp.y = 0
         lp.flags = INVISIBLE_FLAGS
+        OverlayWindowFlags.applyTouchSafeAlpha(lp)
         OverlayWindowFlags.clearPreferredRefreshRate(lp)
         window.attributes = lp
     }

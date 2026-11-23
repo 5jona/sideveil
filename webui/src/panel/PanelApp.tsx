@@ -76,11 +76,12 @@ function PanelWorkbench({
       <AppShell
         variant="drawer"
         title="SideVeil"
-        className={
+        className={cn(
+          'sideveil-drawer-panel',
           isNativeHost
             ? 'h-full min-h-0 flex-1'
-            : 'min-h-[calc(100dvh-1rem)] flex-1 rounded-[var(--radius-panel)]'
-        }
+            : 'min-h-[calc(100dvh-1rem)] flex-1 rounded-[var(--radius-panel)]',
+        )}
         headerLeading={
           <div className="flex size-7 items-center justify-center rounded-[var(--radius-control)] bg-[var(--accent-soft)] text-[var(--accent)]">
             <Sparkles className="size-3.5" />
@@ -108,7 +109,7 @@ function PanelWorkbench({
         }
       >
         <div className="space-y-2.5">
-          <div className="grid grid-cols-2 gap-2">
+          <div className="sideveil-compact-metrics grid grid-cols-2 gap-2">
             <MetricTile
               label="当前前台"
               value={shortPkg}

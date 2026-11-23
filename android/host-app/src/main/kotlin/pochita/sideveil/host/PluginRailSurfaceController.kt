@@ -38,6 +38,12 @@ internal class PluginRailSurfaceController(
         private set
     var lastDesiredHeightPx: Int = dp(120f)
         private set
+    var lastHorizontalMetrics: OverlayHorizontalMetrics =
+        PanelInsetsCoordinator.resolveHorizontalMetrics(
+            context.resources.displayMetrics.widthPixels,
+            densityProvider(),
+        )
+        private set
 
     private var panelConfig = PanelConfig()
     private var syncedThemeId = "coloros-glass"
@@ -57,6 +63,7 @@ internal class PluginRailSurfaceController(
                 width = 1
                 height = 1
                 flags = INVISIBLE_FLAGS
+                OverlayWindowFlags.applyTouchSafeAlpha(this)
                 OverlayWindowFlags.disableMoveAnimation(this)
             }
     }
@@ -80,6 +87,13 @@ internal class PluginRailSurfaceController(
         backdropDrawable.updateDensity(densityProvider())
     }
 
+    fun currentHorizontalMetrics(): OverlayHorizontalMetrics {
+        val safe = PanelInsetsCoordinator.resolveBounds(context, windowManager)
+        return PanelInsetsCoordinator.resolveHorizontalMetrics(safe.screenWidthPx, densityProvider()).also {
+            lastHorizontalMetrics = it
+        }
+    }
+
     fun showAnimated(
         window: Window,
         railContainer: View,
@@ -87,22 +101,25 @@ internal class PluginRailSurfaceController(
         pluginCount: Int,
     ) {
         val safe = PanelInsetsCoordinator.resolveBounds(context, windowManager)
+        val metrics = PanelInsetsCoordinator.resolveHorizontalMetrics(safe.screenWidthPx, densityProvider())
+        lastHorizontalMetrics = metrics
         val maxHeight = (safe.screenHeightPx * 0.65f).toInt().coerceAtLeast(dp(120f))
-        val desiredHeight = (dp(12f) + pluginCount * dp(PluginRailWindow.SLOT_PITCH_DP.toFloat())).coerceAtMost(maxHeight)
+        val desiredHeight = (dp(12f) + pluginCount * dp(metrics.railSlotPitchDp.toFloat())).coerceAtMost(maxHeight)
         lastDesiredHeightPx = desiredHeight
 
-        val hiddenX = -dp((PluginRailWindow.RAIL_WIDTH_DP + 16).toFloat())
-        val openX = dp(EDGE_MARGIN_DP.toFloat()) + PanelInsetsCoordinator.edgeCutoutInsetPx(safe, edgeSide)
+        val hiddenX = -dp((metrics.railWidthDp + 16).toFloat())
+        val openX = dp(metrics.edgeMarginDp.toFloat()) + PanelInsetsCoordinator.edgeCutoutInsetPx(safe, edgeSide)
         val currentX = (hiddenX + (openX - hiddenX) * motionProgress).roundToInt()
 
         val lp = window.attributes
         val horiz = if (edgeSide == EdgeSide.LEFT) Gravity.LEFT else Gravity.RIGHT
         lp.gravity = Gravity.CENTER_VERTICAL or horiz
-        lp.width = dp(PluginRailWindow.RAIL_WIDTH_DP.toFloat())
+        lp.width = dp(metrics.railWidthDp.toFloat())
         lp.height = desiredHeight
         lp.x = currentX
         lp.y = 0
         lp.flags = if (motionProgress >= 0.45f) VISIBLE_FLAGS else ANIMATING_FLAGS
+        OverlayWindowFlags.applyTouchSafeAlpha(lp)
         OverlayWindowFlags.applyPreferredMaxRefreshRate(context, lp, window.decorView.display)
         OverlayWindowFlags.disableMoveAnimation(lp)
         window.attributes = lp
@@ -127,11 +144,12 @@ internal class PluginRailSurfaceController(
         lp.x = 0
         lp.y = 0
         lp.flags = INVISIBLE_FLAGS
+        OverlayWindowFlags.applyTouchSafeAlpha(lp)
         OverlayWindowFlags.clearPreferredRefreshRate(lp)
         window.attributes = lp
     }
 
-    fun cornerPx(): Float = dp(20f).toFloat()
+    fun cornerPx(): Float = dp(if (lastHorizontalMetrics.compact) 16f else 20f).toFloat()
 
     fun appliedBlurRadiusPx(): Int = lastAppliedBlurRadius.coerceAtLeast(0)
 
@@ -162,8 +180,6 @@ internal class PluginRailSurfaceController(
     private fun dp(value: Float): Int = OverlayWindowFlags.dp(densityProvider(), value)
 
     companion object {
-        private const val EDGE_MARGIN_DP = 12
-
         private const val INVISIBLE_FLAGS =
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or

@@ -23,15 +23,66 @@ data class PanelSafeBounds(
 )
 
 /**
+ * Responsive horizontal metrics shared between the drawer panel and adjacent plugin rail.
+ * Compact portrait phones (`screenWidthDp < 400dp`) tighten the rail (`40dp`), gap (`4dp`),
+ * and outer margin (`6dp`) to maximize usable drawer width, while wider viewports preserve
+ * the spacious defaults (`50dp` rail, `6dp` gap, `12dp` margin).
+ */
+data class OverlayHorizontalMetrics(
+    val compact: Boolean,
+    val edgeMarginDp: Int,
+    val railWidthDp: Int,
+    val railGapDp: Int,
+    val railPillSizeDp: Int,
+    val railIconSizeDp: Int,
+    val railSlotPitchDp: Int,
+) {
+    val railInsetDp: Int
+        get() = railWidthDp + railGapDp
+
+    val outerHorizontalMarginTotalDp: Int
+        get() = edgeMarginDp * 2
+}
+
+/**
  * Coordinates Android 16+ `WindowInsets` (status/navigation bars, display cutouts, IME keyboard)
  * and tablet-landscape sizing rules for [PanelWindowLayout].
  */
 internal object PanelInsetsCoordinator {
+    private const val COMPACT_PORTRAIT_MAX_WIDTH_DP = 400f
     private const val TABLET_LANDSCAPE_MIN_WIDTH_DP = 720f
     private const val TABLET_MAX_WIDTH_FRACTION = 0.52f
     private const val VERTICAL_MARGIN_DP = 12f
     private const val MIN_PANEL_WIDTH_DP = 240f
     private const val MIN_PANEL_HEIGHT_DP = 240f
+
+    fun resolveHorizontalMetrics(
+        screenWidthPx: Int,
+        density: Float,
+    ): OverlayHorizontalMetrics {
+        val screenWidthDp = screenWidthPx / density.coerceAtLeast(1f)
+        return if (screenWidthDp < COMPACT_PORTRAIT_MAX_WIDTH_DP) {
+            OverlayHorizontalMetrics(
+                compact = true,
+                edgeMarginDp = 6,
+                railWidthDp = 40,
+                railGapDp = 4,
+                railPillSizeDp = 34,
+                railIconSizeDp = 20,
+                railSlotPitchDp = 42,
+            )
+        } else {
+            OverlayHorizontalMetrics(
+                compact = false,
+                edgeMarginDp = 12,
+                railWidthDp = PluginRailWindow.RAIL_WIDTH_DP,
+                railGapDp = PluginRailWindow.RAIL_GAP_DP,
+                railPillSizeDp = 40,
+                railIconSizeDp = 22,
+                railSlotPitchDp = PluginRailWindow.SLOT_PITCH_DP,
+            )
+        }
+    }
 
     fun resolveBounds(
         context: Context,
@@ -138,7 +189,10 @@ internal object PanelInsetsCoordinator {
         presentationMode: PluginPresentationMode = PluginPresentationMode.DRAWER,
     ): Pair<Int, Int> {
         val edgeCutout = if (edgeSide == EdgeSide.LEFT) safe.safeLeftPx else safe.safeRightPx
-        val reservedHorizontal = dp(density, (24 + railInsetDp).toFloat()) + edgeCutout
+        val horizontal = resolveHorizontalMetrics(safe.screenWidthPx, density)
+        val effectiveRailInsetDp = if (railInsetDp > 0) horizontal.railInsetDp else 0
+        val reservedHorizontal =
+            dp(density, (horizontal.outerHorizontalMarginTotalDp + effectiveRailInsetDp).toFloat()) + edgeCutout
         val screenLimitW = (safe.screenWidthPx - reservedHorizontal).coerceAtLeast(dp(density, MIN_PANEL_WIDTH_DP))
         val isWide = presentationMode == PluginPresentationMode.WIDE
         val tabletFraction = if (isWide) WIDE_TABLET_MAX_WIDTH_FRACTION else TABLET_MAX_WIDTH_FRACTION

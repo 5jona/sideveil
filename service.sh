@@ -15,10 +15,35 @@ ROOT_RUN_DIR="/data/adb/sideveil/run"
 LIVE_CONFIG="${STATE_DIR}/config.json"
 MODULE_CONFIG="${MODDIR}/config.json"
 HUB_BIN="${MODDIR}/bin/sideveild"
+HOST_PKG="pochita.sideveil.host"
+MODULE_HOST_APK="${MODDIR}/system/priv-app/SideVeilHost/SideVeilHost.apk"
 HUB_PID=""
 
 log_info() {
     log -t "$LOG_TAG" -p i "$1"
+}
+
+sync_host_apk_if_overridden() {
+    [ -f "$MODULE_HOST_APK" ] || return 0
+    INSTALLED_PATH=$(pm path "$HOST_PKG" 2>/dev/null | head -n 1)
+    INSTALLED_PATH="${INSTALLED_PATH#package:}"
+    case "$INSTALLED_PATH" in
+        /data/app/*) ;;
+        *) return 0 ;;
+    esac
+    [ -f "$INSTALLED_PATH" ] || return 0
+    MOD_SHA=$(sha256sum "$MODULE_HOST_APK" 2>/dev/null || true)
+    MOD_SHA="${MOD_SHA%% *}"
+    INS_SHA=$(sha256sum "$INSTALLED_PATH" 2>/dev/null || true)
+    INS_SHA="${INS_SHA%% *}"
+    if [ -n "$MOD_SHA" ] && [ -n "$INS_SHA" ] && [ "$MOD_SHA" != "$INS_SHA" ]; then
+        log_info "Detected stale /data/app override for ${HOST_PKG}; syncing module APK..."
+        if pm install -r -d "$MODULE_HOST_APK" >/dev/null 2>&1; then
+            log_info "Synchronized ${HOST_PKG} from ${MODULE_HOST_APK}."
+        else
+            log_info "Warning: failed to sync ${HOST_PKG} from ${MODULE_HOST_APK}."
+        fi
+    fi
 }
 
 terminate_pid_gracefully() {
@@ -110,6 +135,7 @@ if [ ! -x "$HUB_BIN" ]; then
     exit 1
 fi
 
+sync_host_apk_if_overridden
 stop_existing_processes
 
 while true; do

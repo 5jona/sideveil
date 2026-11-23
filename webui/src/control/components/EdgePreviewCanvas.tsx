@@ -1,32 +1,51 @@
 import { colorWithAlpha, readThemeToken, useTheme } from '@pochita/ui';
 import { useEffect, useRef } from 'react';
 import type { SideVeilConfig } from '../../shared/types.ts';
+import { computePreviewViewportMetrics } from './previewLayout.ts';
 
 export interface EdgePreviewCanvasProps {
   config: SideVeilConfig;
   previewOpen?: boolean;
+  screenWidthPx?: number;
+  screenHeightPx?: number;
+  density?: number;
 }
 
 /**
- * Real-time tablet viewport diagram illustrating the configured edge hotzone,
+ * Real-time device viewport diagram illustrating the configured edge hotzone,
  * indicator capsule, and target expanded panel bounding rectangle.
  */
-export function EdgePreviewCanvas({ config, previewOpen = true }: EdgePreviewCanvasProps) {
+export function EdgePreviewCanvas({
+  config,
+  previewOpen = true,
+  screenWidthPx,
+  screenHeightPx,
+  density,
+}: EdgePreviewCanvasProps) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const { resolvedScheme } = useTheme();
 
   useEffect(() => {
+    const container = containerRef.current;
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!container || !canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     const draw = () => {
       const dpr = window.devicePixelRatio || 1;
-      const cssWidth = canvas.clientWidth || 320;
-      const cssHeight = Math.round(cssWidth * 0.56);
+      const metrics = computePreviewViewportMetrics({
+        containerWidth: container.clientWidth || 320,
+        screenWidthPx,
+        screenHeightPx,
+        density,
+      });
+      const { cssWidth, cssHeight, frameX, frameY, frameW, frameH, scale, isPortrait } = metrics;
+
       canvas.width = Math.round(cssWidth * dpr);
       canvas.height = Math.round(cssHeight * dpr);
+      canvas.style.width = `${cssWidth}px`;
       canvas.style.height = `${cssHeight}px`;
 
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -52,14 +71,9 @@ export function EdgePreviewCanvas({ config, previewOpen = true }: EdgePreviewCan
         isDark ? '#a6b0c3' : '#4e5969',
       );
 
-      const pad = 10;
-      const w = cssWidth - pad * 2;
-      const h = cssHeight - pad * 2;
-      const scale = h / 912;
-
       ctx.save();
       ctx.beginPath();
-      ctx.roundRect(pad, pad, w, h, 14);
+      ctx.roundRect(frameX, frameY, frameW, frameH, 14);
       ctx.fillStyle = surface;
       ctx.fill();
       ctx.lineWidth = 1.25;
@@ -70,26 +84,26 @@ export function EdgePreviewCanvas({ config, previewOpen = true }: EdgePreviewCan
       ctx.strokeStyle = border;
       ctx.globalAlpha = 0.25;
       ctx.lineWidth = 0.75;
-      for (let gx = pad + 40; gx < pad + w; gx += 40) {
+      for (let gx = frameX + 40; gx < frameX + frameW; gx += 40) {
         ctx.beginPath();
-        ctx.moveTo(gx, pad);
-        ctx.lineTo(gx, pad + h);
+        ctx.moveTo(gx, frameY);
+        ctx.lineTo(gx, frameY + frameH);
         ctx.stroke();
       }
-      for (let gy = pad + 40; gy < pad + h; gy += 40) {
+      for (let gy = frameY + 40; gy < frameY + frameH; gy += 40) {
         ctx.beginPath();
-        ctx.moveTo(pad, gy);
-        ctx.lineTo(pad + w, gy);
+        ctx.moveTo(frameX, gy);
+        ctx.lineTo(frameX + frameW, gy);
         ctx.stroke();
       }
       ctx.globalAlpha = 1;
 
-      const hotzoneW = Math.max(8, config.edge.hotzoneWidthDp * scale * 1.6);
-      const hotzoneH = Math.min(h - 12, config.edge.heightDp * scale);
-      const maxTop = Math.max(0, h - hotzoneH);
-      const hotzoneY = pad + Math.min(maxTop, (config.edge.topPercent / 100) * h);
+      const hotzoneW = Math.max(8, config.edge.hotzoneWidthDp * scale * 1.45);
+      const hotzoneH = Math.min(frameH - 12, Math.max(24, config.edge.heightDp * scale));
+      const maxTop = Math.max(0, frameH - hotzoneH);
+      const hotzoneY = frameY + Math.min(maxTop, (config.edge.topPercent / 100) * frameH);
       const isLeft = config.edge.side === 'left';
-      const hotzoneX = isLeft ? pad : pad + w - hotzoneW;
+      const hotzoneX = isLeft ? frameX : frameX + frameW - hotzoneW;
 
       ctx.fillStyle = colorWithAlpha(accent, 0.22);
       ctx.fillRect(hotzoneX, hotzoneY, hotzoneW, hotzoneH);
@@ -102,7 +116,7 @@ export function EdgePreviewCanvas({ config, previewOpen = true }: EdgePreviewCan
         const pillH = Math.max(20, hotzoneH * 0.64);
         const pillY = hotzoneY + (hotzoneH - pillH) / 2;
         const offsetPx = Math.max(0, config.edge.edgeOffsetDp * scale);
-        const pillX = isLeft ? pad + offsetPx : pad + w - offsetPx - 4;
+        const pillX = isLeft ? frameX + offsetPx : frameX + frameW - offsetPx - 4;
         ctx.globalAlpha = config.edge.handleOpacity;
         ctx.beginPath();
         ctx.roundRect(pillX, pillY, 4, pillH, 2);
@@ -112,10 +126,12 @@ export function EdgePreviewCanvas({ config, previewOpen = true }: EdgePreviewCan
       }
 
       if (previewOpen) {
-        const panelW = Math.min(w * 0.48, Math.max(64, config.panel.widthDp * scale * 1.15));
-        const panelH = Math.min(h - 16, (config.panel.heightPercent / 100) * h);
-        const panelY = pad + (h - panelH) / 2;
-        const panelX = isLeft ? pad + 10 : pad + w - panelW - 10;
+        const maxPanelW = frameW * (isPortrait ? 0.7 : 0.48);
+        const panelW = Math.min(maxPanelW, Math.max(56, config.panel.widthDp * scale));
+        const panelH = Math.min(frameH - 16, (config.panel.heightPercent / 100) * frameH);
+        const panelY = frameY + (frameH - panelH) / 2;
+        const inset = Math.min(10, Math.max(6, Math.round(frameW * 0.03)));
+        const panelX = isLeft ? frameX + inset : frameX + frameW - panelW - inset;
         const corner = Math.max(6, Math.min(18, config.panel.cornerRadiusDp * scale));
 
         ctx.beginPath();
@@ -129,11 +145,18 @@ export function EdgePreviewCanvas({ config, previewOpen = true }: EdgePreviewCan
         ctx.fillStyle = textMuted;
         ctx.font = '500 10px sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText(
-          `${config.panel.widthDp}dp · ${config.panel.heightPercent}%`,
-          panelX + panelW / 2,
-          panelY + panelH / 2 + 3,
-        );
+        const centerX = panelX + panelW / 2;
+        const centerY = panelY + panelH / 2;
+        if (panelW < 88) {
+          ctx.fillText(`${config.panel.widthDp}dp`, centerX, centerY - 3);
+          ctx.fillText(`${config.panel.heightPercent}%`, centerX, centerY + 10);
+        } else {
+          ctx.fillText(
+            `${config.panel.widthDp}dp · ${config.panel.heightPercent}%`,
+            centerX,
+            centerY + 3,
+          );
+        }
       }
 
       ctx.restore();
@@ -146,23 +169,35 @@ export function EdgePreviewCanvas({ config, previewOpen = true }: EdgePreviewCan
       attributeFilter: ['data-theme', 'data-surface', 'class'],
     });
     const resizeObserver = new ResizeObserver(draw);
-    resizeObserver.observe(canvas);
+    resizeObserver.observe(container);
 
     return () => {
       observer.disconnect();
       resizeObserver.disconnect();
     };
-  }, [config, previewOpen, resolvedScheme]);
+  }, [config, density, previewOpen, resolvedScheme, screenHeightPx, screenWidthPx]);
+
+  const hasDims =
+    typeof screenWidthPx === 'number' &&
+    screenWidthPx > 0 &&
+    typeof screenHeightPx === 'number' &&
+    screenHeightPx > 0;
+  const orientationText = hasDims
+    ? `${screenWidthPx < screenHeightPx ? '竖屏' : '横屏'} ${screenWidthPx}×${screenHeightPx}`
+    : null;
 
   return (
     <div className="space-y-1.5">
-      <canvas
-        ref={canvasRef}
-        aria-label="边缘热区与侧边栏几何实时预览"
-        className="block w-full rounded-[var(--radius-control)]"
-      />
+      <div ref={containerRef} className="w-full overflow-hidden">
+        <canvas
+          ref={canvasRef}
+          aria-label="边缘热区与侧边栏几何实时预览"
+          className="block w-full rounded-[var(--radius-control)]"
+        />
+      </div>
       <p className="text-[11px] text-[var(--text-secondary)]">
-        虚线区域为点击全穿透的无感滑出热区，实线框为展开后的侧边栏面板区域。
+        虚线区域为点击全穿透的无感滑出热区，实线框为展开后的侧边栏面板区域
+        {orientationText ? `（当前屏幕：${orientationText}）` : ''}。
       </p>
     </div>
   );

@@ -256,3 +256,84 @@ async fn debug_rpcs_reject_external_plugins_and_toggle_cdp_state() {
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[tokio::test]
+async fn panel_open_switches_active_plugin_when_already_open() {
+    let (dir, state) = make_test_state("panel-open-switch");
+
+    // Create a second enabled web-embed plugin alongside built-in diagnostic.
+    let created = dispatch_rpc_request(
+        &state,
+        RpcRequest::new(
+            "p1",
+            methods::PLUGINS_CREATE_WEB_EMBED,
+            Some(json!({
+                "id": "lan.homeassistant",
+                "name": "Home Assistant",
+                "url": "https://ha.example.com"
+            })),
+        ),
+        RpcCaller::Ctl,
+    )
+    .await;
+    assert!(created.error.is_none());
+
+    // Simulate drawer already open on built-in diagnostic with a foreground app & host session.
+    {
+        let mut rt = state
+            .runtime
+            .write()
+            .unwrap_or_else(PoisonError::into_inner);
+        rt.foreground_package = "com.example.app".to_owned();
+        rt.panel_state = sideveil_protocol::config::PanelState::Open;
+    }
+    let _ = state.select_active_plugin(sideveil_protocol::plugin::BUILTIN_DIAG_PLUGIN_ID, None);
+    let (tx, mut rx) = outbound_queue::channel();
+    let _sid = state.register_host_session(tx);
+    let _ = rx.recv().await; // initial config.updated
+    let _ = rx.recv().await; // initial plugins.updated
+
+    let resp = dispatch_rpc_request(
+        &state,
+        RpcRequest::new(
+            "p2",
+            methods::PANEL_OPEN,
+            Some(json!({ "pluginId": "lan.homeassistant" })),
+        ),
+        RpcCaller::Ctl,
+    )
+    .await;
+    assert!(resp.error.is_none());
+    assert_eq!(
+        resp.result.as_ref().and_then(|v| v.get("activePluginId")),
+        Some(&json!("lan.homeassistant"))
+    );
+    assert_eq!(
+        state.plugins_snapshot().active_plugin_id.as_deref(),
+        Some("lan.homeassistant")
+    );
+
+    // Host must receive plugins.activeChanged followed by panel.command(open).
+    let ev1: serde_json::Value =
+        serde_json::from_str(&rx.recv().await.expect("activeChanged event")).expect("valid json");
+    assert_eq!(
+        ev1.get("event"),
+        Some(&json!(
+            sideveil_protocol::rpc::events::PLUGINS_ACTIVE_CHANGED
+        ))
+    );
+    assert_eq!(
+        ev1.pointer("/payload/pluginId"),
+        Some(&json!("lan.homeassistant"))
+    );
+
+    let ev2: serde_json::Value =
+        serde_json::from_str(&rx.recv().await.expect("panel.command event")).expect("valid json");
+    assert_eq!(
+        ev2.get("event"),
+        Some(&json!(sideveil_protocol::rpc::events::PANEL_COMMAND))
+    );
+    assert_eq!(ev2.pointer("/payload/command"), Some(&json!("open")));
+
+    let _ = fs::remove_dir_all(&dir);
+}

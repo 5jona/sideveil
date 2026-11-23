@@ -8,7 +8,7 @@ mod plugins_cmd;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use sideveil_protocol::paths;
 use sideveil_protocol::rpc::methods;
 
@@ -65,7 +65,7 @@ pub(crate) fn parse_args(
     let action = match cmd {
         "status" => rpc_action(methods::DAEMON_STATUS, None, OutputMode::UnwrapResult),
         "health" => rpc_action(methods::DAEMON_HEALTH, None, OutputMode::UnwrapResult),
-        "open" => rpc_action(methods::PANEL_OPEN, None, OutputMode::FullEnvelope),
+        "open" => parse_open_subcommand(&positional[1..])?,
         "close" => rpc_action(methods::PANEL_CLOSE, None, OutputMode::FullEnvelope),
         "toggle" => rpc_action(methods::PANEL_TOGGLE, None, OutputMode::FullEnvelope),
         "reload" => rpc_action(methods::CONFIG_RELOAD, None, OutputMode::FullEnvelope),
@@ -123,6 +123,28 @@ fn rpc_action(method: &str, params: Option<Value>, output_mode: OutputMode) -> C
         method: method.to_owned(),
         params,
         output_mode,
+    }
+}
+
+fn parse_open_subcommand(args: &[String]) -> Result<CliAction, (u8, String)> {
+    match args {
+        [] => Ok(rpc_action(
+            methods::PANEL_OPEN,
+            None,
+            OutputMode::FullEnvelope,
+        )),
+        [plugin_id] => {
+            let trimmed = plugin_id.trim();
+            if trimmed.is_empty() {
+                return Err((2, "Usage: sideveil-ctl open [plugin_id]".to_owned()));
+            }
+            Ok(rpc_action(
+                methods::PANEL_OPEN,
+                Some(json!({ "pluginId": trimmed })),
+                OutputMode::FullEnvelope,
+            ))
+        }
+        _ => Err((2, "Usage: sideveil-ctl open [plugin_id]".to_owned())),
     }
 }
 

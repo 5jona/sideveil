@@ -252,7 +252,7 @@ export function OverviewEdgeTab({ config, status, onChange }: OverviewEdgeTabPro
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="self-start">
           <CardHeader>
             <div>
               <CardTitle>几何布局预览</CardTitle>
@@ -260,7 +260,13 @@ export function OverviewEdgeTab({ config, status, onChange }: OverviewEdgeTabPro
             </div>
           </CardHeader>
           <CardContent>
-            <EdgePreviewCanvas config={config} previewOpen />
+            <EdgePreviewCanvas
+              config={config}
+              previewOpen
+              screenWidthPx={status?.screenWidthPx}
+              screenHeightPx={status?.screenHeightPx}
+              density={status?.density}
+            />
           </CardContent>
         </Card>
       </div>

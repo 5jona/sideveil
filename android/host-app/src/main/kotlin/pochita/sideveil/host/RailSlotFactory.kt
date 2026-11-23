@@ -16,6 +16,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.PopupMenu
 import android.widget.TextView
+import pochita.sideveil.protocol.BUILTIN_DIAG_PLUGIN_ID
 import pochita.sideveil.protocol.PluginBackendKind
 import pochita.sideveil.protocol.PluginBackendState
 import pochita.sideveil.protocol.PluginDescriptor
@@ -37,43 +38,31 @@ internal class RailSlotFactory(
         active: Boolean,
         scrubbed: Boolean,
         isDark: Boolean,
+        metrics: OverlayHorizontalMetrics,
     ): View {
         val pill =
             FrameLayout(themedContext).apply {
-                background = createSlotBackground(active, scrubbed, isDark)
+                background = createSlotBackground(active, scrubbed, isDark, metrics.compact)
                 isClickable = false
                 isFocusable = false
             }
 
+        val glyphColor = resolveGlyphColor(active, isDark)
         val glyph =
             TextView(themedContext).apply {
                 text = badgeLabelFor(plugin)
                 gravity = Gravity.CENTER
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, if (metrics.compact) 11f else 12f)
                 typeface = Typeface.DEFAULT_BOLD
-                setTextColor(resolveGlyphColor(active, isDark))
+                setTextColor(glyphColor)
             }
         pill.addView(
             glyph,
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
         )
 
-        if (!plugin.builtin && !plugin.icon.isNullOrBlank()) {
-            val iconSizePx = dp(ICON_SIZE_DP.toFloat())
-            val iconView =
-                ImageView(themedContext).apply {
-                    scaleType = ImageView.ScaleType.FIT_CENTER
-                    visibility = View.GONE
-                }
-            pill.addView(iconView, FrameLayout.LayoutParams(iconSizePx, iconSizePx, Gravity.CENTER))
-            iconLoader.load(plugin, sizePx = (iconSizePx * 2).coerceAtLeast(64), darkSurface = isDark) { bitmap ->
-                if (bitmap != null) {
-                    iconView.setImageBitmap(bitmap)
-                    iconView.visibility = View.VISIBLE
-                    glyph.visibility = View.GONE
-                }
-            }
-        }
+        val iconSizePx = dp(metrics.railIconSizeDp.toFloat())
+        attachSlotIcon(pill, glyph, plugin, iconSizePx, glyphColor, isDark)
 
         if (plugin.backend != PluginBackendKind.NONE) {
             pill.addView(createBackendDot(plugin.backendState), createBackendDotLayout())
@@ -108,24 +97,67 @@ internal class RailSlotFactory(
             }
         slot.addView(
             pill,
-            FrameLayout.LayoutParams(dp(PILL_SIZE_DP.toFloat()), dp(PILL_SIZE_DP.toFloat()), Gravity.CENTER),
+            FrameLayout.LayoutParams(dp(metrics.railPillSizeDp.toFloat()), dp(metrics.railPillSizeDp.toFloat()), Gravity.CENTER),
         )
         slot.layoutParams =
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(SLOT_HEIGHT_DP.toFloat()),
+                dp(metrics.railSlotPitchDp.toFloat()),
             )
         return slot
+    }
+
+    private fun attachSlotIcon(
+        pill: FrameLayout,
+        glyph: TextView,
+        plugin: PluginDescriptor,
+        iconSizePx: Int,
+        glyphColor: Int,
+        isDark: Boolean,
+    ) {
+        if (plugin.id == BUILTIN_DIAG_PLUGIN_ID) {
+            val diagDrawable =
+                themedContext
+                    .getDrawable(R.drawable.ic_sideveil_diagnostic)
+                    ?.mutate()
+                    ?.apply { setTint(glyphColor) }
+            if (diagDrawable != null) {
+                val diagIcon =
+                    ImageView(themedContext).apply {
+                        scaleType = ImageView.ScaleType.FIT_CENTER
+                        setImageDrawable(diagDrawable)
+                    }
+                pill.addView(diagIcon, FrameLayout.LayoutParams(iconSizePx, iconSizePx, Gravity.CENTER))
+                glyph.visibility = View.GONE
+            }
+            return
+        }
+        if (!plugin.builtin && !plugin.icon.isNullOrBlank()) {
+            val iconView =
+                ImageView(themedContext).apply {
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                    visibility = View.GONE
+                }
+            pill.addView(iconView, FrameLayout.LayoutParams(iconSizePx, iconSizePx, Gravity.CENTER))
+            iconLoader.load(plugin, sizePx = (iconSizePx * 2).coerceAtLeast(64), darkSurface = isDark) { bitmap ->
+                if (bitmap != null) {
+                    iconView.setImageBitmap(bitmap)
+                    iconView.visibility = View.VISIBLE
+                    glyph.visibility = View.GONE
+                }
+            }
+        }
     }
 
     private fun createSlotBackground(
         active: Boolean,
         scrubbed: Boolean,
         isDark: Boolean,
+        compact: Boolean,
     ): GradientDrawable =
         GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
-            cornerRadius = dp(12f).toFloat()
+            cornerRadius = dp(if (compact) 10f else 12f).toFloat()
             when {
                 scrubbed -> {
                     setColor(if (isDark) Color.argb(145, 56, 189, 248) else Color.argb(110, 37, 99, 235))
@@ -210,9 +242,6 @@ internal class RailSlotFactory(
     private fun dp(value: Float): Int = OverlayWindowFlags.dp(densityProvider(), value)
 
     companion object {
-        private const val ICON_SIZE_DP = 22
-        private const val PILL_SIZE_DP = 40
-        private const val SLOT_HEIGHT_DP = 48
         private const val MENU_PIN_TOP = 1
         private const val MENU_DISABLE = 2
         private const val MENU_RELOAD = 3

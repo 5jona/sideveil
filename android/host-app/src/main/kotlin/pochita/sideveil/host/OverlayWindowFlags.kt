@@ -12,11 +12,34 @@ import android.view.WindowManager
  */
 internal object OverlayWindowFlags {
     private const val PRIVATE_FLAG_NO_MOVE_ANIMATION = 0x00000040
+    const val MAX_UNTOUCHABLE_OVERLAY_ALPHA = 0.80f
 
     private val privateFlagsField by lazy {
         runCatching {
             WindowManager.LayoutParams::class.java.getField("privateFlags")
         }.getOrNull()
+    }
+
+    /**
+     * Android 12+ untrusted touch occlusion limit: any `TYPE_APPLICATION_OVERLAY` window with
+     * `FLAG_NOT_TOUCHABLE` and `alpha > 0.80f` triggers continuous InputDispatcher warnings.
+     * Cap `alpha` at `0.80f` when `FLAG_NOT_TOUCHABLE` is set, and restore [requestedAlpha]
+     * (default `1.0f`) once interactive.
+     */
+    fun resolveWindowAlpha(
+        flags: Int,
+        requestedAlpha: Float = 1.0f,
+    ): Float {
+        val clamped = requestedAlpha.coerceIn(0f, 1f)
+        val notTouchable = (flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE) != 0
+        return if (notTouchable) minOf(clamped, MAX_UNTOUCHABLE_OVERLAY_ALPHA) else clamped
+    }
+
+    fun applyTouchSafeAlpha(
+        lp: WindowManager.LayoutParams,
+        requestedAlpha: Float = 1.0f,
+    ) {
+        lp.alpha = resolveWindowAlpha(lp.flags, requestedAlpha)
     }
 
     fun disableMoveAnimation(lp: WindowManager.LayoutParams) {

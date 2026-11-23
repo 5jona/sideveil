@@ -1,13 +1,53 @@
-//! Host control-plane JSON-RPC handlers (`config.patchAppearance`, `config.patchEdge`).
+//! Host control-plane JSON-RPC handlers (`config.patchAppearance`, `config.patchEdge`, `panel.open`).
 
 use std::sync::Arc;
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use sideveil_protocol::config::{AppearancePatchParams, EdgePatchParams};
-use sideveil_protocol::rpc::error_codes;
+use sideveil_protocol::rpc::{PanelCommand, PanelOpenParams, error_codes};
 
 use super::serialize_result;
 use crate::state::HubState;
+
+pub(super) fn handle_panel_open(
+    state: &Arc<HubState>,
+    params: Option<Value>,
+) -> Result<Value, (i32, String)> {
+    let parsed = match params {
+        Some(val) => serde_json::from_value::<PanelOpenParams>(val).map_err(|err| {
+            (
+                error_codes::INVALID_PARAMS,
+                format!("Invalid params: {err}"),
+            )
+        })?,
+        None => PanelOpenParams::default(),
+    };
+
+    let mut selected_plugin_id: Option<String> = None;
+    if let Some(plugin_id) = parsed
+        .plugin_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        // Always update active plugin and push `plugins.activeChanged` even when the drawer
+        // is already open so `sideveil-ctl open <plugin_id>` switches immediately.
+        state
+            .select_active_plugin(plugin_id, None)
+            .map_err(|msg| (error_codes::INVALID_PARAMS, msg))?;
+        selected_plugin_id = Some(plugin_id.to_owned());
+    }
+
+    state.send_panel_command(PanelCommand::Open);
+    let active_plugin_id = state
+        .plugins_snapshot()
+        .active_plugin_id
+        .or(selected_plugin_id);
+    Ok(json!({
+        "ok": true,
+        "activePluginId": active_plugin_id,
+    }))
+}
 
 pub(super) fn handle_patch_appearance(
     state: &Arc<HubState>,

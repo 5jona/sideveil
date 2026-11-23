@@ -66,4 +66,5 @@ if [ -d "${MODPATH}/plugins" ]; then
 fi
 
 ui_print "- SideVeilHost APK will mount under /system/priv-app after reboot."
+ui_print "- Any stale /data/app override of SideVeilHost will auto-sync on boot."
 ui_print "- Installation completed successfully."

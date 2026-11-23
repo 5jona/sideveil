@@ -66,6 +66,7 @@ class EdgeIndicatorWindow(
                 PixelFormat.TRANSLUCENT,
             ).apply {
                 title = "SideVeilEdgeIndicator"
+                OverlayWindowFlags.applyTouchSafeAlpha(this)
                 OverlayWindowFlags.disableMoveAnimation(this)
             }
 
@@ -238,6 +239,7 @@ class EdgeIndicatorWindow(
         layoutParams.height = heightPx
         layoutParams.x = dpOrZero(latestEdge.edgeOffsetDp.toFloat())
         layoutParams.y = topPx
+        OverlayWindowFlags.applyTouchSafeAlpha(layoutParams)
 
         appearance.applyBadgeOrPill(badgeText, horiz, heightPx, repositionActive, activeEdgeStatus)
         appearance.applyPillColors(repositionActive, latestDarkSurface, activeEdgeStatus)

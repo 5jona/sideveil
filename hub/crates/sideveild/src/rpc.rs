@@ -89,8 +89,7 @@ async fn dispatch_inner(
         }
         methods::PANEL_OPEN => {
             require_privileged(is_privileged, &req.method)?;
-            state.send_panel_command(PanelCommand::Open);
-            Ok(json!({ "ok": true }))
+            control::handle_panel_open(state, req.params)
         }
         methods::PANEL_CLOSE => {
             require_privileged(is_privileged, &req.method)?;

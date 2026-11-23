@@ -64,6 +64,7 @@ internal class PluginRailWindow(
     private var scrubbedPluginId: String? = null
     private var touchInProgress: Boolean = false
     private var lastTouchUptimeMs: Long = 0L
+    private var lastBuiltCompact: Boolean? = null
 
     private val dialog =
         object : Dialog(themedContext, R.style.Theme_SideVeil_OverlayDialog) {
@@ -77,6 +78,8 @@ internal class PluginRailWindow(
         val scroll =
             ScrollView(themedContext).apply {
                 isVerticalScrollBarEnabled = false
+                isVerticalFadingEdgeEnabled = true
+                setFadingEdgeLength(dp(FADING_EDGE_LENGTH_DP))
                 overScrollMode = View.OVER_SCROLL_NEVER
                 addView(itemColumn, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             }
@@ -88,7 +91,7 @@ internal class PluginRailWindow(
         railContainer.isClickable = true
         railContainer.setOnTouchListener { _, ev ->
             if (ev.actionMasked == MotionEvent.ACTION_UP && matchedPlugins.isNotEmpty()) {
-                val slotPitch = dp(SLOT_PITCH_DP.toFloat()).toFloat().coerceAtLeast(1f)
+                val slotPitch = dp(surfaceController.lastHorizontalMetrics.railSlotPitchDp.toFloat()).toFloat().coerceAtLeast(1f)
                 val idx = ((ev.y - dp(6f)) / slotPitch).toInt().coerceIn(0, matchedPlugins.lastIndex)
                 onSelectPlugin(matchedPlugins[idx].id)
             }
@@ -132,7 +135,7 @@ internal class PluginRailWindow(
 
     fun shouldShowRail(): Boolean = matchedPlugins.size >= 2
 
-    fun railInsetDp(): Int = if (shouldShowRail()) RAIL_WIDTH_DP + RAIL_GAP_DP else 0
+    fun railInsetDp(): Int = if (shouldShowRail()) surfaceController.currentHorizontalMetrics().railInsetDp else 0
 
     fun isTouchActiveOrRecent(nowUptimeMs: Long = SystemClock.uptimeMillis()): Boolean =
         touchInProgress || (nowUptimeMs - lastTouchUptimeMs) in 0..RAIL_TOUCH_GRACE_MS
@@ -146,7 +149,7 @@ internal class PluginRailWindow(
         val slop = dp(18f)
         val loc = IntArray(2)
         railContainer.getLocationOnScreen(loc)
-        val w = railContainer.width.takeIf { it > 1 } ?: dp(RAIL_WIDTH_DP.toFloat())
+        val w = railContainer.width.takeIf { it > 1 } ?: dp(surfaceController.lastHorizontalMetrics.railWidthDp.toFloat())
         val h = railContainer.height.takeIf { it > 1 } ?: surfaceController.lastDesiredHeightPx
         return rawX >= (loc[0] - slop) &&
             rawX <= (loc[0] + w + slop) &&
@@ -230,7 +233,8 @@ internal class PluginRailWindow(
             return null
         }
         val railTop = (screenHeightPx - surfaceController.lastDesiredHeightPx) * 0.5f + dp(6f)
-        val idx = ((rawY - railTop) / dp(SLOT_PITCH_DP.toFloat()).toFloat().coerceAtLeast(1f)).toInt().coerceIn(0, matchedPlugins.lastIndex)
+        val slotPitchPx = dp(surfaceController.lastHorizontalMetrics.railSlotPitchDp.toFloat()).toFloat().coerceAtLeast(1f)
+        val idx = ((rawY - railTop) / slotPitchPx).toInt().coerceIn(0, matchedPlugins.lastIndex)
         val candidate = matchedPlugins[idx].id
         if (candidate != scrubbedPluginId) {
             scrubbedPluginId = candidate
@@ -263,6 +267,9 @@ internal class PluginRailWindow(
             return
         }
         val window = dialog.window ?: return
+        if (lastBuiltCompact != surfaceController.currentHorizontalMetrics().compact) {
+            rebuildItems()
+        }
         surfaceController.showAnimated(window, railContainer, motionProgress, matchedPlugins.size)
     }
 
@@ -273,12 +280,14 @@ internal class PluginRailWindow(
     }
 
     private fun rebuildItems() {
+        val metrics = surfaceController.currentHorizontalMetrics()
+        lastBuiltCompact = metrics.compact
         itemColumn.removeAllViews()
         val highlightedId = scrubbedPluginId ?: activePluginId
         for (plugin in matchedPlugins) {
             val active = plugin.id == highlightedId
             val scrubbed = plugin.id == scrubbedPluginId
-            itemColumn.addView(slotFactory.createButton(plugin, active, scrubbed, surfaceController.isDark))
+            itemColumn.addView(slotFactory.createButton(plugin, active, scrubbed, surfaceController.isDark, metrics))
         }
     }
 
@@ -289,6 +298,7 @@ internal class PluginRailWindow(
         const val RAIL_WIDTH_DP = 50
         const val RAIL_GAP_DP = 6
         internal const val SLOT_PITCH_DP = 48
+        private const val FADING_EDGE_LENGTH_DP = 18f
         private const val RAIL_SCRUB_ZONE_DP = 86
         private const val SCRUB_MIN_PROGRESS = 0.35f
         private const val RAIL_TOUCH_GRACE_MS = 280L
