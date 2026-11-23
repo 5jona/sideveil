@@ -1,4 +1,5 @@
 {
+  "$schema": "../../../../pochita-webui-kit/packages/contracts-gen/contract.schema.json",
   "schemaVersion": 1,
   "name": "sideveil-protocol-constants",
   "description": "Canonical SideVeil RPC methods, host/plugin events, JSON-RPC error codes, theme IDs, built-in diagnostic metadata, timeout bounds, and HUD defaults.",

@@ -52,11 +52,12 @@ SideVeil separates privileges, hidden Android APIs, overlay window rendering, an
 | Crate / Path | Binary / Artifact | Core Responsibilities & Key Modules |
 | --- | --- | --- |
 | `hub/crates/sideveil-protocol/` | rlib | Shared wire types: `generated/`, `config/{patches,sections}`, `plugin/{rpc_params,url_validation,validation}`, `rpc/`, `sensor.rs`, `telemetry.rs`, `theme.rs`, `hud.rs`, `uds.rs`. |
+| `hub/crates/sideveil-plugin-sdk/` | rlib | Lightweight async SDK for `uds-native`/`uds-app` Rust plugin daemons: `codec.rs` (`LinesCodec` bounded NDJSON), `client.rs`/`session.rs` (timeouts, backoff reset, `TaskTracker` + `CancellationToken`), `handle.rs` (dual-priority reliable/ephemeral queues), `config.rs`, `error.rs`. |
 | `hub/crates/sideveil-gfx/` | rlib | Pure-Rust Linebender core: `svg_icon.rs` + `svg_icon/paint.rs` (`usvg` + `vello_cpu` NEON), `palette.rs` (WCAG Oklch), `hud_renderer/{gauges,path_parser,primitives,sparkline}`. |
 | `hub/crates/sideveil-hud-jni/` | `libsideveil_hud.so` | arm64 JNI `cdylib` rasterizing `NativeHudScene` JSON into locked `ARGB_8888` `Bitmap`s via `libjnigraphics`. |
 | `hub/crates/sideveild/` | `bin/sideveild` | Hub daemon: `supervisor/{sensor,host_wake,plugin_daemons}` (`pidfd`), `config_store.rs`, `inotify.rs`, `plugin_registry/{dev_url,embed_override,error,installer,overrides,query,store,web_embed}`, `plugin_acl.rs`, `plugin_backends.rs`, `peercred.rs`, `uds_gateway/{framing,backend_session}`, `host_ws.rs`, `asset_server/{http,icon_cache,path}`, `outbound_queue.rs`, `rpc/`. |
 | `hub/crates/sideveil-ctl/` | `bin/sideveil-ctl` | Native CLI talking JSON-RPC 2.0 over `hub.sock` (`cli/{plugins_cmd,plugins_embed_cmd,hud_cmd,debug_cmd,logs_cmd}`). |
-| `examples/native-perf-hud/` | `bin/sideveil-example-perf-hud` | Reference `uds-native` daemon sampling `/proc` & thermal metrics and streaming `NativeHudScene` frames. |
+| `examples/native-perf-hud/` | `bin/sideveil-example-perf-hud` | Reference `uds-native` daemon built on `sideveil-plugin-sdk`, sampling `/proc` & thermal metrics and streaming `NativeHudScene` frames. |
 
 ### Android Gradle Modules & Sub-Packages
 
