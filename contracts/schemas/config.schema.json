@@ -29,6 +29,14 @@
       ],
       "description": "Lifecycle state of the primary sidebar overlay panel."
     },
+    "RuntimeMode": {
+      "type": "string",
+      "enum": [
+        "release",
+        "debug"
+      ],
+      "description": "Runtime execution mode controlling whether source-level built-in test plugins are exposed."
+    },
     "EdgeConfig": {
       "type": "object",
       "properties": {
@@ -175,6 +183,16 @@
       "properties": {
         "webviewDebuggingEnabled": {
           "type": "boolean"
+        },
+        "runtimeMode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RuntimeMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false,

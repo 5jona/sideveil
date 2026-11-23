@@ -244,10 +244,24 @@ fn sanitize_pkg_list(items: &[String]) -> Vec<String> {
     out
 }
 
+/// Runtime execution mode controlling visibility of source-level built-in test plugins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RuntimeMode {
+    /// Production mode: hides source-level built-in test plugins from active matching.
+    #[default]
+    Release,
+    /// Debug mode: exposes built-in diagnostic and bundled example test plugins.
+    Debug,
+}
+
 /// Developer diagnostics flags persisted in the authoritative configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct DebugConfig {
     /// Enables Android WebView remote DevTools inspection (`WebView.setWebContentsDebuggingEnabled`).
     pub webview_debugging_enabled: bool,
+    /// Runtime execution mode gating source-level built-in test plugins (`release` or `debug`).
+    #[serde(default)]
+    pub runtime_mode: RuntimeMode,
 }

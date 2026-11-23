@@ -10,6 +10,7 @@ fn default_config_roundtrips_json_and_matches_bounds() {
     assert_eq!(parsed, cfg);
     assert_eq!(parsed.sanitized(), cfg);
     assert!(!parsed.debug.webview_debugging_enabled);
+    assert_eq!(parsed.debug.runtime_mode, RuntimeMode::Release);
     assert!(cfg.matches_package("me.weishu.kernelsu"));
     assert!(!cfg.matches_package("com.android.systemui"));
     assert!(!cfg.matches_package("com.example.other"));
@@ -29,7 +30,9 @@ fn config_without_debug_field_deserializes_with_default_debug() {
     assert_eq!(parsed.edge.side, EdgeSide::Left);
     assert_eq!(parsed.edge.top_percent, 40);
     assert!(!parsed.debug.webview_debugging_enabled);
+    assert_eq!(parsed.debug.runtime_mode, RuntimeMode::Release);
     assert!(!parsed.sanitized().debug.webview_debugging_enabled);
+    assert_eq!(parsed.sanitized().debug.runtime_mode, RuntimeMode::Release);
 }
 
 #[test]
@@ -67,6 +70,7 @@ fn sanitized_clamps_out_of_bounds_values_and_preserves_debug() {
         },
         debug: DebugConfig {
             webview_debugging_enabled: true,
+            runtime_mode: RuntimeMode::Debug,
         },
     };
     let clean = raw.sanitized();
@@ -90,6 +94,7 @@ fn sanitized_clamps_out_of_bounds_values_and_preserves_debug() {
     assert!(clean.matches_package("com.example.anything"));
     assert!(!clean.matches_package("com.android.systemui"));
     assert!(clean.debug.webview_debugging_enabled);
+    assert_eq!(clean.debug.runtime_mode, RuntimeMode::Debug);
 }
 
 #[test]

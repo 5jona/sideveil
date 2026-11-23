@@ -13,17 +13,20 @@ import {
 } from '@pochita/ui';
 import { RefreshCw, RotateCcw, Terminal, Zap } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import type {
-  DaemonStatus,
-  DebugCdpStatusResult,
-  DebugInspectUiSnapshot,
-  SideVeilConfig,
+import {
+  type DaemonStatus,
+  type DebugCdpStatusResult,
+  type DebugInspectUiSnapshot,
+  type RuntimeMode,
+  resolveRuntimeMode,
+  type SideVeilConfig,
 } from '../../shared/types.ts';
 import type { DebugBusyAction } from '../hooks/useDebugControl.ts';
 import { BridgeTraceCard } from './BridgeTraceCard.tsx';
 import { CdpDebugCard } from './CdpDebugCard.tsx';
 import { GestureStatsCard } from './GestureStatsCard.tsx';
 import { NetworkContextCard } from './NetworkContextCard.tsx';
+import { RuntimeModeCard } from './RuntimeModeCard.tsx';
 import { UiInspectorCard } from './UiInspectorCard.tsx';
 
 type LogSourceFilter = 'all' | 'webview';
@@ -58,6 +61,7 @@ export interface DiagnosticsTabProps {
   onRefreshLogs: () => void;
   onClearLogs: () => void;
   onSetWebViewDebugging: (enabled: boolean) => void;
+  onSetRuntimeMode: (mode: RuntimeMode) => void;
   onInspectUi: () => void;
   onResetFrameMetrics: () => void;
   onRefreshNetwork: () => void;
@@ -84,6 +88,7 @@ export function DiagnosticsTab({
   onRefreshLogs,
   onClearLogs,
   onSetWebViewDebugging,
+  onSetRuntimeMode,
   onInspectUi,
   onResetFrameMetrics,
   onRefreshNetwork,
@@ -173,6 +178,12 @@ export function DiagnosticsTab({
         loading={networkLoading}
         error={networkError}
         onRefresh={onRefreshNetwork}
+      />
+
+      <RuntimeModeCard
+        runtimeMode={resolveRuntimeMode(config.debug)}
+        busy={debugBusy === 'runtime-mode'}
+        onChange={onSetRuntimeMode}
       />
 
       <CdpDebugCard

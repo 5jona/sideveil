@@ -26,6 +26,7 @@ pub(crate) fn clamp_rpc_timeout_ms(ms: u64) -> u64 {
 pub(crate) enum OutputMode {
     UnwrapResult,
     FullEnvelope,
+    RuntimeMode,
 }
 
 #[derive(Debug, PartialEq, Eq)]

@@ -8,6 +8,9 @@ import {
   CONFIG_PATH,
   type DaemonStatus,
   DEFAULT_CONFIG,
+  isBuiltinTestPlugin,
+  type RuntimeMode,
+  resolveRuntimeMode,
   type SideVeilConfig,
 } from '../shared/types.ts';
 import { handleMockDebugExec } from './mockDebugBridge.ts';
@@ -20,6 +23,7 @@ import {
 
 interface MockControlState {
   panelState: 'closed' | 'open';
+  runtimeMode: RuntimeMode;
   pingCount: number;
   logSeq: number;
   logs: string[];
@@ -30,6 +34,7 @@ interface MockControlState {
 
 const mockState: MockControlState = {
   panelState: 'closed',
+  runtimeMode: 'release',
   pingCount: 0,
   logSeq: 9,
   logs: [
@@ -53,15 +58,30 @@ const mockState: MockControlState = {
   network: { ...INITIAL_MOCK_NETWORK_CONTEXT },
 };
 
-function getMockSnapshot(fgPkg = 'me.weishu.kernelsu'): PluginsSnapshotPayload {
+function getMockSnapshot(
+  fgPkg = 'me.weishu.kernelsu',
+  modeOverride?: RuntimeMode,
+): PluginsSnapshotPayload {
+  const mode = modeOverride ?? mockState.runtimeMode;
+  const hideBuiltinTests = mode === 'release';
   const matched = mockState.plugins
-    .filter((p) => p.enabled && (p.global || p.packages.includes(fgPkg)))
+    .filter(
+      (p) =>
+        p.enabled &&
+        !(hideBuiltinTests && isBuiltinTestPlugin(p.id)) &&
+        (p.global || p.packages.includes(fgPkg)),
+    )
     .map((p) => p.id);
+
+  const activePluginId =
+    mockState.activePluginId && !(hideBuiltinTests && isBuiltinTestPlugin(mockState.activePluginId))
+      ? mockState.activePluginId
+      : (matched[0] ?? null);
 
   return {
     plugins: mockState.plugins,
     matchedPluginIds: matched,
-    activePluginId: mockState.activePluginId,
+    activePluginId,
     foregroundPackage: fgPkg,
   };
 }
@@ -98,14 +118,26 @@ function rpcOk(result: unknown): ExecResult {
 
 export async function handleMockControlExec(cmd: string): Promise<ExecResult> {
   const cfg = readMockStoredConfig();
+  if (cfg.debug?.runtimeMode) {
+    mockState.runtimeMode = resolveRuntimeMode(cfg.debug);
+  }
   const normalized = cmd.replace(/['"]/g, '');
 
   const debugRes = handleMockDebugExec(normalized, {
     cfg,
+    runtimeMode: mockState.runtimeMode,
     panelState: mockState.panelState,
-    activePluginId: mockState.activePluginId,
+    activePluginId: getMockSnapshot().activePluginId ?? '',
     matchedPluginIds: getMockSnapshot().matchedPluginIds,
     devServerActive: mockState.plugins.some((p) => Boolean(p.devServerUrl)),
+    setRuntimeMode: (nextMode) => {
+      mockState.runtimeMode = nextMode;
+      const snap = getMockSnapshot('me.weishu.kernelsu', nextMode);
+      if (snap.activePluginId) {
+        mockState.activePluginId = snap.activePluginId;
+      }
+      return snap;
+    },
     appendLog: appendMockLog,
   });
   if (debugRes) return debugRes;
@@ -140,7 +172,7 @@ export async function handleMockControlExec(cmd: string): Promise<ExecResult> {
       wsPort: 41928,
       sensorConnected: true,
       sensorPid: 14842,
-      activePluginId: mockState.activePluginId,
+      activePluginId: getMockSnapshot().activePluginId ?? undefined,
       matchedPluginsCount: getMockSnapshot().matchedPluginIds.length,
       gestureStats: {
         edgeSwipesTriggered: 18,

@@ -83,6 +83,7 @@ pub mod methods {
     pub const DEBUG_SET_WEBVIEW_DEBUGGING: &str = "debug.setWebViewDebugging";
     pub const DEBUG_CDP_STATUS: &str = "debug.cdpStatus";
     pub const DEBUG_RESET_FRAME_METRICS: &str = "debug.resetFrameMetrics";
+    pub const DEBUG_SET_RUNTIME_MODE: &str = "debug.setRuntimeMode";
 }
 
 /// JSON-RPC 2.0 and SideVeil domain error codes.
@@ -115,6 +116,13 @@ pub mod builtin_diagnostic {
     pub const SURFACE_BACKDROP: &str = "native-glass";
     pub const CAPABILITY_STORAGE: &str = "storage";
     pub const CAPABILITY_TOAST: &str = "toast";
+}
+
+/// Canonical plugin IDs for source-level built-in test and demo plugins gated by runtimeMode.
+pub mod builtin_test_plugins {
+    pub const DIAGNOSTIC: &str = "sideveil.diagnostic";
+    pub const VELLO_SCOPE: &str = "example.vello-scope";
+    pub const NATIVE_PERF_HUD: &str = "example.native-perf-hud";
 }
 
 /// Bounded RPC forwarding timeout limits and plugin event lag sub-event name.

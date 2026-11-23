@@ -59,9 +59,17 @@ class ContractFixturesTest {
 
         val withDebug = assertRoundTrip<SideVeilConfig>("config/SideVeilConfig.with-debug.json")
         assertTrue(withDebug.debug.webviewDebuggingEnabled)
+        assertEquals(RuntimeMode.RELEASE, withDebug.debug.runtimeMode)
         assertEquals(SideVeilThemes.MODERN_SAAS_DARK, withDebug.panel.themeId)
 
+        val runtimeRelease = assertRoundTrip<SideVeilConfig>("config/SideVeilConfig.runtime-release.json")
+        assertEquals(RuntimeMode.RELEASE, runtimeRelease.debug.runtimeMode)
+
+        val runtimeDebug = assertRoundTrip<SideVeilConfig>("config/SideVeilConfig.runtime-debug.json")
+        assertEquals(RuntimeMode.DEBUG, runtimeDebug.debug.runtimeMode)
+
         assertInvalidRejects<SideVeilConfig>("config/SideVeilConfig.invalid-mode.json")
+        assertInvalidRejects<SideVeilConfig>("config/SideVeilConfig.invalid-runtime-mode.json")
     }
 
     @Test
@@ -139,10 +147,15 @@ class ContractFixturesTest {
     fun `generated constants align complete method and event registries`() {
         assertEquals("daemon.health", SideVeilMethods.DAEMON_HEALTH)
         assertEquals("plugins.setScopeOverride", SideVeilMethods.PLUGINS_SET_SCOPE_OVERRIDE)
+        assertEquals("debug.setRuntimeMode", SideVeilMethods.DEBUG_SET_RUNTIME_MODE)
         assertEquals("fs.writeAtomic", SideVeilMethods.FS_WRITE_ATOMIC)
         assertEquals("panel.visibilityChanged", SideVeilEvents.PANEL_VISIBILITY_CHANGED)
         assertEquals("appearance.changed", SideVeilEvents.APPEARANCE_CHANGED)
         assertEquals("container.presentationChanged", SideVeilEvents.CONTAINER_PRESENTATION_CHANGED)
         assertEquals("container.clickThroughChanged", SideVeilEvents.CONTAINER_CLICK_THROUGH_CHANGED)
+        assertTrue(isBuiltinTestPlugin(SideVeilBuiltinTestPlugins.DIAGNOSTIC))
+        assertTrue(isBuiltinTestPlugin(SideVeilBuiltinTestPlugins.VELLO_SCOPE))
+        assertTrue(isBuiltinTestPlugin(SideVeilBuiltinTestPlugins.NATIVE_PERF_HUD))
+        assertFalse(isBuiltinTestPlugin("sideveil.proxy"))
     }
 }

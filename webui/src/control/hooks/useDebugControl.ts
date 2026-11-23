@@ -4,10 +4,12 @@ import {
   CTL_BIN,
   type DebugCdpStatusResult,
   type DebugInspectUiSnapshot,
+  type DebugSetRuntimeModeResult,
+  type RuntimeMode,
   SIDEVEIL_METHODS,
 } from '../../shared/types.ts';
 
-export type DebugBusyAction = 'cdp' | 'inspect' | 'reset-frames' | null;
+export type DebugBusyAction = 'cdp' | 'inspect' | 'reset-frames' | 'runtime-mode' | null;
 
 type PushToast = (message: string, variant?: 'info' | 'success' | 'warning' | 'danger') => void;
 
@@ -38,17 +40,19 @@ export interface UseDebugControlOptions {
   bridge: BridgeClient;
   pushToast: PushToast;
   onConfigSynced: () => Promise<void>;
+  onPluginsRefresh?: () => Promise<void>;
   onRefreshLogs: () => Promise<void>;
 }
 
 /**
- * Manages developer debugging RPCs: WebView CDP toggling, overlay UI hierarchy snapshots,
- * and frame-timing metric resets.
+ * Manages developer debugging RPCs: runtime mode switching, WebView CDP toggling,
+ * overlay UI hierarchy snapshots, and frame-timing metric resets.
  */
 export function useDebugControl({
   bridge,
   pushToast,
   onConfigSynced,
+  onPluginsRefresh,
   onRefreshLogs,
 }: UseDebugControlOptions) {
   const [cdpStatus, setCdpStatus] = useState<DebugCdpStatusResult | null>(null);
@@ -194,6 +198,45 @@ export function useDebugControl({
     }
   }, [bridge, inspectUi, onRefreshLogs, pushToast]);
 
+  const setRuntimeMode = useCallback(
+    async (mode: RuntimeMode) => {
+      setDebugBusy('runtime-mode');
+      setDebugError(null);
+      try {
+        if (bridge.env === 'host') {
+          await bridge.invoke<DebugSetRuntimeModeResult>(SIDEVEIL_METHODS.DEBUG_SET_RUNTIME_MODE, {
+            runtimeMode: mode,
+          });
+        } else {
+          const res = await bridge.exec(`${shellQuote(CTL_BIN)} debug mode ${shellQuote(mode)}`);
+          if (res.errno !== 0) {
+            throw new Error(res.stderr.trim() || res.stdout.trim() || `errno ${res.errno}`);
+          }
+          const decoded = unwrapRpcOutput<DebugSetRuntimeModeResult>(res.stdout);
+          if (decoded.errorMessage) {
+            throw new Error(decoded.errorMessage);
+          }
+        }
+        await onConfigSynced();
+        if (onPluginsRefresh) await onPluginsRefresh();
+        await onRefreshLogs();
+        pushToast(
+          mode === 'debug'
+            ? '已切换至调试模式（内置测试插件已启用）'
+            : '已切换至正式模式（内置测试插件已隐藏）',
+          'success',
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setDebugError(msg);
+        pushToast(`切换运行模式失败：${msg}`, 'warning');
+      } finally {
+        setDebugBusy(null);
+      }
+    },
+    [bridge, onConfigSynced, onPluginsRefresh, onRefreshLogs, pushToast],
+  );
+
   return {
     cdpStatus,
     uiSnapshot,
@@ -202,6 +245,7 @@ export function useDebugControl({
     debugError,
     refreshCdpStatus,
     setWebViewDebugging,
+    setRuntimeMode,
     inspectUi,
     resetFrameMetrics,
   };

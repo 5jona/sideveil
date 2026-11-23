@@ -4,7 +4,9 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
+  RUNTIME_MODE_VALUES,
   SIDEVEIL_BUILTIN_DIAGNOSTIC,
+  SIDEVEIL_BUILTIN_TEST_PLUGINS,
   SIDEVEIL_CONFIG_BOUNDS,
   SIDEVEIL_CONFIG_DEFAULTS,
   SIDEVEIL_ERROR_CODES,
@@ -37,11 +39,19 @@ test('generated method, event, error code, and theme registries are complete acr
   const specEvents = Object.keys(constantsSpec.constants.protocol_events.items);
   const specErrors = Object.keys(constantsSpec.constants.error_codes.items);
 
-  assert.equal(Object.keys(SIDEVEIL_METHODS).length, 43);
+  assert.equal(Object.keys(SIDEVEIL_METHODS).length, 44);
   assert.deepEqual(Object.keys(SIDEVEIL_METHODS), specMethods);
+  assert.equal(SIDEVEIL_METHODS.DEBUG_SET_RUNTIME_MODE, 'debug.setRuntimeMode');
   assert.equal(Object.keys(SIDEVEIL_EVENTS).length, 32);
   assert.deepEqual(Object.keys(SIDEVEIL_EVENTS), specEvents);
   assert.deepEqual(Object.keys(SIDEVEIL_ERROR_CODES), specErrors);
+  assert.deepEqual(RUNTIME_MODE_VALUES, ['release', 'debug']);
+  assert.equal(SIDEVEIL_CONFIG_DEFAULTS.DEFAULT_RUNTIME_MODE, 'release');
+  assert.deepEqual(SIDEVEIL_BUILTIN_TEST_PLUGINS, {
+    DIAGNOSTIC: 'sideveil.diagnostic',
+    VELLO_SCOPE: 'example.vello-scope',
+    NATIVE_PERF_HUD: 'example.native-perf-hud',
+  });
 
   assert.equal(SIDEVEIL_EVENTS.CONTAINER_PRESENTATION_CHANGED, 'container.presentationChanged');
   assert.equal(SIDEVEIL_EVENTS.CONTAINER_CLICK_THROUGH_CHANGED, 'container.clickThroughChanged');

@@ -10,7 +10,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
 use sideveil_protocol::DEFAULT_HOST_PACKAGE;
-use sideveil_protocol::config::EdgeSide;
+use sideveil_protocol::config::{EdgeSide, RuntimeMode};
 use sideveil_protocol::rpc::{DaemonStatus, HostEventEnvelope, RpcRequest, RpcResponse, methods};
 use sideveil_protocol::sensor::{DisplayGeometry, HubToSensor, SensorToHub};
 use sideveil_protocol::uds::{UdsClientHello, UdsHandshakeAck};
@@ -52,6 +52,10 @@ async fn sensor_hub_host_and_ctl_pipeline_works_end_to_end() {
     let dir = temp_test_dir("pipeline");
     let logs = Arc::new(LogRing::new());
     let store = ConfigStore::open(dir.join("config.json"), Arc::clone(&logs));
+    // Expose built-in diagnostic plugin so an empty plugins dir still activates scope.
+    store
+        .set_runtime_mode(RuntimeMode::Debug)
+        .expect("enable debug runtime mode");
     let registry = PluginRegistry::open(
         dir.join("plugins"),
         dir.join("plugins.json"),

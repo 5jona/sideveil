@@ -52,6 +52,18 @@ fn execute(inv: &CliInvocation) -> Result<String, String> {
                 OutputMode::FullEnvelope => {
                     serde_json::to_string(&resp).map_err(|e| format!("Failed encoding output: {e}"))
                 }
+                OutputMode::RuntimeMode => {
+                    let mode = resp
+                        .result
+                        .as_ref()
+                        .and_then(|v| v.pointer("/debug/runtimeMode"))
+                        .and_then(Value::as_str)
+                        .unwrap_or(
+                            sideveil_protocol::generated::config_bounds::defaults::DEFAULT_RUNTIME_MODE,
+                        );
+                    serde_json::to_string(&json!({ "runtimeMode": mode }))
+                        .map_err(|e| format!("Failed encoding output: {e}"))
+                }
             }
         }
     }

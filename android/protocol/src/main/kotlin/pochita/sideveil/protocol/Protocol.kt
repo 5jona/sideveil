@@ -12,6 +12,7 @@ typealias SideVeilMethods = pochita.sideveil.protocol.generated.SideVeilMethods
 typealias SideVeilErrorCodes = pochita.sideveil.protocol.generated.SideVeilErrorCodes
 typealias SideVeilThemes = pochita.sideveil.protocol.generated.SideVeilThemes
 typealias SideVeilBuiltinDiagnostic = pochita.sideveil.protocol.generated.SideVeilBuiltinDiagnostic
+typealias SideVeilBuiltinTestPlugins = pochita.sideveil.protocol.generated.SideVeilBuiltinTestPlugins
 typealias SideVeilTimeoutBounds = pochita.sideveil.protocol.generated.SideVeilTimeoutBounds
 typealias SideVeilHudDefaults = pochita.sideveil.protocol.generated.SideVeilHudDefaults
 typealias SideVeilConfigDefaults = pochita.sideveil.protocol.generated.SideVeilConfigDefaults

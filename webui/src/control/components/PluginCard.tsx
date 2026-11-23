@@ -20,6 +20,7 @@ export interface PluginCardProps {
   plugin: PluginDescriptor;
   isActive: boolean;
   isMatched: boolean;
+  isHiddenByReleaseMode?: boolean;
   isBusy: boolean;
   foregroundPackage: string;
   onSetEnabled: (pluginId: string, enabled: boolean) => Promise<void>;
@@ -35,6 +36,7 @@ export function PluginCard({
   plugin,
   isActive,
   isMatched,
+  isHiddenByReleaseMode = false,
   isBusy,
   foregroundPackage,
   onSetEnabled,
@@ -77,6 +79,8 @@ export function PluginCard({
               </Badge>
             ) : isMatched ? (
               <Badge variant="accent">前台匹配</Badge>
+            ) : isHiddenByReleaseMode ? (
+              <Badge variant="neutral">正式模式已隐藏</Badge>
             ) : null}
             {plugin.hasScopeOverride ? <Badge variant="warning">已覆盖范围</Badge> : null}
             {plugin.devServerUrl ? <Badge variant="warning">Dev 热重载</Badge> : null}

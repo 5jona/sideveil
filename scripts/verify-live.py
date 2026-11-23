@@ -65,6 +65,19 @@ def capture_log_baseline_seq(dev: DeviceRunner) -> int | None:
         return None
 
 
+def read_runtime_mode(dev: DeviceRunner) -> str:
+    try:
+        resp = dev.ctl_json(["rpc", "config.get"], check=False)
+        cfg = resp.get("result", resp) if isinstance(resp, dict) else {}
+        debug = cfg.get("debug") if isinstance(cfg, dict) else None
+        mode = debug.get("runtimeMode") if isinstance(debug, dict) else None
+        if mode in {"release", "debug"}:
+            return mode
+    except Exception:  # noqa: BLE001
+        pass
+    return "release"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Live SideVeil verification (on-device host-exec/local or container SSH)"
@@ -149,11 +162,24 @@ def main() -> int:
 
     results: list[dict[str, Any]] = []
     all_ok = True
-    for name, fn in checks:
-        if not run_check(results, name, fn):
-            all_ok = False
-            if not args.continue_on_error:
-                break
+    orig_runtime_mode = read_runtime_mode(dev)
+    switched_runtime_mode = False
+    try:
+        if orig_runtime_mode != "debug":
+            dev.ctl_json(["debug", "mode", "debug"])
+            switched_runtime_mode = True
+            print(f"[INFO] Switched runtimeMode {orig_runtime_mode} -> debug for live verification")
+            time.sleep(0.3)
+
+        for name, fn in checks:
+            if not run_check(results, name, fn):
+                all_ok = False
+                if not args.continue_on_error:
+                    break
+    finally:
+        if switched_runtime_mode:
+            dev.ctl_json(["debug", "mode", orig_runtime_mode], check=False)
+            print(f"[INFO] Restored runtimeMode -> {orig_runtime_mode}")
 
     if args.report_json:
         report = {

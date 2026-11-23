@@ -1,13 +1,15 @@
 //! Privileged debugging JSON-RPC handlers (`debug.inspectUi`, `debug.cdpStatus`,
-//! `debug.setWebViewDebugging`, `debug.resetFrameMetrics`).
+//! `debug.setWebViewDebugging`, `debug.resetFrameMetrics`, `debug.setRuntimeMode`).
 
 use std::sync::{Arc, PoisonError};
 use std::time::Duration;
 
 use serde_json::{Value, json};
+use sideveil_protocol::config::RuntimeMode;
+use sideveil_protocol::generated::protocol_constants::builtin_test_plugins;
 use sideveil_protocol::rpc::{
-    DebugCdpStatusResult, DebugInspectUiParams, DebugSetWebViewDebuggingParams, error_codes,
-    methods,
+    DebugCdpStatusResult, DebugInspectUiParams, DebugSetRuntimeModeParams,
+    DebugSetRuntimeModeResult, DebugSetWebViewDebuggingParams, error_codes, methods,
 };
 
 use super::{decode_params, serialize_result};
@@ -96,6 +98,40 @@ pub(super) fn handle_set_webview_debugging(
         restart_recommended,
     );
     serialize_result(&status)
+}
+
+pub(super) fn handle_set_runtime_mode(
+    state: &Arc<HubState>,
+    params: Option<Value>,
+) -> Result<Value, (i32, String)> {
+    let parsed: DebugSetRuntimeModeParams = decode_params(params)?;
+    let (previous_mode, updated) = state
+        .config_store()
+        .set_runtime_mode(parsed.runtime_mode)
+        .map_err(|err| {
+            (
+                error_codes::INTERNAL_ERROR,
+                format!("Failed to persist runtime mode: {err}"),
+            )
+        })?;
+    if updated.debug.runtime_mode == RuntimeMode::Release {
+        state.dismiss_hud(Some(builtin_test_plugins::NATIVE_PERF_HUD.to_owned()));
+    }
+    state.on_config_changed(&updated);
+    let snapshot = state.plugins_snapshot();
+    state.logs().info(format!(
+        "Runtime mode switched: {:?} -> {:?} (matched={} active={:?})",
+        previous_mode,
+        updated.debug.runtime_mode,
+        snapshot.matched_plugin_ids.len(),
+        snapshot.active_plugin_id
+    ));
+    serialize_result(&DebugSetRuntimeModeResult {
+        ok: true,
+        runtime_mode: updated.debug.runtime_mode,
+        previous_mode,
+        snapshot,
+    })
 }
 
 fn build_cdp_status(

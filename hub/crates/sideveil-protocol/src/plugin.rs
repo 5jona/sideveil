@@ -21,6 +21,17 @@ fn default_true() -> bool {
 pub const BUILTIN_DIAG_PLUGIN_ID: &str =
     crate::generated::protocol_constants::builtin_diagnostic::ID;
 
+/// Returns `true` when `id` is one of the canonical source-level built-in test plugins
+/// gated by [`crate::config::RuntimeMode`].
+#[must_use]
+pub fn is_builtin_test_plugin(id: &str) -> bool {
+    use crate::generated::protocol_constants::builtin_test_plugins as test_plugins;
+    matches!(
+        id,
+        test_plugins::DIAGNOSTIC | test_plugins::VELLO_SCOPE | test_plugins::NATIVE_PERF_HUD
+    )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PluginBackendKind {

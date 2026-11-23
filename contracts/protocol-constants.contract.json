@@ -98,7 +98,8 @@
         "DEBUG_INSPECT_UI": { "value": "debug.inspectUi", "type": "string" },
         "DEBUG_SET_WEBVIEW_DEBUGGING": { "value": "debug.setWebViewDebugging", "type": "string" },
         "DEBUG_CDP_STATUS": { "value": "debug.cdpStatus", "type": "string" },
-        "DEBUG_RESET_FRAME_METRICS": { "value": "debug.resetFrameMetrics", "type": "string" }
+        "DEBUG_RESET_FRAME_METRICS": { "value": "debug.resetFrameMetrics", "type": "string" },
+        "DEBUG_SET_RUNTIME_MODE": { "value": "debug.setRuntimeMode", "type": "string" }
       }
     },
     "error_codes": {
@@ -143,6 +144,17 @@
         "SURFACE_BACKDROP": { "value": "native-glass", "type": "string" },
         "CAPABILITY_STORAGE": { "value": "storage", "type": "string" },
         "CAPABILITY_TOAST": { "value": "toast", "type": "string" }
+      }
+    },
+    "builtin_test_plugins": {
+      "doc": "Canonical plugin IDs for source-level built-in test and demo plugins gated by runtimeMode.",
+      "rustMod": "builtin_test_plugins",
+      "kotlinObject": "SideVeilBuiltinTestPlugins",
+      "tsName": "SIDEVEIL_BUILTIN_TEST_PLUGINS",
+      "items": {
+        "DIAGNOSTIC": { "value": "sideveil.diagnostic", "type": "string" },
+        "VELLO_SCOPE": { "value": "example.vello-scope", "type": "string" },
+        "NATIVE_PERF_HUD": { "value": "example.native-perf-hud", "type": "string" }
       }
     },
     "timeouts": {

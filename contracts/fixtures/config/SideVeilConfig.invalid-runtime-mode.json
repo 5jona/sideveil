@@ -1,0 +1,40 @@
+{
+  "$def": "SideVeilConfig",
+  "invalid": true,
+  "data": {
+    "version": 1,
+    "enabled": true,
+    "edge": {
+      "side": "right",
+      "topPercent": 32,
+      "heightDp": 168,
+      "hotzoneWidthDp": 24,
+      "triggerDistanceDp": 36,
+      "edgeOffsetDp": 1,
+      "handleVisible": true,
+      "handleOpacity": 0.62,
+      "dimInFullscreen": true,
+      "doubleSwipeInFullscreen": false,
+      "idleAutoDimMs": 3500
+    },
+    "panel": {
+      "widthDp": 340,
+      "heightPercent": 72,
+      "cornerRadiusDp": 22,
+      "themeId": "coloros-glass",
+      "colorMode": "system",
+      "nativeBlurEnabled": true,
+      "blurRadiusPx": 160,
+      "scrimAlpha": 0.0
+    },
+    "scope": {
+      "mode": "allowlist",
+      "allowlist": ["me.weishu.kernelsu"],
+      "denylist": ["com.android.systemui"]
+    },
+    "debug": {
+      "webviewDebuggingEnabled": false,
+      "runtimeMode": "staging"
+    }
+  }
+}

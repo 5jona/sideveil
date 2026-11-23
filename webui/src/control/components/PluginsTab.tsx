@@ -1,7 +1,8 @@
 import type { PluginAuditReport, PluginsSnapshotPayload } from '@pochita/sideveil-sdk';
-import { Button, Card, MetricTile } from '@pochita/ui';
-import { Boxes, Layers, Plus, RefreshCw, Shield, Sparkles } from 'lucide-react';
+import { Badge, Button, Card, MetricTile } from '@pochita/ui';
+import { Boxes, EyeOff, Layers, Plus, RefreshCw, Shield, Sparkles, Wrench } from 'lucide-react';
 import { useState } from 'react';
+import { isBuiltinTestPlugin, type RuntimeMode } from '../../shared/types.ts';
 import type {
   CreateWebEmbedInput,
   PluginEmbedConfigInput,
@@ -16,6 +17,9 @@ export interface PluginsTabProps {
   auditReport: PluginAuditReport | null;
   busyAction: string | null;
   foregroundPackage: string;
+  runtimeMode: RuntimeMode;
+  runtimeModeBusy?: boolean;
+  onSwitchToDebugMode: () => void;
   onReload: () => Promise<void>;
   onSetEnabled: (pluginId: string, enabled: boolean) => Promise<void>;
   onSetPriority: (pluginId: string, priority: number) => Promise<void>;
@@ -33,6 +37,9 @@ export function PluginsTab({
   auditReport,
   busyAction,
   foregroundPackage,
+  runtimeMode,
+  runtimeModeBusy = false,
+  onSwitchToDebugMode,
   onReload,
   onSetEnabled,
   onSetPriority,
@@ -52,9 +59,34 @@ export function PluginsTab({
   const fgPkg = snapshot?.foregroundPackage || foregroundPackage;
 
   const activePlugin = plugins.find((p) => p.id === activePluginId);
+  const hiddenTestCount =
+    runtimeMode === 'release' ? plugins.filter((p) => isBuiltinTestPlugin(p.id)).length : 0;
 
   return (
     <div className="flex flex-col gap-4">
+      {runtimeMode === 'release' ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius-panel)] border border-[var(--border-hairline)] bg-[var(--surface-elevated)] px-3 py-2.5 text-xs">
+          <div className="flex flex-wrap items-center gap-2 text-[var(--text-secondary)]">
+            <EyeOff className="size-3.5 shrink-0 text-[var(--accent)]" />
+            <Badge variant="neutral">正式模式</Badge>
+            <span>
+              内置测试插件已自动隐藏
+              {hiddenTestCount > 0 ? `（共 ${hiddenTestCount} 项，不参与侧边栏匹配）` : ''}
+            </span>
+          </div>
+          <Button
+            size="sm"
+            variant="secondary"
+            aria-label="切换到调试模式"
+            disabled={busyAction !== null || runtimeModeBusy}
+            onClick={onSwitchToDebugMode}
+          >
+            <Wrench className="size-3.5" />
+            切换到调试模式
+          </Button>
+        </div>
+      ) : null}
+
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
         <MetricTile
           label="已注册插件"
@@ -156,6 +188,7 @@ export function PluginsTab({
               plugin={plugin}
               isActive={plugin.id === activePluginId}
               isMatched={matchedIds.includes(plugin.id)}
+              isHiddenByReleaseMode={runtimeMode === 'release' && isBuiltinTestPlugin(plugin.id)}
               isBusy={busyAction === `plugin-${plugin.id}`}
               foregroundPackage={fgPkg}
               onSetEnabled={onSetEnabled}

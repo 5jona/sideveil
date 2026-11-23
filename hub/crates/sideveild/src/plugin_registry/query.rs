@@ -4,9 +4,10 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::PoisonError;
 
-use sideveil_protocol::config::SideVeilConfig;
+use sideveil_protocol::config::{RuntimeMode, SideVeilConfig};
 use sideveil_protocol::plugin::{
     PluginBackendKind, PluginCapability, PluginDescriptor, PluginsSnapshotPayload,
+    is_builtin_test_plugin,
 };
 
 use super::PluginRegistry;
@@ -166,6 +167,7 @@ impl PluginRegistry {
 
         descriptors.sort_by(|a, b| b.priority.cmp(&a.priority).then_with(|| a.id.cmp(&b.id)));
 
+        let hide_builtin_tests = config.debug.runtime_mode == RuntimeMode::Release;
         let matched_plugin_ids: Vec<String> = if !config.enabled || fg.is_empty() || denied {
             Vec::new()
         } else {
@@ -173,6 +175,7 @@ impl PluginRegistry {
                 .iter()
                 .filter(|d| {
                     d.enabled
+                        && !(hide_builtin_tests && is_builtin_test_plugin(&d.id))
                         && (d.global || d.packages.iter().any(|p| p == fg))
                         && matches_activity(&d.activities, fg_act)
                 })

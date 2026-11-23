@@ -8,6 +8,11 @@ typealias HostPluginDiagnosticsPayload = pochita.sideveil.protocol.generated.Hos
 
 const val BUILTIN_DIAG_PLUGIN_ID = SideVeilBuiltinDiagnostic.ID
 
+fun isBuiltinTestPlugin(id: String): Boolean =
+    id == SideVeilBuiltinTestPlugins.DIAGNOSTIC ||
+        id == SideVeilBuiltinTestPlugins.VELLO_SCOPE ||
+        id == SideVeilBuiltinTestPlugins.NATIVE_PERF_HUD
+
 @Serializable
 enum class PluginBackendKind {
     @SerialName("none")

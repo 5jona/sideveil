@@ -346,3 +346,37 @@ fn parses_open_subcommand_with_optional_plugin_id() {
 
     assert!(parse_args(["open".to_owned(), "a".to_owned(), "b".to_owned()]).is_err());
 }
+
+#[test]
+fn parses_debug_mode_subcommand() {
+    let read_mode = parse_args(["debug".to_owned(), "mode".to_owned()]).expect("debug mode read");
+    let (method, params, output_mode) = unwrap_rpc(read_mode.action);
+    assert_eq!(method, methods::CONFIG_GET);
+    assert_eq!(params, None);
+    assert_eq!(output_mode, OutputMode::RuntimeMode);
+
+    let set_debug = parse_args(["debug".to_owned(), "mode".to_owned(), "debug".to_owned()])
+        .expect("debug mode debug");
+    let (method, params, output_mode) = unwrap_rpc(set_debug.action);
+    assert_eq!(method, methods::DEBUG_SET_RUNTIME_MODE);
+    assert_eq!(params, Some(json!({ "runtimeMode": "debug" })));
+    assert_eq!(output_mode, OutputMode::FullEnvelope);
+
+    let set_release = parse_args(["debug".to_owned(), "mode".to_owned(), "release".to_owned()])
+        .expect("debug mode release");
+    let (method, params, output_mode) = unwrap_rpc(set_release.action);
+    assert_eq!(method, methods::DEBUG_SET_RUNTIME_MODE);
+    assert_eq!(params, Some(json!({ "runtimeMode": "release" })));
+    assert_eq!(output_mode, OutputMode::FullEnvelope);
+
+    assert!(parse_args(["debug".to_owned(), "mode".to_owned(), "invalid".to_owned()]).is_err());
+    assert!(
+        parse_args([
+            "debug".to_owned(),
+            "mode".to_owned(),
+            "debug".to_owned(),
+            "extra".to_owned(),
+        ])
+        .is_err()
+    );
+}

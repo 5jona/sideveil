@@ -7,12 +7,12 @@ use std::path::PathBuf;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use sideveil_protocol::config::{PanelState, SideVeilConfig, THEME_COLOROS_GLASS};
+use sideveil_protocol::config::{PanelState, RuntimeMode, SideVeilConfig, THEME_COLOROS_GLASS};
 use sideveil_protocol::generated::protocol_constants::{
-    builtin_diagnostic, error_codes, events, hud_defaults, methods, themes,
+    builtin_diagnostic, builtin_test_plugins, error_codes, events, hud_defaults, methods, themes,
 };
 use sideveil_protocol::hud::{HudDismissPayload, HudTextAlign, HudTextOverlay};
-use sideveil_protocol::plugin::HostPluginDiagnosticsPayload;
+use sideveil_protocol::plugin::{HostPluginDiagnosticsPayload, is_builtin_test_plugin};
 use sideveil_protocol::rpc::{
     DaemonHealth, DaemonStatus, PanelStateChangedPayload, PanelVisibilityPayload, PingResult,
     ScopeChangedPayload,
@@ -56,10 +56,22 @@ fn config_fixtures_match_defaults_and_reject_invalid() {
 
     let with_debug: SideVeilConfig = assert_roundtrip("config/SideVeilConfig.with-debug.json");
     assert!(with_debug.debug.webview_debugging_enabled);
+    assert_eq!(with_debug.debug.runtime_mode, RuntimeMode::Release);
     assert_eq!(with_debug.panel.theme_id, themes::MODERN_SAAS_DARK);
+
+    let runtime_release: SideVeilConfig =
+        assert_roundtrip("config/SideVeilConfig.runtime-release.json");
+    assert_eq!(runtime_release.debug.runtime_mode, RuntimeMode::Release);
+
+    let runtime_debug: SideVeilConfig =
+        assert_roundtrip("config/SideVeilConfig.runtime-debug.json");
+    assert_eq!(runtime_debug.debug.runtime_mode, RuntimeMode::Debug);
 
     let invalid_raw = read_invalid_data("config/SideVeilConfig.invalid-mode.json");
     assert!(serde_json::from_str::<SideVeilConfig>(&invalid_raw).is_err());
+
+    let invalid_runtime = read_invalid_data("config/SideVeilConfig.invalid-runtime-mode.json");
+    assert!(serde_json::from_str::<SideVeilConfig>(&invalid_runtime).is_err());
 }
 
 #[test]
@@ -171,6 +183,15 @@ fn generated_constants_include_host_only_events_and_core_error_codes() {
         methods::PLUGINS_SET_SCOPE_OVERRIDE,
         "plugins.setScopeOverride"
     );
+    assert_eq!(methods::DEBUG_SET_RUNTIME_MODE, "debug.setRuntimeMode");
     assert_eq!(error_codes::PERMISSION_DENIED, -32003);
     assert_eq!(error_codes::BACKEND_TIMEOUT, -32011);
+
+    assert!(is_builtin_test_plugin(builtin_test_plugins::DIAGNOSTIC));
+    assert!(is_builtin_test_plugin(builtin_test_plugins::VELLO_SCOPE));
+    assert!(is_builtin_test_plugin(
+        builtin_test_plugins::NATIVE_PERF_HUD
+    ));
+    assert!(!is_builtin_test_plugin("sideveil.proxy"));
+    assert!(!is_builtin_test_plugin("strata.manager"));
 }

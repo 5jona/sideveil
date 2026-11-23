@@ -32,7 +32,8 @@
         "PANEL_SCRIM_ALPHA": { "value": 0.0, "type": "f32" },
         "SCOPE_ALLOWLIST_DEFAULT_PACKAGE": { "value": "me.weishu.kernelsu", "type": "string" },
         "SCOPE_DENYLIST_DEFAULT_PACKAGE": { "value": "com.android.systemui", "type": "string" },
-        "DEBUG_WEBVIEW_DEBUGGING_ENABLED": { "value": false, "type": "bool" }
+        "DEBUG_WEBVIEW_DEBUGGING_ENABLED": { "value": false, "type": "bool" },
+        "DEFAULT_RUNTIME_MODE": { "value": "release", "type": "string" }
       }
     },
     "config_bounds": {
@@ -84,6 +85,11 @@
       "doc": "Lifecycle state of the primary sidebar overlay panel.",
       "renameAll": "camelCase",
       "variants": [{ "name": "Closed" }, { "name": "Dragging" }, { "name": "Open" }]
+    },
+    "RuntimeMode": {
+      "doc": "Runtime execution mode controlling whether source-level built-in test plugins are exposed.",
+      "renameAll": "camelCase",
+      "variants": [{ "name": "Release" }, { "name": "Debug" }]
     }
   },
   "structs": {
@@ -130,7 +136,15 @@
     "DebugConfig": {
       "doc": "Runtime debugging switches persisted inside SideVeilConfig.",
       "renameAll": "camelCase",
-      "fields": [{ "name": "webview_debugging_enabled", "type": "bool", "default": false }]
+      "fields": [
+        { "name": "webview_debugging_enabled", "type": "bool", "default": false },
+        {
+          "name": "runtime_mode",
+          "type": { "ref": "RuntimeMode" },
+          "optional": true,
+          "default": "release"
+        }
+      ]
     },
     "SideVeilConfig": {
       "doc": "Authoritative persisted configuration schema stored at /data/system/sideveil/config.json.",

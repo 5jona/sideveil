@@ -84,6 +84,7 @@ object SideVeilMethods {
     const val DEBUG_SET_WEBVIEW_DEBUGGING: String = "debug.setWebViewDebugging"
     const val DEBUG_CDP_STATUS: String = "debug.cdpStatus"
     const val DEBUG_RESET_FRAME_METRICS: String = "debug.resetFrameMetrics"
+    const val DEBUG_SET_RUNTIME_MODE: String = "debug.setRuntimeMode"
 }
 
 /** JSON-RPC 2.0 and SideVeil domain error codes. */
@@ -116,6 +117,13 @@ object SideVeilBuiltinDiagnostic {
     const val SURFACE_BACKDROP: String = "native-glass"
     const val CAPABILITY_STORAGE: String = "storage"
     const val CAPABILITY_TOAST: String = "toast"
+}
+
+/** Canonical plugin IDs for source-level built-in test and demo plugins gated by runtimeMode. */
+object SideVeilBuiltinTestPlugins {
+    const val DIAGNOSTIC: String = "sideveil.diagnostic"
+    const val VELLO_SCOPE: String = "example.vello-scope"
+    const val NATIVE_PERF_HUD: String = "example.native-perf-hud"
 }
 
 /** Bounded RPC forwarding timeout limits and plugin event lag sub-event name. */

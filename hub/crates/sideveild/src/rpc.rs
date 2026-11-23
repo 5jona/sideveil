@@ -199,6 +199,10 @@ async fn dispatch_inner(
             require_privileged(is_privileged, &req.method)?;
             debug::handle_reset_frame_metrics(state).await
         }
+        methods::DEBUG_SET_RUNTIME_MODE => {
+            require_privileged(is_privileged, &req.method)?;
+            debug::handle_set_runtime_mode(state, req.params)
+        }
         other => Err((
             error_codes::METHOD_NOT_FOUND,
             format!("Method not found: {other}"),
@@ -261,3 +265,5 @@ mod tests;
 mod tests_debug;
 #[cfg(test)]
 mod tests_embed;
+#[cfg(test)]
+mod tests_runtime_mode;
