@@ -89,6 +89,30 @@ class SideVeilConfigTest {
     }
 
     @Test
+    fun `sanitized guards non-finite floats and matchesPackage trims whitespace`() {
+        val nonFinite =
+            SideVeilConfig(
+                edge = EdgeConfig(handleOpacity = Float.NaN),
+                panel = PanelConfig(scrimAlpha = Float.POSITIVE_INFINITY),
+            ).sanitized()
+        assertEquals(SideVeilConfigDefaults.EDGE_HANDLE_OPACITY, nonFinite.edge.handleOpacity)
+        assertEquals(SideVeilConfigDefaults.PANEL_SCRIM_ALPHA, nonFinite.panel.scrimAlpha)
+
+        val negInf =
+            SideVeilConfig(
+                edge = EdgeConfig(handleOpacity = Float.NEGATIVE_INFINITY),
+                panel = PanelConfig(scrimAlpha = Float.NaN),
+            ).sanitized()
+        assertEquals(SideVeilConfigDefaults.EDGE_HANDLE_OPACITY, negInf.edge.handleOpacity)
+        assertEquals(SideVeilConfigDefaults.PANEL_SCRIM_ALPHA, negInf.panel.scrimAlpha)
+
+        val cfg = SideVeilConfig.DEFAULT
+        assertTrue(cfg.matchesPackage("  me.weishu.kernelsu  "))
+        assertFalse(cfg.matchesPackage("  com.android.systemui  "))
+        assertFalse(cfg.matchesPackage("   "))
+    }
+
+    @Test
     fun `json round-trip preserves structure and defaults`() {
         val encoded = SideVeilPrettyJson.encodeToString(SideVeilConfig.DEFAULT)
         val decoded = SideVeilPrettyJson.decodeFromString<SideVeilConfig>(encoded)

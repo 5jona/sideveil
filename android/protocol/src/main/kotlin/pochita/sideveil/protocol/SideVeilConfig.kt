@@ -66,10 +66,14 @@ data class EdgeConfig(
                     SideVeilConfigBounds.EDGE_OFFSET_DP_MAX,
                 ),
             handleOpacity =
-                handleOpacity.coerceIn(
-                    SideVeilConfigBounds.EDGE_HANDLE_OPACITY_MIN,
-                    SideVeilConfigBounds.EDGE_HANDLE_OPACITY_MAX,
-                ),
+                if (handleOpacity.isFinite()) {
+                    handleOpacity.coerceIn(
+                        SideVeilConfigBounds.EDGE_HANDLE_OPACITY_MIN,
+                        SideVeilConfigBounds.EDGE_HANDLE_OPACITY_MAX,
+                    )
+                } else {
+                    SideVeilConfigDefaults.EDGE_HANDLE_OPACITY
+                },
             idleAutoDimMs =
                 idleAutoDimMs.coerceIn(
                     SideVeilConfigBounds.EDGE_IDLE_AUTO_DIM_MS_MIN,
@@ -124,10 +128,14 @@ data class PanelConfig(
                     SideVeilConfigBounds.PANEL_BLUR_RADIUS_PX_MAX,
                 ),
             scrimAlpha =
-                scrimAlpha.coerceIn(
-                    SideVeilConfigBounds.PANEL_SCRIM_ALPHA_MIN,
-                    SideVeilConfigBounds.PANEL_SCRIM_ALPHA_MAX,
-                ),
+                if (scrimAlpha.isFinite()) {
+                    scrimAlpha.coerceIn(
+                        SideVeilConfigBounds.PANEL_SCRIM_ALPHA_MIN,
+                        SideVeilConfigBounds.PANEL_SCRIM_ALPHA_MAX,
+                    )
+                } else {
+                    SideVeilConfigDefaults.PANEL_SCRIM_ALPHA
+                },
         )
     }
 }
@@ -169,16 +177,17 @@ data class SideVeilConfig(
         )
 
     fun matchesPackage(packageName: String): Boolean {
-        if (!enabled || packageName.isBlank()) {
+        val pkg = packageName.trim()
+        if (!enabled || pkg.isEmpty()) {
             return false
         }
         val cleanScope = scope.sanitized()
-        if (packageName in cleanScope.denylist) {
+        if (pkg in cleanScope.denylist) {
             return false
         }
         return when (cleanScope.mode) {
             ScopeMode.GLOBAL -> true
-            ScopeMode.ALLOWLIST -> packageName in cleanScope.allowlist
+            ScopeMode.ALLOWLIST -> pkg in cleanScope.allowlist
         }
     }
 
