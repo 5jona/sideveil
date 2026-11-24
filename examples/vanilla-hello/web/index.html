@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Vanilla Notes</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main class="panel">
+      <header class="header">
+        <div class="title-group">
+          <h1>Vanilla 便签</h1>
+          <span id="status-badge" class="badge">等待连接</span>
+        </div>
+        <button id="dismiss-btn" type="button" class="icon-btn" aria-label="收起侧边栏">✕</button>
+      </header>
+
+      <section class="card">
+        <label class="field-label" for="note-input">隔离存储便签（note.txt）</label>
+        <textarea
+          id="note-input"
+          rows="5"
+          placeholder="输入内容并点击保存，将通过 fs.writeAtomic 持久化到插件私有目录..."
+          aria-label="便签内容"
+        ></textarea>
+        <div class="actions">
+          <button id="save-btn" type="button" class="btn primary">保存便签</button>
+          <button id="toast-btn" type="button" class="btn secondary">发送 Toast</button>
+        </div>
+      </section>
+
+      <footer class="meta">
+        <span id="caps-line">授权能力：检测中...</span>
+      </footer>
+    </main>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "apiVersion": 1,
+  "id": "example.vanilla-hello",
+  "name": "Vanilla Notes",
+  "version": "1.0.0",
+  "description": "Zero-framework HTML/CSS/JS reference plugin demonstrating WebMessageListener handshake, Oklch theme sync, jailed storage, and toast.",
+  "author": "SideVeil",
+  "icon": "web/icon.svg",
+  "defaultEnabled": false,
+  "entry": "web/index.html",
+  "backend": "none",
+  "capabilities": ["storage", "toast"],
+  "triggers": {
+    "packages": [],
+    "activities": [],
+    "global": true,
+    "priority": 5
+  },
+  "surface": {
+    "backdrop": "native-glass",
+    "presentation": "drawer",
+    "crossOriginIsolated": false,
+    "keepAlive": false,
+    "widthDp": 340,
+    "heightPercent": 58
+  }
+}
