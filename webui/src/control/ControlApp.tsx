@@ -100,6 +100,7 @@ function ControlWorkbench() {
   return (
     <AppShell
       variant="page"
+      maxWidthClassName="max-w-none"
       title="SideVeil 控制台"
       subtitle="全局边缘手势与悬浮窗宿主"
       headerLeading={
@@ -152,7 +153,7 @@ function ControlWorkbench() {
       }
     >
       {configLoadError ? (
-        <div className="mx-auto mb-3 w-full max-w-5xl px-4 sm:px-6">
+        <div className="mb-3 w-full px-3 sm:px-5">
           <div className="flex items-center justify-between gap-3 rounded-[var(--radius-control)] border border-[color-mix(in_oklab,var(--warning)_35%,transparent)] bg-[color-mix(in_oklab,var(--warning)_12%,transparent)] p-3 text-xs text-[var(--text-primary)]">
             <div className="flex items-center gap-2">
               <AlertTriangle className="size-4 shrink-0 text-[var(--warning)]" />
@@ -166,7 +167,7 @@ function ControlWorkbench() {
       ) : null}
 
       {daemonOfflineError ? (
-        <div className="mx-auto mb-3 w-full max-w-5xl px-4 sm:px-6">
+        <div className="mb-3 w-full px-3 sm:px-5">
           <div className="flex items-center justify-between gap-3 rounded-[var(--radius-control)] border border-[color-mix(in_oklab,var(--danger)_35%,transparent)] bg-[color-mix(in_oklab,var(--danger)_12%,transparent)] p-3 text-xs text-[var(--text-primary)]">
             <div className="flex items-center gap-2">
               <AlertCircle className="size-4 shrink-0 text-[var(--danger)]" />
@@ -184,8 +185,8 @@ function ControlWorkbench() {
         tabOrder={CONTROL_TAB_ORDER}
         className="flex w-full flex-1 flex-col"
       >
-        <div className="mx-auto w-full max-w-5xl px-4 sm:px-6">
-          <TabsList>
+        <div className="w-full shrink-0 px-3 sm:px-5">
+          <TabsList className="shrink-0">
             <TabsTrigger value="overview">概览与手势</TabsTrigger>
             <TabsTrigger value="appearance">外观与范围</TabsTrigger>
             <TabsTrigger value="plugins">插件管理</TabsTrigger>
@@ -194,13 +195,13 @@ function ControlWorkbench() {
         </div>
 
         <TabsContent value="overview" className="flex flex-1 flex-col">
-          <div className="mx-auto w-full max-w-5xl flex-1 px-4 sm:px-6">
+          <div className="w-full flex-1 px-3 sm:px-5">
             <OverviewEdgeTab config={config} status={status} onChange={updateConfig} />
           </div>
         </TabsContent>
 
         <TabsContent value="appearance" className="flex flex-1 flex-col">
-          <div className="mx-auto w-full max-w-5xl flex-1 px-4 sm:px-6">
+          <div className="w-full flex-1 px-3 sm:px-5">
             <AppearanceScopeTab
               config={config}
               foregroundPackage={status?.foregroundPackage ?? ''}
@@ -211,7 +212,7 @@ function ControlWorkbench() {
         </TabsContent>
 
         <TabsContent value="plugins" className="flex flex-1 flex-col">
-          <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-4 sm:px-6">
+          <div className="flex w-full flex-1 flex-col px-3 sm:px-5">
             <PluginsTab
               snapshot={pluginsSnapshot}
               loadError={pluginsLoadError}
@@ -236,7 +237,7 @@ function ControlWorkbench() {
         </TabsContent>
 
         <TabsContent value="diagnostics" className="flex flex-1 flex-col">
-          <div className="mx-auto w-full max-w-5xl flex-1 px-4 sm:px-6">
+          <div className="w-full flex-1 px-3 sm:px-5">
             <DiagnosticsTab
               bridge={bridge}
               config={config}
