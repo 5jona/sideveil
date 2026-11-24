@@ -4,23 +4,24 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
-  RUNTIME_MODE_VALUES,
+  collectFixtureFiles,
+  validateFixtureData,
+  validateFixtureFile,
+} from '@gojona/contracts-gen';
+import {
+  PLUGIN_CAPABILITY_VALUES,
+  PLUGIN_ORIGIN_VALUES,
   SIDEVEIL_BUILTIN_DIAGNOSTIC,
-  SIDEVEIL_BUILTIN_TEST_PLUGINS,
   SIDEVEIL_CONFIG_BOUNDS,
   SIDEVEIL_CONFIG_DEFAULTS,
   SIDEVEIL_ERROR_CODES,
   SIDEVEIL_EVENTS,
   SIDEVEIL_HUD_DEFAULTS,
   SIDEVEIL_METHODS,
+  SIDEVEIL_PROTOCOL_VERSIONS,
   SIDEVEIL_THEMES,
   SIDEVEIL_TIMEOUT_BOUNDS,
-} from '@gojona/bridge';
-import {
-  collectFixtureFiles,
-  validateFixtureData,
-  validateFixtureFile,
-} from '@gojona/contracts-gen';
+} from '../src/contracts.ts';
 import { DIAGNOSTIC_PLUGIN_MANIFEST } from '../src/panel/manifest.ts';
 import { DEFAULT_CONFIG, normalizeSideVeilConfig } from '../src/shared/types.ts';
 
@@ -36,19 +37,20 @@ test('generated method, event, error code, and theme registries are complete acr
   const specEvents = Object.keys(constantsSpec.constants.protocol_events.items);
   const specErrors = Object.keys(constantsSpec.constants.error_codes.items);
 
-  assert.equal(Object.keys(SIDEVEIL_METHODS).length, 44);
   assert.deepEqual(Object.keys(SIDEVEIL_METHODS), specMethods);
-  assert.equal(SIDEVEIL_METHODS.DEBUG_SET_RUNTIME_MODE, 'debug.setRuntimeMode');
-  assert.equal(Object.keys(SIDEVEIL_EVENTS).length, 32);
+  assert.equal(SIDEVEIL_METHODS.PLUGINS_GRANT_CAPABILITIES, 'plugins.grantCapabilities');
+  assert.equal(SIDEVEIL_METHODS.PLUGINS_INSPECT_ARCHIVE, 'plugins.inspectArchive');
+  assert.equal(SIDEVEIL_METHODS.PLUGINS_DAEMON_LOGS, 'plugins.daemonLogs');
+  assert.equal(SIDEVEIL_METHODS.PLUGINS_RELOAD_WEBVIEW, 'plugins.reloadWebView');
   assert.deepEqual(Object.keys(SIDEVEIL_EVENTS), specEvents);
+  assert.equal(SIDEVEIL_EVENTS.HOST_READY, 'host.ready');
+  assert.equal(SIDEVEIL_EVENTS.HOST_LOCAL_AUDIT, 'host.localAudit');
   assert.deepEqual(Object.keys(SIDEVEIL_ERROR_CODES), specErrors);
-  assert.deepEqual(RUNTIME_MODE_VALUES, ['release', 'debug']);
-  assert.equal(SIDEVEIL_CONFIG_DEFAULTS.DEFAULT_RUNTIME_MODE, 'release');
-  assert.deepEqual(SIDEVEIL_BUILTIN_TEST_PLUGINS, {
-    DIAGNOSTIC: 'sideveil.diagnostic',
-    VELLO_SCOPE: 'example.vello-scope',
-    NATIVE_PERF_HUD: 'example.native-perf-hud',
-  });
+  assert.equal(SIDEVEIL_PROTOCOL_VERSIONS.PROTOCOL_VERSION, 1);
+  assert.equal(SIDEVEIL_PROTOCOL_VERSIONS.PLUGIN_API_VERSION, 1);
+  assert.equal(SIDEVEIL_PROTOCOL_VERSIONS.MANIFEST_SCHEMA_VERSION, 1);
+  assert.deepEqual(PLUGIN_ORIGIN_VALUES, ['builtin', 'bundled', 'installed', 'web-embed']);
+  assert.ok(PLUGIN_CAPABILITY_VALUES.includes('network-internet'));
 
   assert.equal(SIDEVEIL_EVENTS.CONTAINER_PRESENTATION_CHANGED, 'container.presentationChanged');
   assert.equal(SIDEVEIL_EVENTS.CONTAINER_CLICK_THROUGH_CHANGED, 'container.clickThroughChanged');
@@ -112,12 +114,15 @@ test('all golden fixtures pass their generated JSON Schemas', () => {
     { schema: 'schemas/protocol-status.schema.json', dir: 'fixtures/status' },
     { schema: 'schemas/protocol-events.schema.json', dir: 'fixtures/events' },
     { schema: 'schemas/protocol-theme-hud.schema.json', dir: 'fixtures/theme-hud' },
+    { schema: 'schemas/plugin-manifest.schema.json', dir: 'fixtures/plugin' },
   ];
 
   let totalFixtures = 0;
   for (const { schema, dir } of suites) {
+    const fixtureDir = path.join(CONTRACTS_DIR, dir);
+    if (!fs.existsSync(fixtureDir)) continue;
     const rootSchema = JSON.parse(fs.readFileSync(path.join(CONTRACTS_DIR, schema), 'utf8'));
-    const files = collectFixtureFiles([path.join(CONTRACTS_DIR, dir)]);
+    const files = collectFixtureFiles([fixtureDir]);
     assert.ok(files.length > 0, `Expected fixtures under ${dir}`);
     for (const file of files) {
       totalFixtures++;

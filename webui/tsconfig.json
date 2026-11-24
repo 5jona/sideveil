@@ -14,7 +14,10 @@
     "allowImportingTsExtensions": true,
     "isolatedModules": true,
     "resolveJsonModule": true,
-    "verbatimModuleSyntax": true
+    "verbatimModuleSyntax": true,
+    "paths": {
+      "@gojona/bridge": ["./node_modules/@gojona/bridge"]
+    }
   },
   "include": ["src", "control", "panel", "plugins"]
 }

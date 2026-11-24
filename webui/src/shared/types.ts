@@ -1,36 +1,47 @@
+import type { ColorMode, ThemeId } from '@gojona/ui';
 import {
+  CAPABILITY_RISK_TIER_VALUES,
+  type CapabilityRiskTier,
+  type DaemonHealth,
+  type DaemonStatus,
+  type DynamicThemePalette,
   type EdgeSide,
+  type HostPluginDiagnosticsPayload,
   type PanelState,
-  RUNTIME_MODE_VALUES,
-  type RuntimeMode,
+  type PanelVisibilityPayload,
+  type PingResult,
+  PLUGIN_APPROVAL_STATUS_VALUES,
+  PLUGIN_CAPABILITY_VALUES,
+  PLUGIN_DAEMON_STATUS_VALUES,
+  PLUGIN_ORIGIN_VALUES,
+  type PluginApprovalStatus,
+  type PluginBackendKind,
+  type PluginBackendState,
+  type PluginCapability,
+  type PluginDaemonStatus,
+  type PluginEmbedPrefs,
+  type PluginManifest,
+  type PluginOrigin,
+  type PluginRuntimeDescriptor,
+  type PluginSurfacePrefs,
+  type ScopeChangedPayload,
   type ScopeMode,
   SIDEVEIL_BUILTIN_DIAGNOSTIC,
-  SIDEVEIL_BUILTIN_TEST_PLUGINS,
   SIDEVEIL_CONFIG_BOUNDS,
   SIDEVEIL_CONFIG_DEFAULTS,
   SIDEVEIL_ERROR_CODES,
   SIDEVEIL_EVENTS,
+  SIDEVEIL_HUD_DEFAULTS,
   SIDEVEIL_METHODS,
+  SIDEVEIL_PROTOCOL_VERSIONS,
   SIDEVEIL_THEMES,
-} from '@gojona/bridge';
-import type {
-  DaemonHealth,
-  DaemonStatus,
-  DynamicThemePalette,
-  HostPluginDiagnosticsPayload,
-  PanelVisibilityPayload,
-  PingResult,
-  ScopeChangedPayload,
-  SideVeilEventPayloadMap,
-  SideVeilRpcMethodMap,
-} from '@gojona/sideveil-sdk';
-import type { ColorMode, ThemeId } from '@gojona/ui';
-import {
-  type DebugConfig,
-  type DebugGestureStats,
-  isBuiltinTestPlugin,
-  resolveRuntimeMode,
-} from './debugTypes.ts';
+  SIDEVEIL_TIMEOUT_BOUNDS,
+  type SideVeilCoreEventPayloadMap,
+  type SideVeilCoreRpcMethodMap,
+  type SideVeilThemeHudEventPayloadMap,
+  type SideVeilThemeHudRpcMethodMap,
+} from '../contracts.ts';
+import type { DebugConfig, DebugGestureStats } from './debugTypes.ts';
 
 export { DEFAULT_CONFIG, normalizeSideVeilConfig } from './configNormalize.ts';
 export type {
@@ -42,12 +53,11 @@ export type {
   DebugOverlayWindowSnapshot,
   DebugPanelWindowSnapshot,
   DebugSafeBoundsSnapshot,
-  DebugSetRuntimeModeParams,
-  DebugSetRuntimeModeResult,
   DebugSetWebViewDebuggingParams,
   DebugWebViewSnapshot,
 } from './debugTypes.ts';
 export type {
+  CapabilityRiskTier,
   DaemonHealth,
   DaemonStatus,
   DebugConfig,
@@ -56,27 +66,77 @@ export type {
   HostPluginDiagnosticsPayload,
   PanelVisibilityPayload,
   PingResult,
+  PluginApprovalStatus,
+  PluginBackendKind,
+  PluginBackendState,
+  PluginCapability,
+  PluginDaemonStatus,
+  PluginEmbedPrefs,
+  PluginManifest,
+  PluginOrigin,
+  PluginRuntimeDescriptor,
+  PluginSurfacePrefs,
   ScopeChangedPayload,
-  SideVeilEventPayloadMap,
-  SideVeilRpcMethodMap,
 };
 export {
+  CAPABILITY_RISK_TIER_VALUES,
   type EdgeSide,
-  isBuiltinTestPlugin,
   type PanelState,
-  RUNTIME_MODE_VALUES,
-  type RuntimeMode,
-  resolveRuntimeMode,
+  PLUGIN_APPROVAL_STATUS_VALUES,
+  PLUGIN_CAPABILITY_VALUES,
+  PLUGIN_DAEMON_STATUS_VALUES,
+  PLUGIN_ORIGIN_VALUES,
   type ScopeMode,
   SIDEVEIL_BUILTIN_DIAGNOSTIC,
-  SIDEVEIL_BUILTIN_TEST_PLUGINS,
   SIDEVEIL_CONFIG_BOUNDS,
   SIDEVEIL_CONFIG_DEFAULTS,
   SIDEVEIL_ERROR_CODES,
   SIDEVEIL_EVENTS,
+  SIDEVEIL_HUD_DEFAULTS,
   SIDEVEIL_METHODS,
+  SIDEVEIL_PROTOCOL_VERSIONS,
   SIDEVEIL_THEMES,
+  SIDEVEIL_TIMEOUT_BOUNDS,
 };
+
+export interface SideVeilEventPayloadMap
+  extends SideVeilCoreEventPayloadMap,
+    SideVeilThemeHudEventPayloadMap {}
+
+export interface SideVeilRpcMethodMap
+  extends SideVeilCoreRpcMethodMap,
+    SideVeilThemeHudRpcMethodMap {}
+
+export interface PluginsSnapshot {
+  plugins: PluginRuntimeDescriptor[];
+  matchedPluginIds: string[];
+  activePluginId: string | null;
+  foregroundPackage: string;
+  foregroundActivity?: string;
+}
+
+export interface PluginCapabilityReviewItem {
+  capability: PluginCapability;
+  risk: CapabilityRiskTier;
+  requiresApproval: boolean;
+  isNew: boolean;
+  alreadyGranted: boolean;
+}
+
+export interface PluginArchiveInspection {
+  manifest: PluginManifest;
+  existingVersion?: string;
+  isUpgrade: boolean;
+  capabilities: PluginCapabilityReviewItem[];
+  hasDaemon: boolean;
+  daemonAlreadyApproved: boolean;
+  warnings: string[];
+}
+
+export interface PluginDaemonLogsResult {
+  pluginId: string;
+  lines: string[];
+}
 
 /** Edge gesture hotzone geometry, indicator appearance, and fullscreen trigger settings. */
 export interface EdgeConfig {

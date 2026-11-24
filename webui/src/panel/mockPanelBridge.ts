@@ -49,6 +49,8 @@ export function createMockPanelRpcHandler(
         sensorPid: 14842,
         activePluginId: 'sideveil.diagnostic',
         matchedPluginsCount: 1,
+        protocolVersion: 1,
+        pluginApiVersion: 1,
       } satisfies DaemonStatus;
     }
 

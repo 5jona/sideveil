@@ -15,7 +15,7 @@ const baseConfig = createPochitaViteConfig({
   surface: 'native-glass',
   server: {
     fs: {
-      allow: [__dirname],
+      allow: [__dirname, path.resolve(__dirname, '../contracts')],
     },
   },
 });

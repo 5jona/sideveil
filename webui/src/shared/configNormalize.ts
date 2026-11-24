@@ -1,6 +1,5 @@
-import { SIDEVEIL_CONFIG_BOUNDS, SIDEVEIL_CONFIG_DEFAULTS, SIDEVEIL_THEMES } from '@gojona/bridge';
 import type { ColorMode } from '@gojona/ui';
-import { resolveRuntimeMode } from './debugTypes.ts';
+import { SIDEVEIL_CONFIG_BOUNDS, SIDEVEIL_CONFIG_DEFAULTS, SIDEVEIL_THEMES } from '../contracts.ts';
 import type { SideVeilConfig } from './types.ts';
 
 export const DEFAULT_CONFIG: SideVeilConfig = {
@@ -147,7 +146,6 @@ export function normalizeSideVeilConfig(
       ? {
           debug: {
             webviewDebuggingEnabled: Boolean(raw.debug.webviewDebuggingEnabled),
-            runtimeMode: resolveRuntimeMode(raw.debug),
           },
         }
       : {}),

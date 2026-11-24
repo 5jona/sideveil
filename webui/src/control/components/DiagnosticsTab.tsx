@@ -1,5 +1,5 @@
 import type { BridgeClient } from '@gojona/bridge';
-import type { NetworkContextSnapshot } from '@gojona/sideveil-sdk';
+import type { NetworkContextSnapshot, PluginAuditReport } from '@gojona/sideveil-sdk';
 import {
   Badge,
   Button,
@@ -11,22 +11,20 @@ import {
   LogConsole,
   type LogEntry,
 } from '@gojona/ui';
-import { RefreshCw, RotateCcw, Terminal, Zap } from 'lucide-react';
+import { ChevronDown, ChevronUp, RefreshCw, RotateCcw, Terminal, Wrench, Zap } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import {
-  type DaemonStatus,
-  type DebugCdpStatusResult,
-  type DebugInspectUiSnapshot,
-  type RuntimeMode,
-  resolveRuntimeMode,
-  type SideVeilConfig,
+import type {
+  DaemonStatus,
+  DebugCdpStatusResult,
+  DebugInspectUiSnapshot,
+  SideVeilConfig,
 } from '../../shared/types.ts';
 import type { DebugBusyAction } from '../hooks/useDebugControl.ts';
 import { BridgeTraceCard } from './BridgeTraceCard.tsx';
 import { CdpDebugCard } from './CdpDebugCard.tsx';
 import { GestureStatsCard } from './GestureStatsCard.tsx';
 import { NetworkContextCard } from './NetworkContextCard.tsx';
-import { RuntimeModeCard } from './RuntimeModeCard.tsx';
+import { PluginAuditDrawer } from './PluginAuditDrawer.tsx';
 import { UiInspectorCard } from './UiInspectorCard.tsx';
 
 type LogSourceFilter = 'all' | 'webview';
@@ -45,6 +43,7 @@ export interface DiagnosticsTabProps {
   config: SideVeilConfig;
   status: DaemonStatus | null;
   logs: readonly LogEntry[];
+  auditReport: PluginAuditReport | null;
   busyAction: string | null;
   lastPingMs: number | null;
   cdpStatus: DebugCdpStatusResult | null;
@@ -60,8 +59,8 @@ export interface DiagnosticsTabProps {
   onRestartHost: () => void;
   onRefreshLogs: () => void;
   onClearLogs: () => void;
+  onRefreshAudit: () => Promise<void>;
   onSetWebViewDebugging: (enabled: boolean) => void;
-  onSetRuntimeMode: (mode: RuntimeMode) => void;
   onInspectUi: () => void;
   onResetFrameMetrics: () => void;
   onRefreshNetwork: () => void;
@@ -72,6 +71,7 @@ export function DiagnosticsTab({
   config,
   status,
   logs,
+  auditReport,
   busyAction,
   lastPingMs,
   cdpStatus,
@@ -87,18 +87,27 @@ export function DiagnosticsTab({
   onRestartHost,
   onRefreshLogs,
   onClearLogs,
+  onRefreshAudit,
   onSetWebViewDebugging,
-  onSetRuntimeMode,
   onInspectUi,
   onResetFrameMetrics,
   onRefreshNetwork,
 }: DiagnosticsTabProps) {
   const [logSourceFilter, setLogSourceFilter] = useState<LogSourceFilter>('all');
+  const [devToolsOpen, setDevToolsOpen] = useState(false);
 
   const filteredLogs = useMemo(
     () => (logSourceFilter === 'webview' ? logs.filter(isWebViewConsoleLog) : logs),
     [logSourceFilter, logs],
   );
+
+  const toggleDevTools = () => {
+    const next = !devToolsOpen;
+    setDevToolsOpen(next);
+    if (next && !auditReport) {
+      void onRefreshAudit();
+    }
+  };
 
   return (
     <div className="flex flex-col gap-4">
@@ -180,33 +189,60 @@ export function DiagnosticsTab({
         onRefresh={onRefreshNetwork}
       />
 
-      <RuntimeModeCard
-        runtimeMode={resolveRuntimeMode(config.debug)}
-        busy={debugBusy === 'runtime-mode'}
-        onChange={onSetRuntimeMode}
-      />
+      {/* Collapsible Developer Options (purely client-side fold, zero backend mode flag) */}
+      <Card>
+        <button
+          type="button"
+          aria-expanded={devToolsOpen}
+          aria-label="展开或收起开发者选项"
+          onClick={toggleDevTools}
+          className="flex w-full cursor-pointer items-center justify-between gap-2 px-4 py-3.5 text-left"
+        >
+          <div className="flex flex-col gap-0.5">
+            <span className="flex items-center gap-1.5 text-sm font-semibold text-[var(--text-primary)]">
+              <Wrench className="size-4 text-[var(--accent)]" />
+              开发者选项
+            </span>
+            <span className="text-xs text-[var(--text-secondary)]">
+              WebView 远程调试 (CDP)、宿主运行时审计、UI 检查器、手势统计与 Bridge 追踪
+            </span>
+          </div>
+          <span className="inline-flex shrink-0 items-center gap-1.5 text-xs text-[var(--text-secondary)]">
+            <Badge variant={cdpStatus?.effectiveEnabled ? 'success' : 'neutral'}>
+              {cdpStatus?.effectiveEnabled ? 'CDP 已开启' : devToolsOpen ? '已展开' : '已折叠'}
+            </Badge>
+            {devToolsOpen ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+          </span>
+        </button>
 
-      <CdpDebugCard
-        config={config}
-        status={status}
-        cdpStatus={cdpStatus}
-        busy={debugBusy === 'cdp'}
-        onSetWebViewDebugging={onSetWebViewDebugging}
-      />
-
-      <GestureStatsCard stats={uiSnapshot?.gestureStats ?? status?.gestureStats} />
-
-      <UiInspectorCard
-        snapshot={uiSnapshot}
-        capturedAt={inspectCapturedAt}
-        busy={debugBusy === 'inspect'}
-        resetBusy={debugBusy === 'reset-frames'}
-        error={debugError}
-        onCapture={onInspectUi}
-        onResetFrameMetrics={onResetFrameMetrics}
-      />
-
-      <BridgeTraceCard bridge={bridge} />
+        {devToolsOpen ? (
+          <CardContent className="flex flex-col gap-4 border-t border-[var(--border-hairline)] pt-4">
+            <CdpDebugCard
+              config={config}
+              status={status}
+              cdpStatus={cdpStatus}
+              busy={debugBusy === 'cdp'}
+              onSetWebViewDebugging={onSetWebViewDebugging}
+            />
+            <PluginAuditDrawer
+              report={auditReport}
+              loading={busyAction === 'audit'}
+              onRefresh={onRefreshAudit}
+            />
+            <GestureStatsCard stats={uiSnapshot?.gestureStats ?? status?.gestureStats} />
+            <UiInspectorCard
+              snapshot={uiSnapshot}
+              capturedAt={inspectCapturedAt}
+              busy={debugBusy === 'inspect'}
+              resetBusy={debugBusy === 'reset-frames'}
+              error={debugError}
+              onCapture={onInspectUi}
+              onResetFrameMetrics={onResetFrameMetrics}
+            />
+            <BridgeTraceCard bridge={bridge} />
+          </CardContent>
+        ) : null}
+      </Card>
 
       <div className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center justify-between gap-2">

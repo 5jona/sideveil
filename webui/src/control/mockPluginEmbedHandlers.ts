@@ -1,17 +1,17 @@
 import type { ExecResult } from '@gojona/bridge';
-import type { PluginDescriptor, PluginsSnapshotPayload } from '@gojona/sideveil-sdk';
+import type { PluginRuntimeDescriptor, PluginsSnapshot } from '../shared/types.ts';
 import { INITIAL_MOCK_PLUGINS } from './mockPluginFixtures.ts';
 
 /** Mutable in-memory plugin registry state used by local Control Plane mock bridge. */
 export interface MockPluginState {
   activePluginId: string;
-  plugins: PluginDescriptor[];
+  plugins: PluginRuntimeDescriptor[];
 }
 
 /** Shared context passed to mock plugin CLI/RPC command handlers. */
 export interface MockPluginHandlerCtx {
   state: MockPluginState;
-  getSnapshot: () => PluginsSnapshotPayload;
+  getSnapshot: () => PluginsSnapshot;
   appendLog: (msg: string) => void;
 }
 
@@ -85,34 +85,50 @@ export function createEmbedPlugin(
   const lanSsids = pickStrList(params.lanSsids);
   const allowCleartext = Boolean(params.allowCleartext);
 
-  const nextPlugin: PluginDescriptor = {
+  const nextPlugin: PluginRuntimeDescriptor = {
     id,
     name,
     version: '1.0.0',
+    origin: 'web-embed',
+    schemaVersion: 1,
+    apiVersion: 1,
+    entry: '',
     embed: {
       url,
       remoteUrl,
-      lanSsids: lanSsids && lanSsids.length > 0 ? lanSsids : undefined,
+      lanSsids: lanSsids ?? [],
       allowedOrigins: allowedOrigins.length > 0 ? allowedOrigins : defaultOrigins,
       allowCleartext,
       wideViewport: pickBool(params.wideViewport, true),
       allowZoom: pickBool(params.allowZoom, false),
       webHistoryBack: pickBool(params.webHistoryBack, true),
       textZoom: pickInt(params.textZoom, undefined),
-      showToolbar: pickBool(params.showToolbar, undefined),
+      showToolbar: pickBool(params.showToolbar, true),
       keepAliveGraceSec: pickInt(params.keepAliveGraceSec, undefined),
     },
     builtin: false,
+    defaultEnabled: true,
     enabled: true,
     priority: pickInt(params.priority, 0),
     packages: [],
+    activities: [],
     global: pickBool(params.global, true),
     hasScopeOverride: false,
     backend: 'none',
     backendState: 'none',
+    backendPackages: [],
     capabilities: allowCleartext ? ['network-lan', 'network-context'] : ['network-context'],
+    grantedCapabilities: allowCleartext ? ['network-lan', 'network-context'] : ['network-context'],
+    pendingCapabilities: [],
+    approvalStatus: 'approved',
+    daemonApproved: true,
+    daemonStatus: 'not-configured',
+    daemonRestartCount: 0,
+    hasDaemon: false,
     surface: {
       backdrop: 'opaque',
+      presentation: 'drawer',
+      crossOriginIsolated: false,
       keepAlive: Boolean(params.keepAlive),
       widthDp: pickInt(params.widthDp, 380),
       heightPercent: pickInt(params.heightPercent, 78),
@@ -169,11 +185,13 @@ export function updateEmbedConfig(
   return rpcOk(ctx.getSnapshot());
 }
 
-/** Handles mock `plugins.uninstall` removals while protecting built-in plugins. */
+/** Handles mock `plugins.uninstall` removals while protecting built-in and bundled plugins. */
 export function uninstallMockPlugin(ctx: MockPluginHandlerCtx, pluginId: string): ExecResult {
   const target = ctx.state.plugins.find((p) => p.id === pluginId);
   if (!target) return rpcErr(`未找到插件: ${pluginId}`);
-  if (target.builtin) return rpcErr('内置插件不允许卸载');
+  if (target.builtin || target.origin === 'bundled') {
+    return rpcErr('内置或模块随附插件不允许卸载');
+  }
   ctx.state.plugins = ctx.state.plugins.filter((p) => p.id !== pluginId);
   if (ctx.state.activePluginId === pluginId) {
     ctx.state.activePluginId = 'sideveil.diagnostic';

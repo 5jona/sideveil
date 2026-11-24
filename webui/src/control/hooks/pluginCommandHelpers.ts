@@ -1,6 +1,6 @@
 import { shellQuote } from '@gojona/bridge';
-import type { PluginDescriptor, PluginsSnapshotPayload } from '@gojona/sideveil-sdk';
-import { CTL_BIN, SIDEVEIL_METHODS } from '../../shared/types.ts';
+import { CTL_BIN, type PluginsSnapshot, SIDEVEIL_METHODS } from '../../shared/types.ts';
+import { normalizeRuntimeDescriptor } from './pluginAdminHelpers.ts';
 
 /** Scope override mutation input passed to `plugins.setScopeOverride`. */
 export interface PluginScopeOverrideInput {
@@ -82,13 +82,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function isPluginDescriptor(value: unknown): value is PluginDescriptor {
+function isRawPluginRecord(value: unknown): value is Record<string, unknown> {
   return isRecord(value) && typeof value.id === 'string' && typeof value.name === 'string';
 }
 
-function toPluginsSnapshot(record: Record<string, unknown>): PluginsSnapshotPayload | null {
+function toPluginsSnapshot(record: Record<string, unknown>): PluginsSnapshot | null {
   if (!Array.isArray(record.plugins)) return null;
-  const plugins = record.plugins.filter(isPluginDescriptor);
+  const plugins = record.plugins.filter(isRawPluginRecord).map(normalizeRuntimeDescriptor);
   const matchedPluginIds = Array.isArray(record.matchedPluginIds)
     ? record.matchedPluginIds.filter((item): item is string => typeof item === 'string')
     : [];
@@ -106,8 +106,8 @@ function toPluginsSnapshot(record: Record<string, unknown>): PluginsSnapshotPayl
   };
 }
 
-/** Unwraps a `PluginsSnapshotPayload` from either a direct snapshot or a JSON-RPC result envelope. */
-export function extractSnapshotPayload(value: unknown): PluginsSnapshotPayload | null {
+/** Unwraps a `PluginsSnapshot` from either a direct snapshot or a JSON-RPC result envelope. */
+export function extractSnapshotPayload(value: unknown): PluginsSnapshot | null {
   if (!isRecord(value)) return null;
   const direct = toPluginsSnapshot(value);
   if (direct) return direct;
@@ -120,8 +120,8 @@ export function extractSnapshotPayload(value: unknown): PluginsSnapshotPayload |
   return null;
 }
 
-/** Parses JSON stdout returned by `sideveil-ctl` into a `PluginsSnapshotPayload`. */
-export function parsePluginsSnapshot(stdout: string): PluginsSnapshotPayload | null {
+/** Parses JSON stdout returned by `sideveil-ctl` into a `PluginsSnapshot`. */
+export function parsePluginsSnapshot(stdout: string): PluginsSnapshot | null {
   const trimmed = stdout.trim();
   if (!trimmed) return null;
   try {

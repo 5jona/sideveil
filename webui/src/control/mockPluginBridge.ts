@@ -1,6 +1,13 @@
 import type { ExecResult } from '@gojona/bridge';
 import { SIDEVEIL_METHODS } from '../shared/types.ts';
 import {
+  fetchMockDaemonLogs,
+  grantMockCapabilities,
+  inspectMockArchive,
+  installMockPlugin,
+  reloadMockWebView,
+} from './mockPluginAdminHandlers.ts';
+import {
   createEmbedPlugin,
   type MockPluginHandlerCtx,
   type MockPluginState,
@@ -51,6 +58,21 @@ export function handleMockPluginExec(
     }
     if (rpcCall.method === SIDEVEIL_METHODS.PLUGINS_UNINSTALL) {
       return uninstallMockPlugin(ctx, String(rpcCall.params.pluginId ?? ''));
+    }
+    if (rpcCall.method === SIDEVEIL_METHODS.PLUGINS_GRANT_CAPABILITIES) {
+      return grantMockCapabilities(ctx, rpcCall.params);
+    }
+    if (rpcCall.method === SIDEVEIL_METHODS.PLUGINS_INSPECT_ARCHIVE) {
+      return inspectMockArchive(ctx, rpcCall.params);
+    }
+    if (rpcCall.method === SIDEVEIL_METHODS.PLUGINS_INSTALL) {
+      return installMockPlugin(ctx, rpcCall.params);
+    }
+    if (rpcCall.method === SIDEVEIL_METHODS.PLUGINS_DAEMON_LOGS) {
+      return fetchMockDaemonLogs(ctx, rpcCall.params);
+    }
+    if (rpcCall.method === SIDEVEIL_METHODS.PLUGINS_RELOAD_WEBVIEW) {
+      return reloadMockWebView(ctx, rpcCall.params);
     }
   }
 

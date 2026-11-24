@@ -1,7 +1,7 @@
-import type { PluginEmbedPrefs } from '@gojona/sideveil-sdk';
 import { Button, SettingRow, Switch } from '@gojona/ui';
 import { GlobeLock, RotateCcw, Save } from 'lucide-react';
 import { useId, useState } from 'react';
+import type { PluginEmbedPrefs } from '../../shared/types.ts';
 import {
   clampEmbedNumber,
   normalizeOriginList,

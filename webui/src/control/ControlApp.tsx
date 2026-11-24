@@ -20,7 +20,7 @@ import {
   SlidersHorizontal,
 } from 'lucide-react';
 import { useMemo } from 'react';
-import { CONFIG_PATH, resolveRuntimeMode } from '../shared/types.ts';
+import { CONFIG_PATH } from '../shared/types.ts';
 import { AppearanceScopeTab } from './components/AppearanceScopeTab.tsx';
 import { DiagnosticsTab } from './components/DiagnosticsTab.tsx';
 import { OverviewEdgeTab } from './components/OverviewEdgeTab.tsx';
@@ -40,6 +40,7 @@ function ControlWorkbench() {
     status,
     logs,
     pluginsSnapshot,
+    pluginsLoadError,
     auditReport,
     busyAction,
     lastPingMs,
@@ -50,12 +51,16 @@ function ControlWorkbench() {
     loadConfigFromDisk,
     refreshStatus,
     refreshLogs,
-    refreshPlugins,
     reloadPlugins,
     setPluginEnabled,
     setPluginPriority,
     setPluginScopeOverride,
     setPluginDevUrl,
+    grantPluginCapabilities,
+    inspectPluginArchive,
+    installPlugin,
+    fetchPluginDaemonLogs,
+    reloadPluginWebView,
     createWebEmbed,
     setEmbedConfig,
     uninstallPlugin,
@@ -75,18 +80,14 @@ function ControlWorkbench() {
     debugBusy,
     debugError,
     setWebViewDebugging,
-    setRuntimeMode,
     inspectUi,
     resetFrameMetrics,
   } = useDebugControl({
     bridge,
     pushToast,
     onConfigSynced: loadConfigFromDisk,
-    onPluginsRefresh: refreshPlugins,
     onRefreshLogs: refreshLogs,
   });
-
-  const runtimeMode = resolveRuntimeMode(config.debug);
 
   const isPanelOpen = status?.panelState === 'open';
   const envLabel =
@@ -142,107 +143,128 @@ function ControlWorkbench() {
           </Button>
         </>
       }
+      bodyClassName="flex max-w-none flex-col px-0"
       footer={
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span>配置：{CONFIG_PATH}</span>
-          <span>修改自动保存并热更新</span>
+          <span>当前前台：{status?.foregroundPackage || '未知'}</span>
         </div>
       }
     >
       {configLoadError ? (
-        <div className="mb-4 flex items-center justify-between gap-3 rounded-[var(--radius-control)] border border-[color-mix(in_oklab,var(--warning)_35%,transparent)] bg-[color-mix(in_oklab,var(--warning)_12%,transparent)] p-3 text-xs text-[var(--text-primary)]">
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="size-4 shrink-0 text-[var(--warning)]" />
-            <span>{configLoadError}</span>
+        <div className="mx-auto mb-3 w-full max-w-5xl px-4 sm:px-6">
+          <div className="flex items-center justify-between gap-3 rounded-[var(--radius-control)] border border-[color-mix(in_oklab,var(--warning)_35%,transparent)] bg-[color-mix(in_oklab,var(--warning)_12%,transparent)] p-3 text-xs text-[var(--text-primary)]">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="size-4 shrink-0 text-[var(--warning)]" />
+              <span>{configLoadError}</span>
+            </div>
+            <Button size="sm" variant="secondary" onClick={() => void loadConfigFromDisk()}>
+              重试加载
+            </Button>
           </div>
-          <Button size="sm" variant="secondary" onClick={() => void loadConfigFromDisk()}>
-            重试读取
-          </Button>
         </div>
       ) : null}
 
       {daemonOfflineError ? (
-        <div className="mb-4 flex items-center justify-between gap-3 rounded-[var(--radius-control)] border border-[color-mix(in_oklab,var(--danger)_35%,transparent)] bg-[color-mix(in_oklab,var(--danger)_12%,transparent)] p-3 text-xs text-[var(--text-primary)]">
-          <div className="flex items-center gap-2">
-            <AlertCircle className="size-4 shrink-0 text-[var(--danger)]" />
-            <span>SideVeil 守护进程未运行：{daemonOfflineError}</span>
+        <div className="mx-auto mb-3 w-full max-w-5xl px-4 sm:px-6">
+          <div className="flex items-center justify-between gap-3 rounded-[var(--radius-control)] border border-[color-mix(in_oklab,var(--danger)_35%,transparent)] bg-[color-mix(in_oklab,var(--danger)_12%,transparent)] p-3 text-xs text-[var(--text-primary)]">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="size-4 shrink-0 text-[var(--danger)]" />
+              <span>SideVeil 守护进程未运行：{daemonOfflineError}</span>
+            </div>
+            <Button size="sm" variant="secondary" onClick={() => void refreshStatus()}>
+              重试连接
+            </Button>
           </div>
-          <Button size="sm" variant="secondary" onClick={() => void refreshStatus()}>
-            重试连接
-          </Button>
         </div>
       ) : null}
 
-      <Tabs defaultValue="overview" tabOrder={CONTROL_TAB_ORDER} className="w-full">
-        <TabsList>
-          <TabsTrigger value="overview">概览与手势</TabsTrigger>
-          <TabsTrigger value="appearance">外观与范围</TabsTrigger>
-          <TabsTrigger value="plugins">插件管理</TabsTrigger>
-          <TabsTrigger value="diagnostics">诊断与日志</TabsTrigger>
-        </TabsList>
+      <Tabs
+        defaultValue="overview"
+        tabOrder={CONTROL_TAB_ORDER}
+        className="flex w-full flex-1 flex-col"
+      >
+        <div className="mx-auto w-full max-w-5xl px-4 sm:px-6">
+          <TabsList>
+            <TabsTrigger value="overview">概览与手势</TabsTrigger>
+            <TabsTrigger value="appearance">外观与范围</TabsTrigger>
+            <TabsTrigger value="plugins">插件管理</TabsTrigger>
+            <TabsTrigger value="diagnostics">诊断与日志</TabsTrigger>
+          </TabsList>
+        </div>
 
-        <TabsContent value="overview">
-          <OverviewEdgeTab config={config} status={status} onChange={updateConfig} />
+        <TabsContent value="overview" className="flex flex-1 flex-col">
+          <div className="mx-auto w-full max-w-5xl flex-1 px-4 sm:px-6">
+            <OverviewEdgeTab config={config} status={status} onChange={updateConfig} />
+          </div>
         </TabsContent>
 
-        <TabsContent value="appearance">
-          <AppearanceScopeTab
-            config={config}
-            foregroundPackage={status?.foregroundPackage ?? ''}
-            crossWindowBlurSupported={status?.crossWindowBlurSupported ?? null}
-            onChange={updateConfig}
-          />
+        <TabsContent value="appearance" className="flex flex-1 flex-col">
+          <div className="mx-auto w-full max-w-5xl flex-1 px-4 sm:px-6">
+            <AppearanceScopeTab
+              config={config}
+              foregroundPackage={status?.foregroundPackage ?? ''}
+              crossWindowBlurSupported={status?.crossWindowBlurSupported ?? null}
+              onChange={updateConfig}
+            />
+          </div>
         </TabsContent>
 
-        <TabsContent value="plugins">
-          <PluginsTab
-            snapshot={pluginsSnapshot}
-            auditReport={auditReport}
-            busyAction={busyAction}
-            foregroundPackage={status?.foregroundPackage ?? ''}
-            runtimeMode={runtimeMode}
-            runtimeModeBusy={debugBusy === 'runtime-mode'}
-            onSwitchToDebugMode={() => void setRuntimeMode('debug')}
-            onReload={reloadPlugins}
-            onSetEnabled={setPluginEnabled}
-            onSetPriority={setPluginPriority}
-            onSetScopeOverride={setPluginScopeOverride}
-            onSetDevUrl={setPluginDevUrl}
-            onCreateWebEmbed={createWebEmbed}
-            onSetEmbedConfig={setEmbedConfig}
-            onUninstallPlugin={uninstallPlugin}
-            onRefreshAudit={refreshPluginAudit}
-            onSelectPlugin={selectPlugin}
-          />
+        <TabsContent value="plugins" className="flex flex-1 flex-col">
+          <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-4 sm:px-6">
+            <PluginsTab
+              snapshot={pluginsSnapshot}
+              loadError={pluginsLoadError}
+              busyAction={busyAction}
+              foregroundPackage={status?.foregroundPackage ?? ''}
+              onReload={reloadPlugins}
+              onSetEnabled={setPluginEnabled}
+              onSetPriority={setPluginPriority}
+              onSetScopeOverride={setPluginScopeOverride}
+              onSetDevUrl={setPluginDevUrl}
+              onGrantCapabilities={grantPluginCapabilities}
+              onInspectArchive={inspectPluginArchive}
+              onInstallPlugin={installPlugin}
+              onFetchDaemonLogs={fetchPluginDaemonLogs}
+              onReloadWebView={reloadPluginWebView}
+              onCreateWebEmbed={createWebEmbed}
+              onSetEmbedConfig={setEmbedConfig}
+              onUninstallPlugin={uninstallPlugin}
+              onSelectPlugin={selectPlugin}
+            />
+          </div>
         </TabsContent>
 
-        <TabsContent value="diagnostics">
-          <DiagnosticsTab
-            bridge={bridge}
-            config={config}
-            status={status}
-            logs={logs}
-            busyAction={busyAction}
-            lastPingMs={lastPingMs}
-            cdpStatus={cdpStatus}
-            uiSnapshot={uiSnapshot}
-            inspectCapturedAt={inspectCapturedAt}
-            debugBusy={debugBusy}
-            debugError={debugError}
-            networkContext={networkContext}
-            networkLoading={networkLoading}
-            networkError={networkError}
-            onPing={() => void runCtl('ping', 'Daemon Ping')}
-            onReloadConfig={() => void runCtl('reload', '重载配置')}
-            onRestartHost={() => void runCtl('restart-host', '重启 Host 服务')}
-            onRefreshLogs={() => void refreshLogs()}
-            onClearLogs={() => void clearLogs()}
-            onSetWebViewDebugging={(enabled) => void setWebViewDebugging(enabled)}
-            onSetRuntimeMode={(mode) => void setRuntimeMode(mode)}
-            onInspectUi={() => void inspectUi()}
-            onResetFrameMetrics={() => void resetFrameMetrics()}
-            onRefreshNetwork={() => void refreshNetworkContext()}
-          />
+        <TabsContent value="diagnostics" className="flex flex-1 flex-col">
+          <div className="mx-auto w-full max-w-5xl flex-1 px-4 sm:px-6">
+            <DiagnosticsTab
+              bridge={bridge}
+              config={config}
+              status={status}
+              logs={logs}
+              auditReport={auditReport}
+              busyAction={busyAction}
+              lastPingMs={lastPingMs}
+              cdpStatus={cdpStatus}
+              uiSnapshot={uiSnapshot}
+              inspectCapturedAt={inspectCapturedAt}
+              debugBusy={debugBusy}
+              debugError={debugError}
+              networkContext={networkContext}
+              networkLoading={networkLoading}
+              networkError={networkError}
+              onPing={() => void runCtl('ping', 'Daemon Ping')}
+              onReloadConfig={() => void runCtl('reload', '重载配置')}
+              onRestartHost={() => void runCtl('restart-host', '重启 Host 服务')}
+              onRefreshLogs={() => void refreshLogs()}
+              onClearLogs={() => void clearLogs()}
+              onRefreshAudit={refreshPluginAudit}
+              onSetWebViewDebugging={(enabled) => void setWebViewDebugging(enabled)}
+              onInspectUi={() => void inspectUi()}
+              onResetFrameMetrics={() => void resetFrameMetrics()}
+              onRefreshNetwork={() => void refreshNetworkContext()}
+            />
+          </div>
         </TabsContent>
       </Tabs>
     </AppShell>

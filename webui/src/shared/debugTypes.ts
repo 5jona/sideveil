@@ -1,49 +1,13 @@
-import {
-  type RuntimeMode,
-  SIDEVEIL_BUILTIN_TEST_PLUGINS,
-  SIDEVEIL_CONFIG_DEFAULTS,
-} from '@gojona/bridge';
-import type {
-  DebugGestureStats,
-  EdgeSide,
-  PanelState,
-  PluginsSnapshotPayload,
-} from '@gojona/sideveil-sdk';
+import type { DebugGestureStats, EdgeSide, PanelState } from '../contracts.ts';
 
 export type { DebugGestureStats };
 
 export interface DebugConfig {
   webviewDebuggingEnabled: boolean;
-  runtimeMode?: RuntimeMode;
 }
 
 export interface DebugSetWebViewDebuggingParams {
   enabled: boolean;
-}
-
-export interface DebugSetRuntimeModeParams {
-  runtimeMode: RuntimeMode;
-}
-
-export interface DebugSetRuntimeModeResult {
-  ok: boolean;
-  runtimeMode: RuntimeMode;
-  previousMode: RuntimeMode;
-  snapshot?: PluginsSnapshotPayload;
-}
-
-const BUILTIN_TEST_PLUGIN_IDS: ReadonlySet<string> = new Set(
-  Object.values(SIDEVEIL_BUILTIN_TEST_PLUGINS),
-);
-
-/** Returns true when `id` is one of the canonical source-level built-in test plugins. */
-export function isBuiltinTestPlugin(id: string): boolean {
-  return BUILTIN_TEST_PLUGIN_IDS.has(id);
-}
-
-/** Resolves the effective runtime mode from `debug`, defaulting to `release`. */
-export function resolveRuntimeMode(debug?: Partial<DebugConfig> | null): RuntimeMode {
-  return debug?.runtimeMode === 'debug' ? 'debug' : SIDEVEIL_CONFIG_DEFAULTS.DEFAULT_RUNTIME_MODE;
 }
 
 export interface DebugCdpStatusResult {

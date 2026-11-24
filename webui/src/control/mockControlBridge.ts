@@ -1,16 +1,11 @@
 import type { ExecResult } from '@gojona/bridge';
-import type {
-  NetworkContextSnapshot,
-  PluginDescriptor,
-  PluginsSnapshotPayload,
-} from '@gojona/sideveil-sdk';
+import type { NetworkContextSnapshot } from '@gojona/sideveil-sdk';
 import {
   CONFIG_PATH,
   type DaemonStatus,
   DEFAULT_CONFIG,
-  isBuiltinTestPlugin,
-  type RuntimeMode,
-  resolveRuntimeMode,
+  type PluginRuntimeDescriptor,
+  type PluginsSnapshot,
   type SideVeilConfig,
 } from '../shared/types.ts';
 import { handleMockDebugExec } from './mockDebugBridge.ts';
@@ -23,18 +18,16 @@ import {
 
 interface MockControlState {
   panelState: 'closed' | 'open';
-  runtimeMode: RuntimeMode;
   pingCount: number;
   logSeq: number;
   logs: string[];
   activePluginId: string;
-  plugins: PluginDescriptor[];
+  plugins: PluginRuntimeDescriptor[];
   network: NetworkContextSnapshot;
 }
 
 const mockState: MockControlState = {
   panelState: 'closed',
-  runtimeMode: 'release',
   pingCount: 0,
   logSeq: 9,
   logs: [
@@ -52,31 +45,31 @@ const mockState: MockControlState = {
   plugins: INITIAL_MOCK_PLUGINS.map((p) => ({
     ...p,
     packages: [...p.packages],
-    ...(p.embed ? { embed: { ...p.embed } } : {}),
+    activities: [...p.activities],
+    backendPackages: [...p.backendPackages],
+    capabilities: [...p.capabilities],
+    grantedCapabilities: [...p.grantedCapabilities],
+    pendingCapabilities: [...p.pendingCapabilities],
+    ...(p.embed
+      ? {
+          embed: {
+            ...p.embed,
+            lanSsids: [...p.embed.lanSsids],
+            allowedOrigins: [...p.embed.allowedOrigins],
+          },
+        }
+      : {}),
     surface: { ...p.surface },
   })),
   network: { ...INITIAL_MOCK_NETWORK_CONTEXT },
 };
 
-function getMockSnapshot(
-  fgPkg = 'me.weishu.kernelsu',
-  modeOverride?: RuntimeMode,
-): PluginsSnapshotPayload {
-  const mode = modeOverride ?? mockState.runtimeMode;
-  const hideBuiltinTests = mode === 'release';
+function getMockSnapshot(fgPkg = 'me.weishu.kernelsu'): PluginsSnapshot {
   const matched = mockState.plugins
-    .filter(
-      (p) =>
-        p.enabled &&
-        !(hideBuiltinTests && isBuiltinTestPlugin(p.id)) &&
-        (p.global || p.packages.includes(fgPkg)),
-    )
+    .filter((p) => p.enabled && (p.global || p.packages.includes(fgPkg) || p.builtin))
     .map((p) => p.id);
 
-  const activePluginId =
-    mockState.activePluginId && !(hideBuiltinTests && isBuiltinTestPlugin(mockState.activePluginId))
-      ? mockState.activePluginId
-      : (matched[0] ?? null);
+  const activePluginId = mockState.activePluginId || (matched[0] ?? null);
 
   return {
     plugins: mockState.plugins,
@@ -89,9 +82,7 @@ function getMockSnapshot(
 function readMockStoredConfig(): SideVeilConfig {
   try {
     const raw = window.localStorage.getItem(`pochita:mockfs:sideveil-control:${CONFIG_PATH}`);
-    if (raw) {
-      return JSON.parse(raw) as SideVeilConfig;
-    }
+    if (raw) return JSON.parse(raw) as SideVeilConfig;
   } catch {
     // Ignore storage read issues.
   }
@@ -103,9 +94,7 @@ function appendMockLog(msg: string) {
   const ts = `${now.toTimeString().slice(0, 8)}.${String(now.getMilliseconds()).padStart(3, '0')}`;
   mockState.logSeq += 1;
   mockState.logs.push(`${ts} [I] ${msg}`);
-  if (mockState.logs.length > 80) {
-    mockState.logs.shift();
-  }
+  if (mockState.logs.length > 80) mockState.logs.shift();
 }
 
 function okJson(payload: unknown): ExecResult {
@@ -118,26 +107,14 @@ function rpcOk(result: unknown): ExecResult {
 
 export async function handleMockControlExec(cmd: string): Promise<ExecResult> {
   const cfg = readMockStoredConfig();
-  if (cfg.debug?.runtimeMode) {
-    mockState.runtimeMode = resolveRuntimeMode(cfg.debug);
-  }
   const normalized = cmd.replace(/['"]/g, '');
 
   const debugRes = handleMockDebugExec(normalized, {
     cfg,
-    runtimeMode: mockState.runtimeMode,
     panelState: mockState.panelState,
     activePluginId: getMockSnapshot().activePluginId ?? '',
     matchedPluginIds: getMockSnapshot().matchedPluginIds,
     devServerActive: mockState.plugins.some((p) => Boolean(p.devServerUrl)),
-    setRuntimeMode: (nextMode) => {
-      mockState.runtimeMode = nextMode;
-      const snap = getMockSnapshot('me.weishu.kernelsu', nextMode);
-      if (snap.activePluginId) {
-        mockState.activePluginId = snap.activePluginId;
-      }
-      return snap;
-    },
     appendLog: appendMockLog,
   });
   if (debugRes) return debugRes;
@@ -174,6 +151,8 @@ export async function handleMockControlExec(cmd: string): Promise<ExecResult> {
       sensorPid: 14842,
       activePluginId: getMockSnapshot().activePluginId ?? undefined,
       matchedPluginsCount: getMockSnapshot().matchedPluginIds.length,
+      protocolVersion: 1,
+      pluginApiVersion: 1,
       gestureStats: {
         edgeSwipesTriggered: 18,
         edgeSwipesRejected: 2,

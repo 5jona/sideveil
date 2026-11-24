@@ -1,13 +1,5 @@
 import type { ExecResult } from '@gojona/bridge';
-import type { PluginsSnapshotPayload } from '@gojona/sideveil-sdk';
-import {
-  CONFIG_PATH,
-  type DebugCdpStatusResult,
-  type DebugSetRuntimeModeResult,
-  type RuntimeMode,
-  resolveRuntimeMode,
-  type SideVeilConfig,
-} from '../shared/types.ts';
+import { CONFIG_PATH, type DebugCdpStatusResult, type SideVeilConfig } from '../shared/types.ts';
 import { buildMockInspectUiSnapshot } from './mockInspectSnapshot.ts';
 import { MOCK_HOST_PID } from './mockPluginFixtures.ts';
 
@@ -24,12 +16,10 @@ function writeMockStoredConfig(next: SideVeilConfig): void {
 
 export interface MockDebugContext {
   cfg: SideVeilConfig;
-  runtimeMode: RuntimeMode;
   panelState: 'closed' | 'open';
   activePluginId: string;
   matchedPluginIds: string[];
   devServerActive?: boolean;
-  setRuntimeMode: (mode: RuntimeMode) => PluginsSnapshotPayload;
   appendLog: (msg: string) => void;
 }
 
@@ -63,32 +53,6 @@ export function handleMockDebugExec(normalized: string, ctx: MockDebugContext): 
     return rpcOk(snapshot);
   }
 
-  const modeSetMatch = normalized.match(/sideveil-ctl debug mode (release|debug)\b/);
-  if (modeSetMatch) {
-    const nextMode = modeSetMatch[1] as RuntimeMode;
-    const previousMode = ctx.runtimeMode;
-    const snapshot = ctx.setRuntimeMode(nextMode);
-    writeMockStoredConfig({
-      ...ctx.cfg,
-      debug: {
-        webviewDebuggingEnabled: Boolean(ctx.cfg.debug?.webviewDebuggingEnabled),
-        runtimeMode: nextMode,
-      },
-    });
-    const result: DebugSetRuntimeModeResult = {
-      ok: true,
-      runtimeMode: nextMode,
-      previousMode,
-      snapshot,
-    };
-    ctx.appendLog(`RPC debug.setRuntimeMode ${previousMode} -> ${nextMode}`);
-    return rpcOk(result);
-  }
-
-  if (/sideveil-ctl debug mode\s*$/.test(normalized)) {
-    return okJson({ runtimeMode: ctx.runtimeMode });
-  }
-
   const cdpMatch = normalized.match(/sideveil-ctl debug cdp (on|off|status)/);
   if (cdpMatch) {
     const mode = cdpMatch[1];
@@ -111,10 +75,7 @@ export function handleMockDebugExec(normalized: string, ctx: MockDebugContext): 
     const effectiveEnabled = nextEnabled || devServerActive;
     writeMockStoredConfig({
       ...ctx.cfg,
-      debug: {
-        webviewDebuggingEnabled: nextEnabled,
-        runtimeMode: resolveRuntimeMode(ctx.cfg.debug),
-      },
+      debug: { webviewDebuggingEnabled: nextEnabled },
     });
     const result: DebugCdpStatusResult = {
       ok: true,

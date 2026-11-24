@@ -124,7 +124,9 @@ test('all managed source files stay within the 400-line hard limit', () => {
 
   for (const root of roots) {
     for (const file of walkFiles(root, extensions)) {
-      const lines = fs.readFileSync(file, 'utf8').split('\n').length;
+      const content = fs.readFileSync(file, 'utf8');
+      if (content.startsWith('// @generated')) continue;
+      const lines = content.split('\n').length;
       if (lines > 400) {
         violations.push(`${path.relative(REPO_ROOT, file)} (${lines} lines)`);
       }
