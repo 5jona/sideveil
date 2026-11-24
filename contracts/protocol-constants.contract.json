@@ -4,6 +4,17 @@
   "name": "sideveil-protocol-constants",
   "description": "Canonical SideVeil RPC methods, host/plugin events, JSON-RPC error codes, theme IDs, built-in diagnostic metadata, timeout bounds, and HUD defaults.",
   "constants": {
+    "protocol_versions": {
+      "doc": "Canonical SideVeil wire protocol, plugin API, and manifest schema versions.",
+      "rustMod": "protocol_versions",
+      "kotlinObject": "SideVeilProtocolVersions",
+      "tsName": "SIDEVEIL_PROTOCOL_VERSIONS",
+      "items": {
+        "PROTOCOL_VERSION": { "value": 1, "type": "u32" },
+        "PLUGIN_API_VERSION": { "value": 1, "type": "u32" },
+        "MANIFEST_SCHEMA_VERSION": { "value": 1, "type": "u32" }
+      }
+    },
     "protocol_events": {
       "doc": "Canonical JSON-RPC and WebView event names shared across Hub, Render Host, Sensor, and WebUI.",
       "rustMod": "events",
@@ -19,6 +30,8 @@
         "EDGE_REPOSITION": { "value": "edge.reposition", "type": "string" },
         "PANEL_COMMAND": { "value": "panel.command", "type": "string" },
         "HOST_HELLO": { "value": "host.hello", "type": "string" },
+        "HOST_READY": { "value": "host.ready", "type": "string" },
+        "HOST_LOCAL_AUDIT": { "value": "host.localAudit", "type": "string" },
         "HOST_FULLSCREEN_CHANGED": { "value": "host.fullscreenChanged", "type": "string" },
         "HOST_DYNAMIC_COLORS": { "value": "host.dynamicColors", "type": "string" },
         "HOST_DIAGNOSTICS": { "value": "host.diagnostics", "type": "string" },
@@ -82,6 +95,10 @@
         "PLUGINS_UNINSTALL": { "value": "plugins.uninstall", "type": "string" },
         "PLUGINS_AUDIT": { "value": "plugins.audit", "type": "string" },
         "PLUGINS_SELECT": { "value": "plugins.select", "type": "string" },
+        "PLUGINS_GRANT_CAPABILITIES": { "value": "plugins.grantCapabilities", "type": "string" },
+        "PLUGINS_INSPECT_ARCHIVE": { "value": "plugins.inspectArchive", "type": "string" },
+        "PLUGINS_DAEMON_LOGS": { "value": "plugins.daemonLogs", "type": "string" },
+        "PLUGINS_RELOAD_WEBVIEW": { "value": "plugins.reloadWebView", "type": "string" },
         "NETWORK_CONTEXT": { "value": "network.context", "type": "string" },
         "PLUGIN_INVOKE": { "value": "plugin.invoke", "type": "string" },
         "PLUGIN_BUS_PUBLISH": { "value": "plugin.busPublish", "type": "string" },
@@ -98,8 +115,7 @@
         "DEBUG_INSPECT_UI": { "value": "debug.inspectUi", "type": "string" },
         "DEBUG_SET_WEBVIEW_DEBUGGING": { "value": "debug.setWebViewDebugging", "type": "string" },
         "DEBUG_CDP_STATUS": { "value": "debug.cdpStatus", "type": "string" },
-        "DEBUG_RESET_FRAME_METRICS": { "value": "debug.resetFrameMetrics", "type": "string" },
-        "DEBUG_SET_RUNTIME_MODE": { "value": "debug.setRuntimeMode", "type": "string" }
+        "DEBUG_RESET_FRAME_METRICS": { "value": "debug.resetFrameMetrics", "type": "string" }
       }
     },
     "error_codes": {
@@ -113,7 +129,12 @@
         "METHOD_NOT_FOUND": { "value": -32601, "type": "i32" },
         "INVALID_PARAMS": { "value": -32602, "type": "i32" },
         "INTERNAL_ERROR": { "value": -32000, "type": "i32" },
+        "DAEMON_DISCONNECTED": { "value": -32001, "type": "i32" },
+        "RPC_TIMEOUT": { "value": -32002, "type": "i32" },
         "PERMISSION_DENIED": { "value": -32003, "type": "i32" },
+        "RATE_LIMITED": { "value": -32004, "type": "i32" },
+        "VERSION_MISMATCH": { "value": -32005, "type": "i32" },
+        "QUOTA_EXCEEDED": { "value": -32006, "type": "i32" },
         "BACKEND_OFFLINE": { "value": -32010, "type": "i32" },
         "BACKEND_TIMEOUT": { "value": -32011, "type": "i32" }
       }
@@ -144,17 +165,6 @@
         "SURFACE_BACKDROP": { "value": "native-glass", "type": "string" },
         "CAPABILITY_STORAGE": { "value": "storage", "type": "string" },
         "CAPABILITY_TOAST": { "value": "toast", "type": "string" }
-      }
-    },
-    "builtin_test_plugins": {
-      "doc": "Canonical plugin IDs for source-level built-in test and demo plugins gated by runtimeMode.",
-      "rustMod": "builtin_test_plugins",
-      "kotlinObject": "SideVeilBuiltinTestPlugins",
-      "tsName": "SIDEVEIL_BUILTIN_TEST_PLUGINS",
-      "items": {
-        "DIAGNOSTIC": { "value": "sideveil.diagnostic", "type": "string" },
-        "VELLO_SCOPE": { "value": "example.vello-scope", "type": "string" },
-        "NATIVE_PERF_HUD": { "value": "example.native-perf-hud", "type": "string" }
       }
     },
     "timeouts": {

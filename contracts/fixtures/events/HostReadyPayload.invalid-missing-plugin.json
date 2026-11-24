@@ -1,0 +1,9 @@
+{
+  "$def": "HostReadyPayload",
+  "invalid": true,
+  "data": {
+    "protocolVersion": 1,
+    "apiVersion": 1,
+    "grantedCapabilities": []
+  }
+}

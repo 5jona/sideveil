@@ -2,6 +2,13 @@
 // Source: contracts/protocol-constants.contract.json
 #![allow(dead_code)]
 
+/// Canonical SideVeil wire protocol, plugin API, and manifest schema versions.
+pub mod protocol_versions {
+    pub const PROTOCOL_VERSION: u32 = 1;
+    pub const PLUGIN_API_VERSION: u32 = 1;
+    pub const MANIFEST_SCHEMA_VERSION: u32 = 1;
+}
+
 /// Canonical JSON-RPC and WebView event names shared across Hub, Render Host, Sensor, and WebUI.
 pub mod events {
     pub const CONFIG_UPDATED: &str = "config.updated";
@@ -13,6 +20,8 @@ pub mod events {
     pub const EDGE_REPOSITION: &str = "edge.reposition";
     pub const PANEL_COMMAND: &str = "panel.command";
     pub const HOST_HELLO: &str = "host.hello";
+    pub const HOST_READY: &str = "host.ready";
+    pub const HOST_LOCAL_AUDIT: &str = "host.localAudit";
     pub const HOST_FULLSCREEN_CHANGED: &str = "host.fullscreenChanged";
     pub const HOST_DYNAMIC_COLORS: &str = "host.dynamicColors";
     pub const HOST_DIAGNOSTICS: &str = "host.diagnostics";
@@ -66,6 +75,10 @@ pub mod methods {
     pub const PLUGINS_UNINSTALL: &str = "plugins.uninstall";
     pub const PLUGINS_AUDIT: &str = "plugins.audit";
     pub const PLUGINS_SELECT: &str = "plugins.select";
+    pub const PLUGINS_GRANT_CAPABILITIES: &str = "plugins.grantCapabilities";
+    pub const PLUGINS_INSPECT_ARCHIVE: &str = "plugins.inspectArchive";
+    pub const PLUGINS_DAEMON_LOGS: &str = "plugins.daemonLogs";
+    pub const PLUGINS_RELOAD_WEBVIEW: &str = "plugins.reloadWebView";
     pub const NETWORK_CONTEXT: &str = "network.context";
     pub const PLUGIN_INVOKE: &str = "plugin.invoke";
     pub const PLUGIN_BUS_PUBLISH: &str = "plugin.busPublish";
@@ -83,7 +96,6 @@ pub mod methods {
     pub const DEBUG_SET_WEBVIEW_DEBUGGING: &str = "debug.setWebViewDebugging";
     pub const DEBUG_CDP_STATUS: &str = "debug.cdpStatus";
     pub const DEBUG_RESET_FRAME_METRICS: &str = "debug.resetFrameMetrics";
-    pub const DEBUG_SET_RUNTIME_MODE: &str = "debug.setRuntimeMode";
 }
 
 /// JSON-RPC 2.0 and SideVeil domain error codes.
@@ -93,7 +105,12 @@ pub mod error_codes {
     pub const METHOD_NOT_FOUND: i32 = -32601;
     pub const INVALID_PARAMS: i32 = -32602;
     pub const INTERNAL_ERROR: i32 = -32000;
+    pub const DAEMON_DISCONNECTED: i32 = -32001;
+    pub const RPC_TIMEOUT: i32 = -32002;
     pub const PERMISSION_DENIED: i32 = -32003;
+    pub const RATE_LIMITED: i32 = -32004;
+    pub const VERSION_MISMATCH: i32 = -32005;
+    pub const QUOTA_EXCEEDED: i32 = -32006;
     pub const BACKEND_OFFLINE: i32 = -32010;
     pub const BACKEND_TIMEOUT: i32 = -32011;
 }
@@ -116,13 +133,6 @@ pub mod builtin_diagnostic {
     pub const SURFACE_BACKDROP: &str = "native-glass";
     pub const CAPABILITY_STORAGE: &str = "storage";
     pub const CAPABILITY_TOAST: &str = "toast";
-}
-
-/// Canonical plugin IDs for source-level built-in test and demo plugins gated by runtimeMode.
-pub mod builtin_test_plugins {
-    pub const DIAGNOSTIC: &str = "sideveil.diagnostic";
-    pub const VELLO_SCOPE: &str = "example.vello-scope";
-    pub const NATIVE_PERF_HUD: &str = "example.native-perf-hud";
 }
 
 /// Bounded RPC forwarding timeout limits and plugin event lag sub-event name.

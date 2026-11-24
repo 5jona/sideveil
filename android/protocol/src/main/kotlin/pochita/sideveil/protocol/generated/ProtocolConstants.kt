@@ -3,6 +3,13 @@
 
 package pochita.sideveil.protocol.generated
 
+/** Canonical SideVeil wire protocol, plugin API, and manifest schema versions. */
+object SideVeilProtocolVersions {
+    const val PROTOCOL_VERSION: Long = 1L
+    const val PLUGIN_API_VERSION: Long = 1L
+    const val MANIFEST_SCHEMA_VERSION: Long = 1L
+}
+
 /** Canonical JSON-RPC and WebView event names shared across Hub, Render Host, Sensor, and WebUI. */
 object SideVeilEvents {
     const val CONFIG_UPDATED: String = "config.updated"
@@ -14,6 +21,8 @@ object SideVeilEvents {
     const val EDGE_REPOSITION: String = "edge.reposition"
     const val PANEL_COMMAND: String = "panel.command"
     const val HOST_HELLO: String = "host.hello"
+    const val HOST_READY: String = "host.ready"
+    const val HOST_LOCAL_AUDIT: String = "host.localAudit"
     const val HOST_FULLSCREEN_CHANGED: String = "host.fullscreenChanged"
     const val HOST_DYNAMIC_COLORS: String = "host.dynamicColors"
     const val HOST_DIAGNOSTICS: String = "host.diagnostics"
@@ -67,6 +76,10 @@ object SideVeilMethods {
     const val PLUGINS_UNINSTALL: String = "plugins.uninstall"
     const val PLUGINS_AUDIT: String = "plugins.audit"
     const val PLUGINS_SELECT: String = "plugins.select"
+    const val PLUGINS_GRANT_CAPABILITIES: String = "plugins.grantCapabilities"
+    const val PLUGINS_INSPECT_ARCHIVE: String = "plugins.inspectArchive"
+    const val PLUGINS_DAEMON_LOGS: String = "plugins.daemonLogs"
+    const val PLUGINS_RELOAD_WEBVIEW: String = "plugins.reloadWebView"
     const val NETWORK_CONTEXT: String = "network.context"
     const val PLUGIN_INVOKE: String = "plugin.invoke"
     const val PLUGIN_BUS_PUBLISH: String = "plugin.busPublish"
@@ -84,7 +97,6 @@ object SideVeilMethods {
     const val DEBUG_SET_WEBVIEW_DEBUGGING: String = "debug.setWebViewDebugging"
     const val DEBUG_CDP_STATUS: String = "debug.cdpStatus"
     const val DEBUG_RESET_FRAME_METRICS: String = "debug.resetFrameMetrics"
-    const val DEBUG_SET_RUNTIME_MODE: String = "debug.setRuntimeMode"
 }
 
 /** JSON-RPC 2.0 and SideVeil domain error codes. */
@@ -94,7 +106,12 @@ object SideVeilErrorCodes {
     const val METHOD_NOT_FOUND: Int = -32601
     const val INVALID_PARAMS: Int = -32602
     const val INTERNAL_ERROR: Int = -32000
+    const val DAEMON_DISCONNECTED: Int = -32001
+    const val RPC_TIMEOUT: Int = -32002
     const val PERMISSION_DENIED: Int = -32003
+    const val RATE_LIMITED: Int = -32004
+    const val VERSION_MISMATCH: Int = -32005
+    const val QUOTA_EXCEEDED: Int = -32006
     const val BACKEND_OFFLINE: Int = -32010
     const val BACKEND_TIMEOUT: Int = -32011
 }
@@ -117,13 +134,6 @@ object SideVeilBuiltinDiagnostic {
     const val SURFACE_BACKDROP: String = "native-glass"
     const val CAPABILITY_STORAGE: String = "storage"
     const val CAPABILITY_TOAST: String = "toast"
-}
-
-/** Canonical plugin IDs for source-level built-in test and demo plugins gated by runtimeMode. */
-object SideVeilBuiltinTestPlugins {
-    const val DIAGNOSTIC: String = "sideveil.diagnostic"
-    const val VELLO_SCOPE: String = "example.vello-scope"
-    const val NATIVE_PERF_HUD: String = "example.native-perf-hud"
 }
 
 /** Bounded RPC forwarding timeout limits and plugin event lag sub-event name. */

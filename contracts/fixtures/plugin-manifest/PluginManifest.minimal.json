@@ -1,0 +1,6 @@
+{
+  "id": "com.example.minimal",
+  "name": "Minimal Plugin",
+  "version": "1.0.0",
+  "entry": "web/index.html"
+}

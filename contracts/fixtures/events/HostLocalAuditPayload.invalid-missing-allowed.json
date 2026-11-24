@@ -1,0 +1,8 @@
+{
+  "$def": "HostLocalAuditPayload",
+  "invalid": true,
+  "data": {
+    "pluginId": "com.example.notes",
+    "method": "clipboard.get"
+  }
+}

@@ -117,6 +117,69 @@
         "webviewCrashCount"
       ],
       "description": "Render host WebView LRU, HUD, memory, and crash diagnostics payload."
+    },
+    "HostReadyPayload": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "apiVersion": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "pluginId": {
+          "type": "string"
+        },
+        "grantedCapabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "protocolVersion",
+        "apiVersion",
+        "pluginId",
+        "grantedCapabilities"
+      ],
+      "description": "Handshake readiness payload pushed to a mounted plugin WebView with negotiated versions and granted capabilities."
+    },
+    "HostLocalAuditPayload": {
+      "type": "object",
+      "properties": {
+        "pluginId": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "allowed": {
+          "type": "boolean"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "pluginId",
+        "method",
+        "allowed"
+      ],
+      "description": "Audit record forwarded from Render Host to Hub for host-local capability-gated RPC calls (clipboard, toast, haptics)."
     }
   }
 }

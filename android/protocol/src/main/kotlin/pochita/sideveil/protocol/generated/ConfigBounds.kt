@@ -28,7 +28,6 @@ object SideVeilConfigDefaults {
     const val SCOPE_ALLOWLIST_DEFAULT_PACKAGE: String = "me.weishu.kernelsu"
     const val SCOPE_DENYLIST_DEFAULT_PACKAGE: String = "com.android.systemui"
     const val DEBUG_WEBVIEW_DEBUGGING_ENABLED: Boolean = false
-    const val DEFAULT_RUNTIME_MODE: String = "release"
 }
 
 /** Inclusive sanitization clamp bounds for SideVeilConfig numeric fields. */

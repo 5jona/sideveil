@@ -1,0 +1,38 @@
+{
+  "$def": "PluginRuntimeDescriptor",
+  "invalid": true,
+  "data": {
+    "id": "com.example.bad-origin",
+    "name": "Bad Origin",
+    "version": "1.0.0",
+    "origin": "sideloaded",
+    "schemaVersion": 1,
+    "apiVersion": 1,
+    "entry": "web/index.html",
+    "builtin": false,
+    "defaultEnabled": true,
+    "enabled": true,
+    "priority": 10,
+    "packages": [],
+    "activities": [],
+    "global": false,
+    "hasScopeOverride": false,
+    "backend": "none",
+    "backendState": "none",
+    "backendPackages": [],
+    "capabilities": [],
+    "grantedCapabilities": [],
+    "pendingCapabilities": [],
+    "approvalStatus": "approved",
+    "daemonApproved": false,
+    "daemonStatus": "not-configured",
+    "daemonRestartCount": 0,
+    "hasDaemon": false,
+    "surface": {
+      "backdrop": "native-glass",
+      "presentation": "drawer",
+      "crossOriginIsolated": false,
+      "keepAlive": false
+    }
+  }
+}

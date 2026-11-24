@@ -27,7 +27,6 @@ pub mod defaults {
     pub const SCOPE_ALLOWLIST_DEFAULT_PACKAGE: &str = "me.weishu.kernelsu";
     pub const SCOPE_DENYLIST_DEFAULT_PACKAGE: &str = "com.android.systemui";
     pub const DEBUG_WEBVIEW_DEBUGGING_ENABLED: bool = false;
-    pub const DEFAULT_RUNTIME_MODE: &str = "release";
 }
 
 /// Inclusive sanitization clamp bounds for SideVeilConfig numeric fields.

@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "apiVersion": 1,
+  "minHostVersion": "0.1.0",
+  "id": "example.native-perf-hud",
+  "name": "性能监控",
+  "version": "0.1.0",
+  "description": "Zero-WebView native vector HUD performance monitor.",
+  "author": "SideVeil",
+  "icon": "web/icon.svg",
+  "defaultEnabled": false,
+  "triggers": {
+    "packages": [],
+    "activities": [],
+    "global": true,
+    "priority": 15
+  },
+  "entry": "web/index.html",
+  "backend": "uds-native",
+  "daemon": {
+    "binary": "bin/sideveil-example-perf-hud",
+    "args": ["--interval-ms", "500"],
+    "env": {
+      "RUST_LOG": "info"
+    },
+    "restartPolicy": "on-failure",
+    "maxRestarts": 5,
+    "backoffMs": 1000
+  },
+  "capabilities": ["native-hud", "telemetry", "haptics"],
+  "surface": {
+    "backdrop": "native-glass",
+    "presentation": "drawer",
+    "crossOriginIsolated": false,
+    "widthDp": 320,
+    "heightPercent": 54
+  }
+}

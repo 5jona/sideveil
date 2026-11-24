@@ -20,5 +20,7 @@
   "wsPort": 41928,
   "sensorConnected": false,
   "sensorPid": null,
-  "matchedPluginsCount": 0
+  "matchedPluginsCount": 0,
+  "protocolVersion": 1,
+  "pluginApiVersion": 1
 }

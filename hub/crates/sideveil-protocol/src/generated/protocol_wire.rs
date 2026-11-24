@@ -66,6 +66,10 @@ pub struct DaemonStatus {
     pub active_plugin_id: Option<String>,
     #[serde(default)]
     pub matched_plugins_count: usize,
+    #[serde(default = "default_daemon_status_protocol_version")]
+    pub protocol_version: u32,
+    #[serde(default = "default_daemon_status_plugin_api_version")]
+    pub plugin_api_version: u32,
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gesture_stats: Option<DebugGestureStats>,
@@ -134,6 +138,37 @@ pub struct HostPluginDiagnosticsPayload {
     pub host_pss_kb: Option<u64>,
     #[serde(default)]
     pub webview_crash_count: i32,
+}
+
+/// Handshake readiness payload pushed to a mounted plugin WebView with negotiated versions and granted capabilities.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostReadyPayload {
+    pub protocol_version: u32,
+    pub api_version: u32,
+    pub plugin_id: String,
+    #[serde(default)]
+    pub granted_capabilities: Vec<String>,
+}
+
+/// Audit record forwarded from Render Host to Hub for host-local capability-gated RPC calls (clipboard, toast, haptics).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostLocalAuditPayload {
+    pub plugin_id: String,
+    pub method: String,
+    pub allowed: bool,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+fn default_daemon_status_protocol_version() -> u32 {
+    1
+}
+
+fn default_daemon_status_plugin_api_version() -> u32 {
+    1
 }
 
 fn default_ping_result_pong() -> bool {

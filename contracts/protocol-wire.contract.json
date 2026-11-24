@@ -65,6 +65,8 @@
           "skipSerializingIfNone": true
         },
         { "name": "matched_plugins_count", "type": "usize", "default": 0 },
+        { "name": "protocol_version", "type": "u32", "default": 1 },
+        { "name": "plugin_api_version", "type": "u32", "default": 1 },
         {
           "name": "gesture_stats",
           "type": { "ref": "DebugGestureStats" },
@@ -146,6 +148,33 @@
         },
         { "name": "webview_crash_count", "type": "i32", "default": 0 }
       ]
+    },
+    "HostReadyPayload": {
+      "doc": "Handshake readiness payload pushed to a mounted plugin WebView with negotiated versions and granted capabilities.",
+      "renameAll": "camelCase",
+      "rustDerives": ["Debug", "Clone", "PartialEq", "Eq", "Serialize", "Deserialize"],
+      "fields": [
+        { "name": "protocol_version", "type": "u32" },
+        { "name": "api_version", "type": "u32" },
+        { "name": "plugin_id", "type": "string" },
+        { "name": "granted_capabilities", "type": { "list": "string" }, "default": [] }
+      ]
+    },
+    "HostLocalAuditPayload": {
+      "doc": "Audit record forwarded from Render Host to Hub for host-local capability-gated RPC calls (clipboard, toast, haptics).",
+      "renameAll": "camelCase",
+      "rustDerives": ["Debug", "Clone", "PartialEq", "Eq", "Serialize", "Deserialize"],
+      "fields": [
+        { "name": "plugin_id", "type": "string" },
+        { "name": "method", "type": "string" },
+        { "name": "allowed", "type": "bool" },
+        {
+          "name": "detail",
+          "type": "string",
+          "optional": true,
+          "skipSerializingIfNone": true
+        }
+      ]
     }
   },
   "rpcs": {
@@ -185,6 +214,14 @@
     "HOST_DIAGNOSTICS": {
       "event": "host.diagnostics",
       "payload": { "ref": "HostPluginDiagnosticsPayload" }
+    },
+    "HOST_READY": {
+      "event": "host.ready",
+      "payload": { "ref": "HostReadyPayload" }
+    },
+    "HOST_LOCAL_AUDIT": {
+      "event": "host.localAudit",
+      "payload": { "ref": "HostLocalAuditPayload" }
     }
   },
   "outputs": [
@@ -202,7 +239,9 @@
           "ScopeChangedPayload",
           "PanelStateChangedPayload",
           "PanelVisibilityPayload",
-          "HostPluginDiagnosticsPayload"
+          "HostPluginDiagnosticsPayload",
+          "HostReadyPayload",
+          "HostLocalAuditPayload"
         ]
       }
     },
@@ -221,7 +260,9 @@
           "ScopeChangedPayload",
           "PanelStateChangedPayload",
           "PanelVisibilityPayload",
-          "HostPluginDiagnosticsPayload"
+          "HostPluginDiagnosticsPayload",
+          "HostReadyPayload",
+          "HostLocalAuditPayload"
         ]
       }
     },
@@ -255,7 +296,9 @@
           "ScopeChangedPayload",
           "PanelStateChangedPayload",
           "PanelVisibilityPayload",
-          "HostPluginDiagnosticsPayload"
+          "HostPluginDiagnosticsPayload",
+          "HostReadyPayload",
+          "HostLocalAuditPayload"
         ]
       }
     }

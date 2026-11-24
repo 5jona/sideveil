@@ -41,6 +41,8 @@ export interface DaemonStatus {
   sensorPid?: number;
   activePluginId?: string;
   matchedPluginsCount: number;
+  protocolVersion: number;
+  pluginApiVersion: number;
   gestureStats?: DebugGestureStats;
 }
 
@@ -87,6 +89,22 @@ export interface HostPluginDiagnosticsPayload {
   webviewCrashCount: number;
 }
 
+/** Handshake readiness payload pushed to a mounted plugin WebView with negotiated versions and granted capabilities. */
+export interface HostReadyPayload {
+  protocolVersion: number;
+  apiVersion: number;
+  pluginId: string;
+  grantedCapabilities: string[];
+}
+
+/** Audit record forwarded from Render Host to Hub for host-local capability-gated RPC calls (clipboard, toast, haptics). */
+export interface HostLocalAuditPayload {
+  pluginId: string;
+  method: string;
+  allowed: boolean;
+  detail?: string;
+}
+
 /** RPC method names. */
 export const SIDEVEIL_CORE_WIRE_METHODS = {
   DAEMON_PING: 'daemon.ping',
@@ -117,6 +135,8 @@ export const SIDEVEIL_CORE_WIRE_EVENTS = {
   PANEL_VISIBILITY: 'panel.visibility',
   PANEL_VISIBILITY_CHANGED: 'panel.visibilityChanged',
   HOST_DIAGNOSTICS: 'host.diagnostics',
+  HOST_READY: 'host.ready',
+  HOST_LOCAL_AUDIT: 'host.localAudit',
 } as const;
 
 /** Typed event payload map. */
@@ -126,4 +146,6 @@ export interface SideVeilCoreEventPayloadMap {
   'panel.visibility': PanelVisibilityPayload;
   'panel.visibilityChanged': PanelVisibilityPayload;
   'host.diagnostics': HostPluginDiagnosticsPayload;
+  'host.ready': HostReadyPayload;
+  'host.localAudit': HostLocalAuditPayload;
 }

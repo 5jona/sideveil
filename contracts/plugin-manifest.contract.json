@@ -1,0 +1,665 @@
+{
+  "$schema": "../webui/node_modules/@gojona/contracts-gen/contract.schema.json",
+  "schemaVersion": 1,
+  "name": "sideveil-plugin-manifest",
+  "description": "Canonical SideVeil plugin manifest schema, capability & origin taxonomy, supervised daemon specification, and runtime descriptor wire DTOs.",
+  "enums": {
+    "PluginOrigin": {
+      "doc": "Provenance classification distinguishing system built-in, module-bundled, user-installed, and web-embed plugins.",
+      "renameAll": "kebab-case",
+      "variants": [
+        { "name": "Builtin", "doc": "Host-embedded system plugin (e.g., sideveil.diagnostic)." },
+        { "name": "Bundled", "doc": "Read-only example or first-party plugin shipped under module_dir/plugins/." },
+        { "name": "Installed", "doc": "User-installed third-party plugin under /data/system/sideveil/plugins/." },
+        { "name": "WebEmbed", "doc": "Zero-privilege user-created URL wrapper plugin." }
+      ]
+    },
+    "PluginBackendKind": {
+      "doc": "Optional UDS backend architecture attached to a SideVeil plugin.",
+      "renameAll": "kebab-case",
+      "variants": [
+        { "name": "None" },
+        { "name": "UdsNative" },
+        { "name": "UdsApp" }
+      ]
+    },
+    "PluginBackendState": {
+      "doc": "Live connection state of a plugin's UDS backend session.",
+      "renameAll": "kebab-case",
+      "variants": [
+        { "name": "None" },
+        { "name": "Online" },
+        { "name": "Offline" }
+      ]
+    },
+    "PluginCapability": {
+      "doc": "Capability ACL tokens declared in manifest.json and enforced across Hub and Render Host.",
+      "renameAll": "kebab-case",
+      "variants": [
+        { "name": "Storage" },
+        { "name": "Toast" },
+        { "name": "SystemExec" },
+        { "name": "NativeHud" },
+        { "name": "Clipboard" },
+        { "name": "Haptics" },
+        { "name": "Telemetry" },
+        { "name": "InterPluginBus" },
+        { "name": "NetworkLoopback" },
+        { "name": "NetworkLan" },
+        { "name": "NetworkInternet" },
+        { "name": "NetworkContext" }
+      ]
+    },
+    "CapabilityRiskTier": {
+      "doc": "Security risk tier used for capability grant policy and Control Plane review UI.",
+      "renameAll": "kebab-case",
+      "variants": [
+        { "name": "Low" },
+        { "name": "Medium" },
+        { "name": "High" }
+      ]
+    },
+    "PluginSurfaceBackdrop": {
+      "doc": "Preferred glass or backdrop surface rendering mode for a plugin overlay.",
+      "renameAll": "kebab-case",
+      "variants": [
+        { "name": "NativeGlass" },
+        { "name": "Transparent" },
+        { "name": "Opaque" }
+      ]
+    },
+    "PluginPresentationMode": {
+      "doc": "Preferred window container presentation mode for a plugin.",
+      "renameAll": "kebab-case",
+      "variants": [
+        { "name": "Drawer" },
+        { "name": "Peek" },
+        { "name": "Pinned" },
+        { "name": "Wide" },
+        { "name": "NativeHud" }
+      ]
+    },
+    "PluginDaemonRestartPolicy": {
+      "doc": "Supervisor restart policy for a managed uds-native plugin daemon process.",
+      "renameAll": "kebab-case",
+      "variants": [
+        { "name": "OnFailure" },
+        { "name": "Always" },
+        { "name": "Never" }
+      ]
+    },
+    "PluginDaemonStatus": {
+      "doc": "Observed lifecycle state of a plugin's supervised uds-native daemon.",
+      "renameAll": "kebab-case",
+      "variants": [
+        { "name": "NotConfigured" },
+        { "name": "Stopped" },
+        { "name": "AwaitingApproval" },
+        { "name": "Running" },
+        { "name": "Crashed" },
+        { "name": "CircuitOpen" }
+      ]
+    },
+    "PluginApprovalStatus": {
+      "doc": "User/admin review state for a plugin's requested capabilities and daemon execution.",
+      "renameAll": "kebab-case",
+      "variants": [
+        { "name": "Approved" },
+        { "name": "PendingReview" },
+        { "name": "NeedsReapproval" }
+      ]
+    }
+  },
+  "structs": {
+    "PluginDaemonSpec": {
+      "doc": "Declarative process supervision specification for a uds-native plugin daemon.",
+      "renameAll": "camelCase",
+      "rustDerives": ["Debug", "Clone", "PartialEq", "Eq", "Serialize", "Deserialize"],
+      "fields": [
+        {
+          "name": "binary",
+          "type": "string",
+          "doc": "Relative executable path inside the plugin package (e.g. bin/daemon)."
+        },
+        {
+          "name": "args",
+          "type": { "list": "string" },
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "env",
+          "type": { "map": ["string", "string"] },
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "restart_policy",
+          "type": { "ref": "PluginDaemonRestartPolicy" },
+          "optional": true,
+          "skipSerializingIfNone": true,
+          "doc": "Defaults to on-failure when omitted."
+        },
+        {
+          "name": "max_restarts",
+          "type": "u32",
+          "optional": true,
+          "default": 5,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "backoff_ms",
+          "type": "u64",
+          "optional": true,
+          "default": 1000,
+          "skipSerializingIfNone": true
+        }
+      ]
+    },
+    "PluginManifestTriggers": {
+      "doc": "Optional foreground trigger rules declared inside manifest.json.",
+      "renameAll": "camelCase",
+      "rustDerives": ["Debug", "Clone", "Default", "PartialEq", "Eq", "Serialize", "Deserialize"],
+      "fields": [
+        {
+          "name": "packages",
+          "type": { "list": "string" },
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "activities",
+          "type": { "list": "string" },
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "global",
+          "type": "bool",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "priority",
+          "type": "i32",
+          "optional": true,
+          "skipSerializingIfNone": true
+        }
+      ]
+    },
+    "PluginManifestSurfacePrefs": {
+      "doc": "Optional surface presentation preferences declared inside manifest.json.",
+      "renameAll": "camelCase",
+      "rustDerives": ["Debug", "Clone", "Default", "PartialEq", "Eq", "Serialize", "Deserialize"],
+      "fields": [
+        {
+          "name": "backdrop",
+          "type": { "ref": "PluginSurfaceBackdrop" },
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "presentation",
+          "type": { "ref": "PluginPresentationMode" },
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "cross_origin_isolated",
+          "type": "bool",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "keep_alive",
+          "type": "bool",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "width_dp",
+          "type": "i32",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "height_percent",
+          "type": "i32",
+          "optional": true,
+          "skipSerializingIfNone": true
+        }
+      ]
+    },
+    "PluginManifestEmbedPrefs": {
+      "doc": "Optional web-embed settings declared inside manifest.json (only url is required).",
+      "renameAll": "camelCase",
+      "rustDerives": ["Debug", "Clone", "PartialEq", "Eq", "Serialize", "Deserialize"],
+      "fields": [
+        { "name": "url", "type": "string" },
+        {
+          "name": "remote_url",
+          "type": "string",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "lan_ssids",
+          "type": { "list": "string" },
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "allowed_origins",
+          "type": { "list": "string" },
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "allow_cleartext",
+          "type": "bool",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "wide_viewport",
+          "type": "bool",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "allow_zoom",
+          "type": "bool",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "web_history_back",
+          "type": "bool",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "text_zoom",
+          "type": "i32",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "show_toolbar",
+          "type": "bool",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "keep_alive_grace_sec",
+          "type": "i32",
+          "optional": true,
+          "skipSerializingIfNone": true
+        }
+      ]
+    },
+    "PluginManifestNetworkPrefs": {
+      "doc": "Optional network allowlist and SPA fallback preferences declared inside manifest.json.",
+      "renameAll": "camelCase",
+      "rustDerives": ["Debug", "Clone", "Default", "PartialEq", "Eq", "Serialize", "Deserialize"],
+      "fields": [
+        {
+          "name": "allowed_origins",
+          "type": { "list": "string" },
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "allow_cleartext",
+          "type": "bool",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "spa_fallback",
+          "type": "bool",
+          "optional": true,
+          "skipSerializingIfNone": true
+        }
+      ]
+    },
+    "PluginManifest": {
+      "doc": "Authoritative manifest.json schema for SideVeil plugins (v1).",
+      "renameAll": "camelCase",
+      "rustDerives": ["Debug", "Clone", "PartialEq", "Eq", "Serialize", "Deserialize"],
+      "fields": [
+        {
+          "name": "schema_version",
+          "type": "u32",
+          "optional": true,
+          "default": 1,
+          "skipSerializingIfNone": true,
+          "doc": "Manifest schema version (defaults to 1)."
+        },
+        {
+          "name": "api_version",
+          "type": "u32",
+          "optional": true,
+          "default": 1,
+          "skipSerializingIfNone": true,
+          "doc": "Target SideVeil plugin API version (defaults to 1)."
+        },
+        {
+          "name": "min_host_version",
+          "type": "string",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        { "name": "id", "type": "string" },
+        { "name": "name", "type": "string" },
+        { "name": "version", "type": "string" },
+        {
+          "name": "description",
+          "type": "string",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "author",
+          "type": "string",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "homepage",
+          "type": "string",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "icon",
+          "type": "string",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "default_enabled",
+          "type": "bool",
+          "optional": true,
+          "default": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "triggers",
+          "type": { "ref": "PluginManifestTriggers" },
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "entry",
+          "type": "string",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "backend",
+          "type": { "ref": "PluginBackendKind" },
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "backend_packages",
+          "type": { "list": "string" },
+          "optional": true,
+          "skipSerializingIfNone": true,
+          "doc": "Explicit Android package allowlist permitted to attach via app.sock for uds-app plugins."
+        },
+        {
+          "name": "daemon",
+          "type": { "ref": "PluginDaemonSpec" },
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "capabilities",
+          "type": { "list": { "ref": "PluginCapability" } },
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "surface",
+          "type": { "ref": "PluginManifestSurfacePrefs" },
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "embed",
+          "type": { "ref": "PluginManifestEmbedPrefs" },
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "network",
+          "type": { "ref": "PluginManifestNetworkPrefs" },
+          "optional": true,
+          "skipSerializingIfNone": true
+        }
+      ]
+    },
+    "PluginSurfacePrefs": {
+      "doc": "Normalized runtime surface preferences delivered in PluginRuntimeDescriptor.",
+      "renameAll": "camelCase",
+      "rustDerives": ["Debug", "Clone", "PartialEq", "Eq", "Serialize", "Deserialize"],
+      "fields": [
+        { "name": "backdrop", "type": { "ref": "PluginSurfaceBackdrop" } },
+        { "name": "presentation", "type": { "ref": "PluginPresentationMode" } },
+        { "name": "cross_origin_isolated", "type": "bool", "default": false },
+        { "name": "keep_alive", "type": "bool", "default": false },
+        {
+          "name": "width_dp",
+          "type": "i32",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "height_percent",
+          "type": "i32",
+          "optional": true,
+          "skipSerializingIfNone": true
+        }
+      ]
+    },
+    "PluginEmbedPrefs": {
+      "doc": "Normalized runtime web-embed preferences delivered in PluginRuntimeDescriptor.",
+      "renameAll": "camelCase",
+      "rustDerives": ["Debug", "Clone", "PartialEq", "Eq", "Serialize", "Deserialize"],
+      "fields": [
+        { "name": "url", "type": "string" },
+        {
+          "name": "remote_url",
+          "type": "string",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        { "name": "lan_ssids", "type": { "list": "string" }, "default": [] },
+        { "name": "allowed_origins", "type": { "list": "string" }, "default": [] },
+        { "name": "allow_cleartext", "type": "bool", "default": false },
+        { "name": "wide_viewport", "type": "bool", "default": true },
+        { "name": "allow_zoom", "type": "bool", "default": false },
+        { "name": "web_history_back", "type": "bool", "default": true },
+        {
+          "name": "text_zoom",
+          "type": "i32",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        { "name": "show_toolbar", "type": "bool", "default": true },
+        {
+          "name": "keep_alive_grace_sec",
+          "type": "i32",
+          "optional": true,
+          "skipSerializingIfNone": true
+        }
+      ]
+    },
+    "PluginNetworkPrefs": {
+      "doc": "Normalized runtime network allowlist and SPA fallback preferences delivered in PluginRuntimeDescriptor.",
+      "renameAll": "camelCase",
+      "rustDerives": ["Debug", "Clone", "Default", "PartialEq", "Eq", "Serialize", "Deserialize"],
+      "fields": [
+        { "name": "allowed_origins", "type": { "list": "string" }, "default": [] },
+        { "name": "allow_cleartext", "type": "bool", "default": false },
+        { "name": "spa_fallback", "type": "bool", "default": false }
+      ]
+    },
+    "PluginScopeOverride": {
+      "doc": "Per-plugin trigger scope override payload matching plugins.setScopeOverride semantics.",
+      "renameAll": "camelCase",
+      "rustDerives": ["Debug", "Clone", "Default", "PartialEq", "Eq", "Serialize", "Deserialize"],
+      "fields": [
+        {
+          "name": "packages",
+          "type": { "list": "string" },
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "global",
+          "type": "bool",
+          "optional": true,
+          "skipSerializingIfNone": true
+        }
+      ]
+    },
+    "PluginRuntimeDescriptor": {
+      "doc": "Authoritative runtime descriptor for a registered plugin broadcast by Hub to Host and Control Plane.",
+      "renameAll": "camelCase",
+      "rustDerives": ["Debug", "Clone", "PartialEq", "Eq", "Serialize", "Deserialize"],
+      "fields": [
+        { "name": "id", "type": "string" },
+        { "name": "name", "type": "string" },
+        { "name": "version", "type": "string" },
+        { "name": "origin", "type": { "ref": "PluginOrigin" } },
+        { "name": "schema_version", "type": "u32", "default": 1 },
+        { "name": "api_version", "type": "u32", "default": 1 },
+        {
+          "name": "min_host_version",
+          "type": "string",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "author",
+          "type": "string",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "homepage",
+          "type": "string",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "icon",
+          "type": "string",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        { "name": "entry", "type": "string", "default": "" },
+        {
+          "name": "asset_revision",
+          "type": "string",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        { "name": "builtin", "type": "bool", "default": false },
+        { "name": "default_enabled", "type": "bool", "default": true },
+        { "name": "enabled", "type": "bool", "default": true },
+        { "name": "priority", "type": "i32", "default": 0 },
+        { "name": "packages", "type": { "list": "string" }, "default": [] },
+        { "name": "activities", "type": { "list": "string" }, "default": [] },
+        { "name": "global", "type": "bool", "default": false },
+        { "name": "has_scope_override", "type": "bool", "default": false },
+        {
+          "name": "dev_server_url",
+          "type": "string",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        { "name": "backend", "type": { "ref": "PluginBackendKind" } },
+        { "name": "backend_state", "type": { "ref": "PluginBackendState" } },
+        { "name": "backend_packages", "type": { "list": "string" }, "default": [] },
+        { "name": "capabilities", "type": { "list": { "ref": "PluginCapability" } }, "default": [] },
+        {
+          "name": "granted_capabilities",
+          "type": { "list": { "ref": "PluginCapability" } },
+          "default": []
+        },
+        {
+          "name": "pending_capabilities",
+          "type": { "list": { "ref": "PluginCapability" } },
+          "default": []
+        },
+        { "name": "approval_status", "type": { "ref": "PluginApprovalStatus" } },
+        { "name": "daemon_approved", "type": "bool", "default": false },
+        { "name": "daemon_status", "type": { "ref": "PluginDaemonStatus" } },
+        {
+          "name": "daemon_pid",
+          "type": "u32",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        { "name": "daemon_restart_count", "type": "u32", "default": 0 },
+        {
+          "name": "daemon_last_error",
+          "type": "string",
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        { "name": "has_daemon", "type": "bool", "default": false },
+        { "name": "surface", "type": { "ref": "PluginSurfacePrefs" } },
+        {
+          "name": "embed",
+          "type": { "ref": "PluginEmbedPrefs" },
+          "optional": true,
+          "skipSerializingIfNone": true
+        },
+        {
+          "name": "network",
+          "type": { "ref": "PluginNetworkPrefs" },
+          "optional": true,
+          "skipSerializingIfNone": true
+        }
+      ]
+    }
+  },
+  "outputs": [
+    {
+      "target": "rust",
+      "path": "../hub/crates/sideveil-protocol/src/generated/plugin_manifest.rs",
+      "header": "Source: contracts/plugin-manifest.contract.json",
+      "include": { "enums": true, "structs": true }
+    },
+    {
+      "target": "kotlin",
+      "path": "../android/protocol/src/main/kotlin/pochita/sideveil/protocol/generated/PluginManifest.kt",
+      "package": "pochita.sideveil.protocol.generated",
+      "header": "Source: contracts/plugin-manifest.contract.json",
+      "include": { "enums": true, "structs": true }
+    },
+    {
+      "target": "ts",
+      "path": "generated/ts/sideveilPlugin.ts",
+      "header": "Source: sideveil/contracts/plugin-manifest.contract.json",
+      "include": { "enums": true, "structs": true }
+    },
+    {
+      "target": "jsonSchema",
+      "path": "schemas/plugin-manifest.schema.json",
+      "title": "SideVeil Plugin Manifest & Runtime Descriptor Schema",
+      "include": { "enums": true, "structs": true }
+    }
+  ]
+}

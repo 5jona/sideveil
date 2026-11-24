@@ -1,0 +1,11 @@
+{
+  "$def": "PluginManifest",
+  "invalid": true,
+  "data": {
+    "id": "com.example.bad-cap",
+    "name": "Bad Capability",
+    "version": "1.0.0",
+    "entry": "web/index.html",
+    "capabilities": ["root-shell"]
+  }
+}

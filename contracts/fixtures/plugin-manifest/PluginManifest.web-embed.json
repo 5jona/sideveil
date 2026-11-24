@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "apiVersion": 1,
+  "id": "com.example.embed",
+  "name": "LAN Dashboard",
+  "version": "1.0.0",
+  "backend": "none",
+  "capabilities": ["network-lan"],
+  "embed": {
+    "url": "http://192.168.1.10:8080",
+    "remoteUrl": "https://dash.example.com",
+    "lanSsids": ["HomeWiFi"],
+    "allowCleartext": true,
+    "showToolbar": true
+  }
+}

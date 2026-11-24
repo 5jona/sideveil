@@ -175,6 +175,16 @@
           "type": "integer",
           "minimum": 0
         },
+        "protocolVersion": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "pluginApiVersion": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
         "gestureStats": {
           "anyOf": [
             {
@@ -206,7 +216,9 @@
         "density",
         "wsPort",
         "sensorConnected",
-        "matchedPluginsCount"
+        "matchedPluginsCount",
+        "protocolVersion",
+        "pluginApiVersion"
       ],
       "description": "Live runtime status snapshot returned by daemon.status."
     },

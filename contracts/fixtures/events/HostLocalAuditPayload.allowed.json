@@ -1,0 +1,6 @@
+{
+  "pluginId": "com.example.notes",
+  "method": "clipboard.get",
+  "allowed": true,
+  "detail": "granted"
+}

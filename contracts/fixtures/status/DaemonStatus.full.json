@@ -22,6 +22,8 @@
   "sensorPid": 14842,
   "activePluginId": "sideveil.diagnostic",
   "matchedPluginsCount": 2,
+  "protocolVersion": 1,
+  "pluginApiVersion": 1,
   "gestureStats": {
     "edgeSwipesTriggered": 12,
     "edgeSwipesRejected": 3,

@@ -26,7 +26,6 @@ export const SIDEVEIL_CONFIG_DEFAULTS = {
   SCOPE_ALLOWLIST_DEFAULT_PACKAGE: 'me.weishu.kernelsu',
   SCOPE_DENYLIST_DEFAULT_PACKAGE: 'com.android.systemui',
   DEBUG_WEBVIEW_DEBUGGING_ENABLED: false,
-  DEFAULT_RUNTIME_MODE: 'release',
 } as const;
 
 /** Inclusive sanitization clamp bounds for SideVeilConfig numeric fields. */
@@ -72,8 +71,3 @@ export const SCOPE_MODE_VALUES = ['allowlist', 'global'] as const;
 export type PanelState = 'closed' | 'dragging' | 'open';
 
 export const PANEL_STATE_VALUES = ['closed', 'dragging', 'open'] as const;
-
-/** Runtime execution mode controlling whether source-level built-in test plugins are exposed. */
-export type RuntimeMode = 'release' | 'debug';
-
-export const RUNTIME_MODE_VALUES = ['release', 'debug'] as const;

@@ -54,6 +54,8 @@ data class DaemonStatus(
     val sensorPid: Long? = null,
     val activePluginId: String? = null,
     val matchedPluginsCount: Long = 0L,
+    val protocolVersion: Long = 1L,
+    val pluginApiVersion: Long = 1L,
     val gestureStats: DebugGestureStats? = null,
 )
 
@@ -104,4 +106,22 @@ data class HostPluginDiagnosticsPayload(
     val hostNativeHeapKb: Long? = null,
     val hostPssKb: Long? = null,
     val webviewCrashCount: Int = 0,
+)
+
+/** Handshake readiness payload pushed to a mounted plugin WebView with negotiated versions and granted capabilities. */
+@Serializable
+data class HostReadyPayload(
+    val protocolVersion: Long,
+    val apiVersion: Long,
+    val pluginId: String,
+    val grantedCapabilities: List<String> = emptyList(),
+)
+
+/** Audit record forwarded from Render Host to Hub for host-local capability-gated RPC calls (clipboard, toast, haptics). */
+@Serializable
+data class HostLocalAuditPayload(
+    val pluginId: String,
+    val method: String,
+    val allowed: Boolean,
+    val detail: String? = null,
 )
