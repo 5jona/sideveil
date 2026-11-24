@@ -63,13 +63,15 @@ object PluginWebViewSettings {
         descriptor: PluginDescriptor,
         isUntrustedEmbed: Boolean,
     ) {
+        // Multi-profile assignment swaps AwContents in Chromium and resets its base background
+        // color to opaque white; attach the profile FIRST, then apply transparent background.
+        PluginWebViewProfileManager.configureProfileAndCookies(webView, descriptor.id, isUntrustedEmbed)
         webView.setBackgroundColor(Color.TRANSPARENT)
         webView.isFocusable = true
         webView.isFocusableInTouchMode = true
         webView.overScrollMode = WebView.OVER_SCROLL_NEVER
         webView.isVerticalScrollBarEnabled = false
         webView.isHorizontalScrollBarEnabled = false
-        PluginWebViewProfileManager.configureProfileAndCookies(webView, descriptor.id, isUntrustedEmbed)
         applyWebSettings(webView, descriptor)
         webView.setInitialScale(0)
 
