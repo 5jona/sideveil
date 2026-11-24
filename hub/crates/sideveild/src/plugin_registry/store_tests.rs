@@ -73,7 +73,7 @@ fn builtin_diag_manifest_declares_storage_and_toast() {
     let m = builtin_diag_manifest();
     assert_eq!(m.id, BUILTIN_DIAG_PLUGIN_ID);
     assert_eq!(m.name, "内置诊断");
-    assert_eq!(m.version, "0.1.0");
+    assert_eq!(m.version, env!("CARGO_PKG_VERSION"));
     let triggers = m.effective_triggers();
     assert!(!triggers.global);
     assert_eq!(triggers.priority, 20);

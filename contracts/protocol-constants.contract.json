@@ -157,7 +157,7 @@
       "items": {
         "ID": { "value": "sideveil.diagnostic", "type": "string" },
         "NAME": { "value": "内置诊断", "type": "string" },
-        "VERSION": { "value": "0.1.0", "type": "string" },
+        "VERSION": { "value": "0.2.0", "type": "string" },
         "ENTRY": { "value": "index.html", "type": "string" },
         "PRIORITY": { "value": 20, "type": "i32" },
         "GLOBAL": { "value": false, "type": "bool" },

@@ -126,7 +126,7 @@ object SideVeilThemes {
 object SideVeilBuiltinDiagnostic {
     const val ID: String = "sideveil.diagnostic"
     const val NAME: String = "内置诊断"
-    const val VERSION: String = "0.1.0"
+    const val VERSION: String = "0.2.0"
     const val ENTRY: String = "index.html"
     const val PRIORITY: Int = 20
     const val GLOBAL: Boolean = false

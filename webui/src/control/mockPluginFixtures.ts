@@ -57,7 +57,7 @@ export const INITIAL_MOCK_PLUGINS: readonly PluginRuntimeDescriptor[] = [
   {
     id: 'sideveil.diagnostic',
     name: '内置诊断',
-    version: '0.1.0',
+    version: '0.2.0',
     origin: 'builtin',
     schemaVersion: 1,
     apiVersion: 1,
@@ -93,7 +93,7 @@ export const INITIAL_MOCK_PLUGINS: readonly PluginRuntimeDescriptor[] = [
   {
     id: 'example.vello-scope',
     name: 'Vello 矢量示波',
-    version: '0.1.0',
+    version: '0.2.0',
     origin: 'bundled',
     schemaVersion: 1,
     apiVersion: 1,
@@ -131,7 +131,7 @@ export const INITIAL_MOCK_PLUGINS: readonly PluginRuntimeDescriptor[] = [
   {
     id: 'example.native-perf-hud',
     name: '性能监控',
-    version: '0.1.0',
+    version: '0.2.0',
     origin: 'bundled',
     schemaVersion: 1,
     apiVersion: 1,

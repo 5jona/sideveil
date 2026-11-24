@@ -23,6 +23,8 @@ import {
   SIDEVEIL_TIMEOUT_BOUNDS,
 } from '../src/contracts.ts';
 import { DIAGNOSTIC_PLUGIN_MANIFEST } from '../src/panel/manifest.ts';
+import { NATIVE_PERF_HUD_MANIFEST } from '../src/plugins/native-perf-hud/manifest.ts';
+import { VELLO_SCOPE_MANIFEST } from '../src/plugins/vello-scope/manifest.ts';
 import { DEFAULT_CONFIG, normalizeSideVeilConfig } from '../src/shared/types.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -135,4 +137,54 @@ test('all golden fixtures pass their generated JSON Schemas', () => {
     }
   }
   assert.ok(totalFixtures >= 20, `Expected >= 20 golden fixtures, got ${totalFixtures}`);
+});
+
+test('version and versionCode stay aligned across module.prop, Rust, Kotlin sensor, WebUI, and bundled plugins', () => {
+  const moduleProp = fs.readFileSync(path.join(REPO_ROOT, 'module.prop'), 'utf8');
+  const versionMatch = moduleProp.match(/^version=v([0-9]+)\.([0-9]+)\.([0-9]+)$/m);
+  const codeMatch = moduleProp.match(/^versionCode=([0-9]+)$/m);
+  assert.ok(versionMatch, 'module.prop must declare version=vMAJOR.MINOR.PATCH');
+  assert.ok(codeMatch, 'module.prop must declare numeric versionCode');
+
+  const expectedVersion = `${versionMatch[1]}.${versionMatch[2]}.${versionMatch[3]}`;
+  const expectedCode =
+    Number(versionMatch[1]) * 10000 + Number(versionMatch[2]) * 100 + Number(versionMatch[3]);
+  assert.equal(Number(codeMatch[1]), expectedCode);
+
+  const hubCargo = fs.readFileSync(path.join(REPO_ROOT, 'hub/Cargo.toml'), 'utf8');
+  const hubMatch = hubCargo.match(/\[workspace\.package\][\s\S]*?^version\s*=\s*"([^"]+)"/m);
+  assert.ok(hubMatch, 'hub/Cargo.toml must declare workspace.package.version');
+  assert.equal(hubMatch[1], expectedVersion);
+
+  const webuiPkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'webui/package.json'), 'utf8'));
+  assert.equal(webuiPkg.version, expectedVersion);
+  assert.equal(SIDEVEIL_BUILTIN_DIAGNOSTIC.VERSION, expectedVersion);
+  assert.equal(DIAGNOSTIC_PLUGIN_MANIFEST.version, expectedVersion);
+
+  const sensorMain = fs.readFileSync(
+    path.join(REPO_ROOT, 'android/sensor/src/main/kotlin/pochita/sideveil/sensor/SensorMain.kt'),
+    'utf8',
+  );
+  const sensorMatch = sensorMain.match(/SENSOR_VERSION\s*=\s*"([^"]+)"/);
+  assert.ok(sensorMatch, 'SensorMain.kt must declare SENSOR_VERSION');
+  assert.equal(sensorMatch[1], expectedVersion);
+
+  const perfManifest = JSON.parse(
+    fs.readFileSync(path.join(REPO_ROOT, 'examples/native-perf-hud/manifest.json'), 'utf8'),
+  );
+  const perfCargo = fs.readFileSync(
+    path.join(REPO_ROOT, 'examples/native-perf-hud/Cargo.toml'),
+    'utf8',
+  );
+  const perfCargoMatch = perfCargo.match(/\[package\][\s\S]*?^version\s*=\s*"([^"]+)"/m);
+  assert.ok(perfCargoMatch, 'examples/native-perf-hud/Cargo.toml must declare package.version');
+  assert.equal(perfManifest.version, expectedVersion);
+  assert.equal(perfCargoMatch[1], expectedVersion);
+  assert.equal(NATIVE_PERF_HUD_MANIFEST.version, expectedVersion);
+
+  const velloManifest = JSON.parse(
+    fs.readFileSync(path.join(REPO_ROOT, 'examples/vello-vector-scope/manifest.json'), 'utf8'),
+  );
+  assert.equal(velloManifest.version, expectedVersion);
+  assert.equal(VELLO_SCOPE_MANIFEST.version, expectedVersion);
 });

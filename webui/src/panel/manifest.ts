@@ -1,8 +1,5 @@
-import {
-  definePluginManifest,
-  type PluginManifest,
-  SIDEVEIL_BUILTIN_DIAGNOSTIC,
-} from '@gojona/sideveil-sdk';
+import { definePluginManifest, type PluginManifest } from '@gojona/sideveil-sdk';
+import { SIDEVEIL_BUILTIN_DIAGNOSTIC } from '../contracts.ts';
 
 export const DIAGNOSTIC_PLUGIN_MANIFEST: PluginManifest = definePluginManifest({
   id: SIDEVEIL_BUILTIN_DIAGNOSTIC.ID,

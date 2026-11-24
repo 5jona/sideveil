@@ -7,6 +7,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import pochita.sideveil.protocol.generated.SideVeilBuiltinDiagnostic
 
 class PluginProtocolTest {
     @Test
@@ -156,7 +157,7 @@ class PluginProtocolTest {
         val diag = PluginDescriptor.builtinDiagnostic()
         assertEquals(BUILTIN_DIAG_PLUGIN_ID, diag.id)
         assertEquals("内置诊断", diag.name)
-        assertEquals("0.1.0", diag.version)
+        assertEquals(SideVeilBuiltinDiagnostic.VERSION, diag.version)
         assertEquals(PluginOrigin.BUILTIN, diag.origin)
         assertFalse(diag.global)
         assertEquals(20, diag.priority)

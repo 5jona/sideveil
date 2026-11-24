@@ -32,7 +32,7 @@ private data class SensorArgs(
  * foreground Activity tracking, `monitorGestureInput` + `pilferPointers`, and AppOps grants.
  */
 object SensorMain {
-    private const val SENSOR_VERSION = "0.1.0"
+    private const val SENSOR_VERSION = "0.2.0"
     private const val DEFAULT_SOCKET_PATH = "/data/system/sideveil/run/hub.sock"
     private const val DEFAULT_HOST_PACKAGE = "pochita.sideveil.host"
 

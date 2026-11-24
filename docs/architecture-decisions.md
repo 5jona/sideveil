@@ -85,3 +85,20 @@ Analysis of system sidebar implementations (`com.coloros.smartsidebar` v17.9.8 a
   - `sideveild` uses `usvg` + `vello_cpu` (AArch64 NEON) to rasterize plugin SVG icons into cached PNGs (`/plugins/<id>/__icon`) and uses `color` (`Oklch`) to synthesize light/dark glass tokens from Android wallpaper seed colors.
   - For lightweight status overlays (`native-hud` presentation mode), `libsideveil_hud.so` rasterizes vector primitives (`NativeHudScene`) directly into double-buffered Android `Bitmap`s via `libjnigraphics.so`, while Android HWUI `Canvas.drawText` renders CJK/Emoji/tabular text (`tnum`) using system fonts without bundling font assets in Rust or spawning a WebView process.
 - **WebView Plugin Sandbox**: Standard web plugins run inside LRU-cached WebViews; plugins declaring `surface.crossOriginIsolated: true` receive `COOP: same-origin` and `COEP: require-corp` headers to enable `SharedArrayBuffer` and WASM/WebGPU rendering, with render processes reclaimed on LRU eviction.
+
+---
+
+## 5. WebView Sandbox, Bridge & Packaging Findings
+
+1. **Chromium `WebViewCompat.setProfile` resets WebView background to opaque white**
+   - Calling `WebViewCompat.setProfile(...)` recreates Chromium's underlying `AwContents`, resetting the view background to opaque white and masking SurfaceFlinger `blurRegions` on the floating panel even while the Plugin Rail remains translucent.
+   - **Resolution**: Always bind the isolated WebView profile first and invoke `webView.setBackgroundColor(Color.TRANSPARENT)` strictly afterwards (`PluginWebViewSettings.kt`).
+2. **Origin-bound `WebMessageListener` supersedes `MessagePort` during handshake**
+   - `addJavascriptInterface` is banned in favor of `WebViewCompat.addWebMessageListener` gated on exact plugin origin and main-frame checks (`PluginWebMessageBridge.kt`).
+   - Once the web page sends `host.attach(channel: 'listener')`, the Android bridge closes any legacy `MessagePort`. Client transports (`@gojona/bridge` `HostTransport`) must therefore prioritize the active listener and close late-transferred ports so `plugin.invoke` requests are never dropped into a closed port.
+3. **Full-response CSP & canonical network origin validation**
+   - CSP headers are attached to every `2xx` response served from virtual plugin origins (including JavaScript resources loaded by Web Workers) to prevent zero-CSP worker escape, and main-frame navigation out of trusted plugin origins is blocked.
+   - Both Rust Hub and Android Host unwrap IPv4-mapped IPv6 literals (`[::ffff:...]`) and reject unspecified addresses (`0.0.0.0`, `[::]`) when evaluating loopback/LAN network capabilities.
+4. **KernelSU `.svp` uploads and plugin ID namespace rules**
+   - KernelSU WebUI shell commands hit Linux's `MAX_ARG_STRLEN` (128 KiB `E2BIG`) if large `.svp` payloads are passed inline; the Control Plane stages uploads in 40 KiB chunks to a temporary file before invoking `sideveil-ctl plugins install <path>` (and `sideveil-ctl rpc -` accepts stdin payloads up to 24 MiB for `uid 0`).
+   - Reserved-ID guards protect `builtin` (`sideveil.diagnostic`) and `bundled` (`example.*`) plugin IDs against third-party hijacking without blocking legitimate installed first-party modules such as `sideveil.proxy`. Keep `/data/system/sideveil/plugins/` free of stale shadowed `example.*` directories that belong under `/data/adb/modules/sideveil/plugins/`.

@@ -125,7 +125,7 @@ pub mod themes {
 pub mod builtin_diagnostic {
     pub const ID: &str = "sideveil.diagnostic";
     pub const NAME: &str = "内置诊断";
-    pub const VERSION: &str = "0.1.0";
+    pub const VERSION: &str = "0.2.0";
     pub const ENTRY: &str = "index.html";
     pub const PRIORITY: i32 = 20;
     pub const GLOBAL: bool = false;

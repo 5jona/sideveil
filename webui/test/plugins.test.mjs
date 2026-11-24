@@ -35,12 +35,12 @@ import {
   needsPermissionAttention,
 } from '../src/control/pluginMeta.ts';
 import { DIAGNOSTIC_PLUGIN_MANIFEST } from '../src/panel/manifest.ts';
-import { SIDEVEIL_METHODS } from '../src/shared/types.ts';
+import { SIDEVEIL_BUILTIN_DIAGNOSTIC, SIDEVEIL_METHODS } from '../src/shared/types.ts';
 
 test('DIAGNOSTIC_PLUGIN_MANIFEST defines valid builtin plugin', () => {
   assert.equal(DIAGNOSTIC_PLUGIN_MANIFEST.id, BUILTIN_DIAG_PLUGIN_ID);
   assert.equal(DIAGNOSTIC_PLUGIN_MANIFEST.name, '内置诊断');
-  assert.equal(DIAGNOSTIC_PLUGIN_MANIFEST.version, '0.1.0');
+  assert.equal(DIAGNOSTIC_PLUGIN_MANIFEST.version, SIDEVEIL_BUILTIN_DIAGNOSTIC.VERSION);
   assert.equal(DIAGNOSTIC_PLUGIN_MANIFEST.triggers?.global, false);
   assert.equal(DIAGNOSTIC_PLUGIN_MANIFEST.backend, 'none');
   assert.deepEqual(DIAGNOSTIC_PLUGIN_MANIFEST.capabilities, ['storage', 'toast']);

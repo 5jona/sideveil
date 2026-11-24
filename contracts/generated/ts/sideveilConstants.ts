@@ -124,7 +124,7 @@ export const SIDEVEIL_THEMES = {
 export const SIDEVEIL_BUILTIN_DIAGNOSTIC = {
   ID: 'sideveil.diagnostic',
   NAME: '内置诊断',
-  VERSION: '0.1.0',
+  VERSION: '0.2.0',
   ENTRY: 'index.html',
   PRIORITY: 20,
   GLOBAL: false,

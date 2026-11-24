@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-11-25
+
+### Changed
+
+- Unified module, Rust hub, Kotlin sensor, SideVeilHost APK (`versionCode=200`), built-in diagnostic contract, WebUI, and bundled example plugins to `v0.2.0` (`versionCode = MAJOR * 10000 + MINOR * 100 + PATCH`).
+- Updated `webui/src/panel/manifest.ts` to read `SIDEVEIL_BUILTIN_DIAGNOSTIC` directly from in-repo generated contracts and added a cross-stack version parity test in `webui/test/contracts.test.mjs`.
+- Rebuilt Control Plane, built-in diagnostic panel, and bundled plugin WebUIs with `@gojona/ui` rapid tab-swipe fixes and `@gojona/bridge` `WebMessageListener` channel prioritization fixes.
+
 ## [0.1.0] - 2026-11-24
 
 Initial public release of **SideVeil**, a generic Android 16+ (API 36+, arm64, Linux GKI 6.12+) sidebar microkernel host packaged as a KernelSU module.
