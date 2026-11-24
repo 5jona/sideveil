@@ -1,133 +1,38 @@
 package pochita.sideveil.protocol
 
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 
 typealias HostPluginDiagnosticsPayload = pochita.sideveil.protocol.generated.HostPluginDiagnosticsPayload
+typealias PluginOrigin = pochita.sideveil.protocol.generated.PluginOrigin
+typealias PluginBackendKind = pochita.sideveil.protocol.generated.PluginBackendKind
+typealias PluginBackendState = pochita.sideveil.protocol.generated.PluginBackendState
+typealias PluginCapability = pochita.sideveil.protocol.generated.PluginCapability
+typealias CapabilityRiskTier = pochita.sideveil.protocol.generated.CapabilityRiskTier
+typealias PluginSurfaceBackdrop = pochita.sideveil.protocol.generated.PluginSurfaceBackdrop
+typealias PluginPresentationMode = pochita.sideveil.protocol.generated.PluginPresentationMode
+typealias PluginDaemonRestartPolicy = pochita.sideveil.protocol.generated.PluginDaemonRestartPolicy
+typealias PluginDaemonStatus = pochita.sideveil.protocol.generated.PluginDaemonStatus
+typealias PluginApprovalStatus = pochita.sideveil.protocol.generated.PluginApprovalStatus
+typealias PluginDaemonSpec = pochita.sideveil.protocol.generated.PluginDaemonSpec
+typealias PluginEmbedPrefs = pochita.sideveil.protocol.generated.PluginEmbedPrefs
+typealias PluginNetworkPrefs = pochita.sideveil.protocol.generated.PluginNetworkPrefs
+typealias PluginScopeOverride = pochita.sideveil.protocol.generated.PluginScopeOverride
+typealias PluginManifest = pochita.sideveil.protocol.generated.PluginManifest
+typealias PluginRuntimeDescriptor = pochita.sideveil.protocol.generated.PluginRuntimeDescriptor
 
 const val BUILTIN_DIAG_PLUGIN_ID = SideVeilBuiltinDiagnostic.ID
 
-fun isBuiltinTestPlugin(id: String): Boolean =
-    id == SideVeilBuiltinTestPlugins.DIAGNOSTIC ||
-        id == SideVeilBuiltinTestPlugins.VELLO_SCOPE ||
-        id == SideVeilBuiltinTestPlugins.NATIVE_PERF_HUD
-
-@Serializable
-enum class PluginBackendKind {
-    @SerialName("none")
-    NONE,
-
-    @SerialName("uds-native")
-    UDS_NATIVE,
-
-    @SerialName("uds-app")
-    UDS_APP,
-}
-
-@Serializable
-enum class PluginBackendState {
-    @SerialName("none")
-    NONE,
-
-    @SerialName("online")
-    ONLINE,
-
-    @SerialName("offline")
-    OFFLINE,
-}
-
-@Serializable
-enum class PluginCapability {
-    @SerialName("storage")
-    STORAGE,
-
-    @SerialName("toast")
-    TOAST,
-
-    @SerialName("system-exec")
-    SYSTEM_EXEC,
-
-    @SerialName("native-hud")
-    NATIVE_HUD,
-
-    @SerialName("clipboard")
-    CLIPBOARD,
-
-    @SerialName("haptics")
-    HAPTICS,
-
-    @SerialName("telemetry")
-    TELEMETRY,
-
-    @SerialName("inter-plugin-bus")
-    INTER_PLUGIN_BUS,
-
-    @SerialName("network-loopback")
-    NETWORK_LOOPBACK,
-
-    @SerialName("network-lan")
-    NETWORK_LAN,
-
-    @SerialName("network-context")
-    NETWORK_CONTEXT,
-}
-
-@Serializable
-data class PluginEmbedPrefs(
-    val url: String,
-    val remoteUrl: String? = null,
-    val lanSsids: List<String> = emptyList(),
-    val allowedOrigins: List<String> = emptyList(),
-    val allowCleartext: Boolean = false,
-    val wideViewport: Boolean = true,
-    val allowZoom: Boolean = false,
-    val webHistoryBack: Boolean = true,
-    val textZoom: Int? = null,
-    val showToolbar: Boolean = true,
-    val keepAliveGraceSec: Int? = null,
-)
-
-@Serializable
-data class PluginNetworkPrefs(
-    val allowedOrigins: List<String> = emptyList(),
-    val allowCleartext: Boolean = false,
-    val spaFallback: Boolean = false,
-)
-
-@Serializable
-enum class PluginSurfaceBackdrop {
-    @SerialName("native-glass")
-    NATIVE_GLASS,
-
-    @SerialName("transparent")
-    TRANSPARENT,
-
-    @SerialName("opaque")
-    OPAQUE,
-}
-
-@Serializable
-enum class PluginPresentationMode {
-    @SerialName("drawer")
-    DRAWER,
-
-    @SerialName("peek")
-    PEEK,
-
-    @SerialName("pinned")
-    PINNED,
-
-    @SerialName("wide")
-    WIDE,
-
-    @SerialName("native-hud")
-    NATIVE_HUD,
-}
-
+/**
+ * Forward-compatible surface preference projection backed by generated [PluginSurfaceBackdrop]
+ * and [PluginPresentationMode] enums with safe defaults when optional fields or future enum
+ * variants appear on the wire.
+ */
 @Serializable
 data class PluginSurfacePrefs(
+    @Serializable(with = TolerantPluginSurfaceBackdropSerializer::class)
     val backdrop: PluginSurfaceBackdrop = PluginSurfaceBackdrop.NATIVE_GLASS,
+    @Serializable(with = TolerantPluginPresentationModeSerializer::class)
     val presentation: PluginPresentationMode = PluginPresentationMode.DRAWER,
     val crossOriginIsolated: Boolean = false,
     val keepAlive: Boolean = false,
@@ -135,15 +40,30 @@ data class PluginSurfacePrefs(
     val heightPercent: Int? = null,
 )
 
+/**
+ * Forward-compatible runtime plugin descriptor decoded from Hub `plugins.updated` snapshots.
+ *
+ * Uses generated enums and sub-DTOs from [PluginRuntimeDescriptor] with tolerant deserializers for
+ * capability lists and enum variants so future Hub additions never drop a live plugin catalog.
+ */
 @Serializable
 data class PluginDescriptor(
     val id: String,
     val name: String,
     val version: String,
+    @Serializable(with = TolerantPluginOriginSerializer::class)
+    val origin: PluginOrigin = PluginOrigin.INSTALLED,
+    val schemaVersion: Long = SideVeilProtocolVersions.MANIFEST_SCHEMA_VERSION,
+    val apiVersion: Long = SideVeilProtocolVersions.PLUGIN_API_VERSION,
+    val minHostVersion: String? = null,
+    val description: String? = null,
+    val author: String? = null,
+    val homepage: String? = null,
     val icon: String? = null,
     val entry: String = "index.html",
     val assetRevision: String? = null,
     val builtin: Boolean = false,
+    val defaultEnabled: Boolean = true,
     val enabled: Boolean = true,
     val priority: Int = 0,
     val packages: List<String> = emptyList(),
@@ -151,26 +71,54 @@ data class PluginDescriptor(
     val global: Boolean = false,
     val hasScopeOverride: Boolean = false,
     val devServerUrl: String? = null,
+    @Serializable(with = TolerantPluginBackendKindSerializer::class)
     val backend: PluginBackendKind = PluginBackendKind.NONE,
+    @Serializable(with = TolerantPluginBackendStateSerializer::class)
     val backendState: PluginBackendState = PluginBackendState.NONE,
+    val backendPackages: List<String> = emptyList(),
+    @Serializable(with = TolerantPluginCapabilityListSerializer::class)
     val capabilities: List<PluginCapability> = emptyList(),
+    @Serializable(with = TolerantPluginCapabilityListSerializer::class)
+    val grantedCapabilities: List<PluginCapability> = emptyList(),
+    @Serializable(with = TolerantPluginCapabilityListSerializer::class)
+    val pendingCapabilities: List<PluginCapability> = emptyList(),
+    @Serializable(with = TolerantPluginApprovalStatusSerializer::class)
+    val approvalStatus: PluginApprovalStatus = PluginApprovalStatus.APPROVED,
+    val daemonApproved: Boolean = false,
+    @Serializable(with = TolerantPluginDaemonStatusSerializer::class)
+    val daemonStatus: PluginDaemonStatus = PluginDaemonStatus.NOT_CONFIGURED,
+    val daemonPid: Long? = null,
+    val daemonRestartCount: Long = 0L,
+    val daemonLastError: String? = null,
+    val hasDaemon: Boolean = false,
     val surface: PluginSurfacePrefs = PluginSurfacePrefs(),
     val embed: PluginEmbedPrefs? = null,
     val network: PluginNetworkPrefs? = null,
 ) {
+    /** Returns `true` when [cap] is explicitly present in [grantedCapabilities]. */
+    fun hasGrantedCapability(cap: PluginCapability): Boolean = grantedCapabilities.contains(cap)
+
+    /** Wire-encoded list of [grantedCapabilities] for `host.ready` handshakes. */
+    fun grantedCapabilityWireTokens(): List<String> = grantedCapabilities.map(PluginCapabilityCodec::toWire)
+
     companion object {
-        fun builtinDiagnostic(): PluginDescriptor =
-            PluginDescriptor(
+        fun builtinDiagnostic(): PluginDescriptor {
+            val caps = listOf(PluginCapability.STORAGE, PluginCapability.TOAST)
+            return PluginDescriptor(
                 id = SideVeilBuiltinDiagnostic.ID,
                 name = SideVeilBuiltinDiagnostic.NAME,
                 version = SideVeilBuiltinDiagnostic.VERSION,
+                origin = PluginOrigin.BUILTIN,
                 entry = SideVeilBuiltinDiagnostic.ENTRY,
                 builtin = true,
                 enabled = true,
                 priority = SideVeilBuiltinDiagnostic.PRIORITY,
                 global = SideVeilBuiltinDiagnostic.GLOBAL,
-                capabilities = listOf(PluginCapability.STORAGE, PluginCapability.TOAST),
+                capabilities = caps,
+                grantedCapabilities = caps,
+                approvalStatus = PluginApprovalStatus.APPROVED,
             )
+        }
     }
 }
 
@@ -193,6 +141,7 @@ data class PluginActiveChangedPayload(
 @Serializable
 data class PluginBackendStatePayload(
     val pluginId: String,
+    @Serializable(with = TolerantPluginBackendStateSerializer::class)
     val state: PluginBackendState,
 )
 

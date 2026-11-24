@@ -40,6 +40,7 @@ object NetworkOriginParser {
         val authority = afterScheme.substring(0, authorityEnd)
         if (authority.isEmpty() || authority.contains('@')) return null
         val (host, port) = parseAuthority(authority, scheme) ?: return null
+        if (isUnspecifiedHost(host)) return null
         return ParsedOrigin(scheme = scheme, host = host, port = port)
     }
 
@@ -49,6 +50,7 @@ object NetworkOriginParser {
         val scheme = uri.scheme?.lowercase(Locale.ROOT) ?: return null
         if (scheme !in ALLOWED_SCHEMES) return null
         val host = uri.host?.let(::normalizeHost) ?: return null
+        if (isUnspecifiedHost(host)) return null
         val port = if (uri.port == -1) defaultPortFor(scheme) else uri.port
         if (port !in 1..65535) return null
         return ParsedOrigin(scheme = scheme, host = host, port = port)
@@ -64,12 +66,20 @@ object NetworkOriginParser {
         return schemeOk && hasValidLoopbackAuthority(uri)
     }
 
-    /** Returns `true` if [host] is `localhost`, `127.0.0.1`, or IPv6 `::1`. */
+    /** Returns `true` if [host] is `localhost`, any `127.0.0.0/8` IPv4 loopback literal, or IPv6 `::1`. */
     fun isLoopbackHost(host: String): Boolean {
         val normalized = normalizeHost(host) ?: return false
-        if (normalized == "localhost" || normalized == "127.0.0.1") return true
+        if (normalized == "localhost") return true
+        parseIpv4Octets(normalized)?.let { return it[0] == 127 }
         val ipv6 = parseIpv6Groups(normalized) ?: return false
         return isLoopbackIpv6(ipv6)
+    }
+
+    /** Formats [origin] into its canonical `scheme://host[:port]` representation for CSP directives. */
+    fun formatOrigin(origin: ParsedOrigin): String {
+        val hostPart = if (origin.host.contains(':')) "[${origin.host}]" else origin.host
+        val isDefault = origin.port == defaultPortFor(origin.scheme)
+        return if (isDefault) "${origin.scheme}://$hostPart" else "${origin.scheme}://$hostPart:${origin.port}"
     }
 
     /** Returns `true` if [host] is a loopback, RFC1918 private IPv4, IPv6 ULA/link-local, or local mDNS domain. */
@@ -80,6 +90,15 @@ object NetworkOriginParser {
         parseIpv4Octets(normalized)?.let { return isPrivateOrLoopbackIpv4(it) }
         parseIpv6Groups(normalized)?.let { return isPrivateOrLoopbackIpv6(it) }
         return isLocalDomainSuffix(normalized)
+    }
+
+    /** Returns `true` if [host] is an unspecified IPv4/IPv6 literal (`0.0.0.0`, `::`, or `::ffff:0.0.0.0`). */
+    fun isUnspecifiedHost(host: String): Boolean {
+        val normalized = normalizeHost(host) ?: return false
+        parseIpv4Octets(normalized)?.let { return it.all { octet -> octet == 0 } }
+        val ipv6 = parseIpv6Groups(normalized) ?: return false
+        extractIpv4MappedOctets(ipv6)?.let { return it.all { octet -> octet == 0 } }
+        return ipv6.all { group -> group == 0 }
     }
 
     /** Returns `true` if [normalizedHost] collides with SideVeil's internal virtual plugin domain. */
@@ -180,15 +199,17 @@ object NetworkOriginParser {
     }
 
     private fun isPrivateOrLoopbackIpv4(o: IntArray): Boolean =
-        (o[0] == 127 && o[1] == 0 && o[2] == 0 && o[3] == 1) ||
+        o[0] == 127 ||
             o[0] == 10 ||
             (o[0] == 172 && o[1] in 16..31) ||
-            (o[0] == 192 && o[1] == 168)
+            (o[0] == 192 && o[1] == 168) ||
+            (o[0] == 169 && o[1] == 254)
 
     private fun parseIpv6Groups(host: String): IntArray? {
         val zoneStripped = host.substringBefore('%')
         if (!zoneStripped.contains(':')) return null
-        val split = zoneStripped.split("::")
+        val normalized = rewriteTrailingIpv4(zoneStripped) ?: return null
+        val split = normalized.split("::")
         if (split.size > 2) return null
         val tokens =
             if (split.size == 1) {
@@ -211,12 +232,37 @@ object NetworkOriginParser {
         return groups
     }
 
-    private fun isLoopbackIpv6(g: IntArray): Boolean = (0 until 7).all { g[it] == 0 } && g[7] == 1
+    private fun rewriteTrailingIpv4(zoneStripped: String): String? {
+        val lastColon = zoneStripped.lastIndexOf(':')
+        val tail = zoneStripped.substring(lastColon + 1)
+        if (!tail.contains('.')) return zoneStripped
+        val octets = parseIpv4Octets(tail) ?: return null
+        val hi = ((octets[0] shl 8) or octets[1]).toString(16)
+        val lo = ((octets[2] shl 8) or octets[3]).toString(16)
+        return "${zoneStripped.substring(0, lastColon + 1)}$hi:$lo"
+    }
 
-    private fun isPrivateOrLoopbackIpv6(g: IntArray): Boolean =
-        isLoopbackIpv6(g) ||
+    private fun extractIpv4MappedOctets(g: IntArray): IntArray? {
+        if (!(0 until 5).all { g[it] == 0 } || g[5] != 0xFFFF) return null
+        return intArrayOf(
+            (g[6] ushr 8) and 0xFF,
+            g[6] and 0xFF,
+            (g[7] ushr 8) and 0xFF,
+            g[7] and 0xFF,
+        )
+    }
+
+    private fun isLoopbackIpv6(g: IntArray): Boolean {
+        extractIpv4MappedOctets(g)?.let { return it[0] == 127 }
+        return (0 until 7).all { g[it] == 0 } && g[7] == 1
+    }
+
+    private fun isPrivateOrLoopbackIpv6(g: IntArray): Boolean {
+        extractIpv4MappedOctets(g)?.let { return isPrivateOrLoopbackIpv4(it) }
+        return isLoopbackIpv6(g) ||
             (g[0] and 0xFE00) == 0xFC00 ||
             (g[0] and 0xFFC0) == 0xFE80
+    }
 
     private fun isLocalDomainSuffix(host: String): Boolean {
         val base =

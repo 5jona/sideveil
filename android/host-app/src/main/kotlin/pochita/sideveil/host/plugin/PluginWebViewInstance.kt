@@ -23,8 +23,9 @@ import pochita.sideveil.protocol.SideVeilWireJson
 
 /**
  * Isolated WebView sandbox instance for a single SideVeil plugin under
- * `https://<pluginId>.plugins.sideveil.local/` with `onRenderProcessGone` crash recovery,
- * per-plugin container preferences, and [PluginWebMessageBridge] IPC routing.
+ * `https://<pluginId>.plugins.sideveil.local/` with multi-profile storage isolation,
+ * origin-verified `WebMessageListener` IPC, `onRenderProcessGone` crash recovery,
+ * and per-plugin container preferences.
  */
 internal class PluginWebViewInstance(
     context: Context,
@@ -36,68 +37,55 @@ internal class PluginWebViewInstance(
     private val mainHandler = Handler(Looper.getMainLooper())
     val webView: WebView = WebView(context)
     private val dormancy =
-        WebViewDormancyController.forWebView(
-            webView = webView,
-            mainHandler = mainHandler,
-            hidePauseDelayMs = WebViewDormancyController.resolveHidePauseDelayMs(initialDescriptor),
-        )
+        WebViewDormancyController.forWebView(webView, mainHandler, WebViewDormancyController.resolveHidePauseDelayMs(initialDescriptor))
     private val embedSession = EmbedSessionController(webView, mainHandler, initialNetworkRoute)
 
-    @Volatile
-    var descriptor: PluginDescriptor = initialDescriptor
+    @Volatile var descriptor: PluginDescriptor = initialDescriptor
         private set
 
-    @Volatile
-    var backInterceptEnabled: Boolean = false
+    @Volatile var backInterceptEnabled: Boolean = false
         private set
 
-    @Volatile
-    var surfaceBackdrop: PluginSurfaceBackdrop = initialDescriptor.surface.backdrop
+    @Volatile var surfaceBackdrop: PluginSurfaceBackdrop = initialDescriptor.surface.backdrop
         private set
 
-    @Volatile
-    var presentationMode: PluginPresentationMode = initialDescriptor.surface.presentation
+    @Volatile var presentationMode: PluginPresentationMode = initialDescriptor.surface.presentation
         private set
 
-    @Volatile
-    var sizeOverride: PluginSizeOverride =
-        PluginSizeOverride(
-            widthDp = initialDescriptor.surface.widthDp,
-            heightPercent = initialDescriptor.surface.heightPercent,
-        )
+    @Volatile var sizeOverride: PluginSizeOverride =
+        PluginSizeOverride(widthDp = initialDescriptor.surface.widthDp, heightPercent = initialDescriptor.surface.heightPercent)
         private set
 
-    @Volatile
-    var foregroundPriority: Boolean = false
+    @Volatile var foregroundPriority: Boolean = false
         private set
+
+    @Volatile private var hadMainFrameErrorThisLoad: Boolean = false
 
     val isUntrustedEmbed: Boolean = PluginNetworkPolicy.isUntrustedEmbed(initialDescriptor)
 
-    // Untrusted web-embeds receive zero JS bridge or WebMessagePort privileges by construction.
     private val messageBridge: PluginWebMessageBridge? =
         deps.createMessageBridgeIfTrusted(
-            isUntrustedEmbed = isUntrustedEmbed,
-            webView = webView,
-            initialPluginId = initialDescriptor.id,
-            descriptorProvider = { descriptor },
-            onContainerAction = ::applyContainerAction,
+            isUntrustedEmbed,
+            webView,
+            initialDescriptor.id,
+            { descriptor },
+            { foregroundPriority },
+            ::applyContainerAction,
         )
 
     init {
         PluginWebViewSettings.configureBaseView(context, webView, initialDescriptor, isUntrustedEmbed)
-        messageBridge?.let { bridge ->
-            webView.addJavascriptInterface(bridge.createJsHostObject(), "__POCHITA_HOST__")
-        }
+        messageBridge?.installWebMessageListener()
         webView.webViewClient =
             PluginWebViewClient(
-                isUntrustedEmbed = isUntrustedEmbed,
-                descriptorProvider = { descriptor },
-                assetFetcher = deps.assetFetcher,
-                messageBridge = messageBridge,
-                dormancy = dormancy,
-                onWebViewError = ::emitWebViewError,
-                onRenderProcessGoneEvent = ::handleRenderProcessGone,
-                onMainPageFinished = ::handleMainPageFinished,
+                isUntrustedEmbed,
+                { descriptor },
+                deps.assetFetcher,
+                messageBridge,
+                dormancy,
+                ::emitWebViewError,
+                ::handleRenderProcessGone,
+                ::handleMainPageFinished,
             )
         webView.webChromeClient = PluginWebChromeClient({ descriptor.id }, deps.daemonClient, isUntrustedEmbed)
     }
@@ -116,19 +104,25 @@ internal class PluginWebViewInstance(
             isUntrustedEmbed && (prev.embed?.showToolbar != next.embed?.showToolbar || prev.name != next.name)
         val surfaceChanged = syncSurfaceDefaults(prev, next) || toolbarOrTitleChanged
         val needsReload = PluginWebViewSettings.shouldReloadOnDescriptorChange(prev, next)
-        if (needsReload) loadEntry()
+        if (needsReload) {
+            if (prev.devServerUrl != next.devServerUrl) {
+                runCatching { webView.clearCache(true) }
+            }
+            loadEntry()
+        }
         if (prev.backendState != next.backendState || needsReload) pushBackendState()
         return if (surfaceChanged) DescriptorUpdateOutcome.SURFACE_UPDATED else DescriptorUpdateOutcome.UNCHANGED
     }
 
+    fun reloadWithCacheClear() {
+        runCatching { webView.clearCache(true) }
+        if (isUntrustedEmbed) embedSession.reload(descriptor) else loadEntry()
+    }
+
     fun pushBackendState() {
         if (isUntrustedEmbed || descriptor.backend == PluginBackendKind.NONE) return
-        pushEvent(
-            SideVeilEvents.PLUGIN_BACKEND_STATE,
-            SideVeilWireJson.encodeToJsonElement(
-                PluginBackendStatePayload(pluginId = descriptor.id, state = descriptor.backendState),
-            ),
-        )
+        val payload = PluginBackendStatePayload(pluginId = descriptor.id, state = descriptor.backendState)
+        pushEvent(SideVeilEvents.PLUGIN_BACKEND_STATE, SideVeilWireJson.encodeToJsonElement(payload))
     }
 
     fun setForegroundPriority(foreground: Boolean) {
@@ -157,7 +151,7 @@ internal class PluginWebViewInstance(
         return false
     }
 
-    fun flushCookies() = PluginWebViewSettings.flushCookies(descriptor.id)
+    fun flushCookies() = PluginWebViewSettings.flushCookies(webView, descriptor.id, isUntrustedEmbed)
 
     fun debugState(
         isActive: Boolean,
@@ -165,24 +159,28 @@ internal class PluginWebViewInstance(
         keepAlive: Boolean,
     ): DebugWebViewSnapshot =
         PluginWebViewSettings.buildWebViewDebugSnapshot(
-            webView = webView,
-            descriptor = descriptor,
-            isUntrustedEmbed = isUntrustedEmbed,
-            surfaceBackdrop = surfaceBackdrop,
-            presentationMode = presentationMode,
-            backInterceptEnabled = backInterceptEnabled,
-            foregroundPriority = foregroundPriority,
-            dormant = dormancy.isPaused,
-            crashCount = deps.crashRegistry.countFor(descriptor.id),
-            isActive = isActive,
-            isPinned = isPinned,
-            keepAlive = keepAlive,
+            webView,
+            descriptor,
+            isUntrustedEmbed,
+            surfaceBackdrop,
+            presentationMode,
+            backInterceptEnabled,
+            foregroundPriority,
+            dormancy.isPaused,
+            deps.crashRegistry.countFor(descriptor.id),
+            isActive,
+            isPinned,
+            keepAlive,
         )
 
     fun loadEntry(restoreUrl: String? = null) {
+        hadMainFrameErrorThisLoad = false
+        callbacks.onMainFrameStatusChanged(descriptor.id, errorTitle = null, errorDetail = null)
         dormancy.onLoadStarted()
         messageBridge?.resetBeforeLoad()
-        if (descriptor.embed != null) {
+        if (descriptor.embed !=
+            null
+        ) {
             embedSession.loadInitial(descriptor, restoreUrl)
         } else {
             webView.loadUrl(deps.assetFetcher.entryUrlFor(descriptor))
@@ -204,8 +202,7 @@ internal class PluginWebViewInstance(
         event: String,
         payload: JsonElement?,
     ) {
-        val bridge = messageBridge ?: return
-        bridge.postRawAsync(SideVeilWireJson.encodeToString(HostEventEnvelope(event = event, payload = payload)))
+        messageBridge?.postRawAsync(SideVeilWireJson.encodeToString(HostEventEnvelope(event = event, payload = payload)))
     }
 
     fun pushEnvelope(envelope: HostEventEnvelope) {
@@ -214,19 +211,12 @@ internal class PluginWebViewInstance(
 
     fun resetPresentationToDrawer() {
         presentationMode = PluginPresentationMode.DRAWER
-        pushEvent(
-            SideVeilEvents.CONTAINER_PRESENTATION_CHANGED,
-            buildJsonObject { put("mode", JsonPrimitive("drawer")) },
-        )
+        pushEvent(SideVeilEvents.CONTAINER_PRESENTATION_CHANGED, buildJsonObject { put("mode", JsonPrimitive("drawer")) })
         notifyClickThroughChanged(false)
     }
 
-    fun notifyClickThroughChanged(clickThrough: Boolean) {
-        pushEvent(
-            SideVeilEvents.CONTAINER_CLICK_THROUGH_CHANGED,
-            buildJsonObject { put("clickThrough", JsonPrimitive(clickThrough)) },
-        )
-    }
+    fun notifyClickThroughChanged(clickThrough: Boolean) =
+        pushEvent(SideVeilEvents.CONTAINER_CLICK_THROUGH_CHANGED, buildJsonObject { put("clickThrough", JsonPrimitive(clickThrough)) })
 
     fun destroy() {
         dormancy.destroy()
@@ -243,13 +233,24 @@ internal class PluginWebViewInstance(
                 return
             }
         }
+        if (!isUntrustedEmbed && payload.isMainFrame) {
+            hadMainFrameErrorThisLoad = true
+            val title = if (!descriptor.devServerUrl.isNullOrBlank()) "开发服务器不可达" else "插件加载失败"
+            val detail = PluginWebViewSettings.formatMainFrameErrorDetail(payload)
+            mainHandler.post { callbacks.onMainFrameStatusChanged(descriptor.id, title, detail) }
+        }
         deps.emitWebViewError(payload)
     }
 
     private fun handleMainPageFinished(url: String?) {
-        if (!isUntrustedEmbed) return
-        flushCookies()
-        embedSession.handleMainPageFinished(url)
+        if (isUntrustedEmbed) {
+            flushCookies()
+            embedSession.handleMainPageFinished(url)
+            return
+        }
+        if (!hadMainFrameErrorThisLoad && !url.isNullOrBlank() && url != "about:blank") {
+            callbacks.onMainFrameStatusChanged(descriptor.id, errorTitle = null, errorDetail = null)
+        }
     }
 
     private fun handleRenderProcessGone(
@@ -281,16 +282,20 @@ internal class PluginWebViewInstance(
         return changed
     }
 
-    private fun applyContainerAction(action: ContainerActionPayload?) =
-        PluginContainerActionRouter.dispatch(
-            pluginId = descriptor.id,
-            action = action,
-            callbacks = callbacks,
-            onSizeOverride = { sizeOverride = it },
-            onBackIntercept = { backInterceptEnabled = it },
-            onBackdrop = { surfaceBackdrop = it },
-            onPresentationMode = { presentationMode = it },
+    private fun applyContainerAction(action: ContainerActionPayload?): ContainerActionResult {
+        val own = callbacks.pluginOwnership(descriptor.id)
+        return PluginContainerActionRouter.dispatch(
+            descriptor,
+            action,
+            callbacks,
+            own.active,
+            own.pinned,
+            { sizeOverride = it },
+            { backInterceptEnabled = it },
+            { surfaceBackdrop = it },
+            { presentationMode = it },
         )
+    }
 
     companion object {
         private const val TAG = "SideVeilPluginWebView"

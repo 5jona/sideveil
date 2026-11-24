@@ -154,18 +154,8 @@ data class ScopeConfig(
 }
 
 @Serializable
-enum class RuntimeMode {
-    @SerialName("release")
-    RELEASE,
-
-    @SerialName("debug")
-    DEBUG,
-}
-
-@Serializable
 data class DebugConfig(
     val webviewDebuggingEnabled: Boolean = SideVeilConfigDefaults.DEBUG_WEBVIEW_DEBUGGING_ENABLED,
-    val runtimeMode: RuntimeMode = RuntimeMode.RELEASE,
 )
 
 @Serializable

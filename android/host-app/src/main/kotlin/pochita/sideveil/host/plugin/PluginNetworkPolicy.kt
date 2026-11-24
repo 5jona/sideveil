@@ -48,8 +48,8 @@ object PluginNetworkPolicy {
         if (isUntrustedEmbed(descriptor)) return false
         val network = descriptor.network ?: return false
         if (!network.allowCleartext) return false
-        return descriptor.capabilities.contains(PluginCapability.NETWORK_LOOPBACK) ||
-            descriptor.capabilities.contains(PluginCapability.NETWORK_LAN)
+        return descriptor.hasGrantedCapability(PluginCapability.NETWORK_LOOPBACK) ||
+            descriptor.hasGrantedCapability(PluginCapability.NETWORK_LAN)
     }
 
     /** Verifies that [url] belongs to the exact same origin as [expectedOrigin]. */
@@ -68,10 +68,14 @@ object PluginNetworkPolicy {
         isMainFrame: Boolean,
     ): Boolean {
         if (NetworkOriginParser.isReservedVirtualPluginHost(target.host)) return false
+        if (NetworkOriginParser.isUnspecifiedHost(target.host)) return false
         val embed = descriptor.embed
         if (embed != null) {
             return shouldAllowUntrustedEmbed(embed, target, isMainFrame)
         }
+        // Trusted plugins live exclusively on their virtual origin and may never navigate their
+        // top-level frame to an external origin (which would escape Host-injected CSP).
+        if (isMainFrame) return false
         val network = descriptor.network ?: return false
         return shouldAllowTrustedPlugin(descriptor, network, target)
     }
@@ -119,18 +123,24 @@ object PluginNetworkPolicy {
         val allowedOrigins = network.allowedOrigins.mapNotNull(NetworkOriginParser::parseOrigin)
         if (!matchesAnyOrigin(target, allowedOrigins)) return false
         val loopback = NetworkOriginParser.isLoopbackHost(target.host)
-        val hasLoopback = descriptor.capabilities.contains(PluginCapability.NETWORK_LOOPBACK)
-        val hasLan = descriptor.capabilities.contains(PluginCapability.NETWORK_LAN)
+        val privateOrLoopback = NetworkOriginParser.isPrivateOrLoopbackHost(target.host)
+        val hasLoopback = descriptor.hasGrantedCapability(PluginCapability.NETWORK_LOOPBACK)
+        val hasLan = descriptor.hasGrantedCapability(PluginCapability.NETWORK_LAN)
+        val hasInternet = descriptor.hasGrantedCapability(PluginCapability.NETWORK_INTERNET)
         return when (target.scheme) {
             "https", "wss" -> {
-                if (loopback) hasLoopback else hasLan
+                when {
+                    loopback -> hasLoopback || hasLan
+                    privateOrLoopback -> hasLan
+                    else -> hasInternet
+                }
             }
 
             "http", "ws" -> {
-                if (!network.allowCleartext || !NetworkOriginParser.isPrivateOrLoopbackHost(target.host)) {
+                if (!network.allowCleartext || !privateOrLoopback) {
                     false
                 } else if (loopback) {
-                    hasLoopback
+                    hasLoopback || hasLan
                 } else {
                     hasLan
                 }

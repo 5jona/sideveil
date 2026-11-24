@@ -6,6 +6,7 @@ import android.os.Process
 import pochita.sideveil.protocol.HubToSensor
 import pochita.sideveil.protocol.SensorToHub
 import pochita.sideveil.protocol.SensorUdsHello
+import pochita.sideveil.protocol.SideVeilProtocolVersions
 import pochita.sideveil.protocol.SideVeilWireJson
 import pochita.sideveil.protocol.UdsHandshakeAck
 import pochita.sideveil.sensor.SensorLog
@@ -156,7 +157,11 @@ class HubUdsClient(
     ) {
         val hello =
             SideVeilWireJson.encodeToString(
-                SensorUdsHello(pid = Process.myPid(), version = version),
+                SensorUdsHello(
+                    pid = Process.myPid(),
+                    version = version,
+                    protocolVersion = SideVeilProtocolVersions.PROTOCOL_VERSION,
+                ),
             )
         writer.write(hello)
         writer.write('\n'.code)

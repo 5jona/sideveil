@@ -42,7 +42,7 @@ class PluginWebViewPool<T>(
     /** Retrieves an existing warm instance or creates and caches a new one after LRU eviction. */
     fun getOrCreate(
         pluginId: String,
-        activePluginId: String,
+        activePluginId: String?,
         pinnedPluginId: String? = null,
         protectedIds: Set<String> = emptySet(),
         onHit: (T) -> Unit = {},
@@ -101,7 +101,7 @@ class PluginWebViewPool<T>(
      * WebGPU/WASM renderer memory aggressively.
      */
     fun selectEvictionCandidate(
-        activePluginId: String,
+        activePluginId: String?,
         keepId: String,
         pinnedPluginId: String? = null,
         protectedIds: Set<String> = emptySet(),
@@ -118,7 +118,7 @@ class PluginWebViewPool<T>(
      * ([maxWarmInstances]) and `keepAlive`-protected ([maxKeepAliveInstances]) plugins.
      */
     fun evictLruIfNeeded(
-        activePluginId: String,
+        activePluginId: String?,
         keepId: String,
         pinnedPluginId: String? = null,
         protectedIds: Set<String> = emptySet(),
@@ -160,7 +160,7 @@ class PluginWebViewPool<T>(
      * [pinnedPluginId], and optionally `keepAlive` [protectedIds] when [includeKeepAlive] is false.
      */
     fun trimNonActive(
-        activePluginId: String,
+        activePluginId: String?,
         pinnedPluginId: String? = null,
         protectedIds: Set<String> = emptySet(),
         includeKeepAlive: Boolean = false,
@@ -187,7 +187,7 @@ class PluginWebViewPool<T>(
     /** Synchronizes foreground/background renderer priority across all warm instances. */
     fun updateRendererPriorities(
         panelState: PanelState,
-        activePluginId: String,
+        activePluginId: String?,
         pinnedPluginId: String?,
     ) {
         warmInstances.forEach { (id, inst) ->

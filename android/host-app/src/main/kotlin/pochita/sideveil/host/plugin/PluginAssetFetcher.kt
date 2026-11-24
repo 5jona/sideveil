@@ -14,8 +14,9 @@ import java.net.URI
 
 /**
  * Resolves isolated per-plugin virtual HTTPS origins (`https://<pluginId>.plugins.sideveil.local/`),
- * injects on-demand COOP/COEP headers for WASM/WebGPU plugins, proxies per-plugin loopback Dev Mode
- * servers, and loads static assets either from APK `assets/panel/` or `sideveild`'s loopback HTTP.
+ * injects Host-computed CSP, `X-Content-Type-Options: nosniff`, and on-demand COOP/COEP headers,
+ * proxies loopback Dev Mode servers with bounded streaming, and loads static assets from APK
+ * `assets/panel/` or `sideveild`'s loopback HTTP.
  */
 class PluginAssetFetcher(
     private val context: Context,
@@ -80,17 +81,18 @@ class PluginAssetFetcher(
                 ?.takeIf(::isValidLoopbackDevUrl)
         if (devBase != null) {
             val rel = rawPath.removePrefix("web/").ifEmpty { "index.html" }
+            val encodedRel = encodeRelativePath(rel)
             val querySuffix = uri.encodedQuery?.let { "?$it" }.orEmpty()
             return fetchLoopbackUrl(
                 descriptor = descriptor,
-                targetUrl = "$devBase/$rel$querySuffix",
+                targetUrl = "$devBase/$encodedRel$querySuffix",
                 authToken = null,
                 fallbackPath = rel,
                 isMainFrame = isMainFrame,
             )
         }
         return if (descriptor.builtin) {
-            openBuiltinAsset(rawPath.ifEmpty { "index.html" }, coi = coi)
+            openBuiltinAsset(descriptor, rawPath.ifEmpty { "index.html" }, coi = coi)
         } else {
             fetchExternalAsset(
                 descriptor = descriptor,
@@ -101,19 +103,22 @@ class PluginAssetFetcher(
     }
 
     private fun openBuiltinAsset(
+        descriptor: PluginDescriptor,
         relativePath: String,
         coi: Boolean,
     ): WebResourceResponse {
         val normalized = relativePath.trimStart('/').ifEmpty { "index.html" }
         val assetPath = "panel/$normalized"
-        val headers = buildResponseHeaders(coi)
         return try {
             val stream = context.assets.open(assetPath)
-            WebResourceResponse(mimeTypeFor(normalized), "UTF-8", 200, "OK", headers, stream)
+            val mime = mimeTypeFor(normalized)
+            val csp = resolveCspForStatus(descriptor, statusCode = 200)
+            WebResourceResponse(mime, "UTF-8", 200, "OK", buildResponseHeaders(coi, csp), stream)
         } catch (_: IOException) {
             runCatching {
                 val indexStream = context.assets.open("panel/index.html")
-                WebResourceResponse("text/html", "UTF-8", 200, "OK", headers, indexStream)
+                val csp = resolveCspForStatus(descriptor, statusCode = 200)
+                WebResourceResponse("text/html", "UTF-8", 200, "OK", buildResponseHeaders(coi, csp), indexStream)
             }.getOrElse {
                 errorResponse(404, "Not Found")
             }
@@ -127,7 +132,8 @@ class PluginAssetFetcher(
     ): WebResourceResponse {
         val (port, token) = endpointProvider() ?: return errorResponse(503, "Hub Unavailable")
         val normalized = relativePath.trimStart('/')
-        val url = "http://127.0.0.1:$port/plugins/${descriptor.id}/$normalized"
+        val encodedPath = encodeRelativePath(normalized)
+        val url = "http://127.0.0.1:$port/plugins/${descriptor.id}/$encodedPath"
         val response = fetchLoopbackUrl(descriptor, url, authToken = token, fallbackPath = normalized, isMainFrame = isMainFrame)
         val entryPath = descriptor.entry.trimStart('/').ifEmpty { "index.html" }
         val isSpaRoute =
@@ -136,7 +142,9 @@ class PluginAssetFetcher(
                 normalized != entryPath &&
                 !normalized.substringAfterLast('/').contains('.')
         return if (isSpaRoute) {
-            val entryUrl = "http://127.0.0.1:$port/plugins/${descriptor.id}/$entryPath"
+            runCatching { response.data?.close() }
+            val encodedEntry = encodeRelativePath(entryPath)
+            val entryUrl = "http://127.0.0.1:$port/plugins/${descriptor.id}/$encodedEntry"
             fetchLoopbackUrl(descriptor, entryUrl, authToken = token, fallbackPath = entryPath, isMainFrame = isMainFrame)
         } else {
             response
@@ -166,30 +174,30 @@ class PluginAssetFetcher(
                         setRequestProperty("Authorization", "Bearer $authToken")
                     }
                 }
+            var streamOwnedByResponse = false
             try {
                 val code = conn.responseCode
                 if (conn.contentLengthLong > MAX_RESPONSE_BYTES) {
                     return@runCatching errorResponse(413, "Payload Too Large")
                 }
-                val body =
-                    if (code in 200..299) {
-                        conn.inputStream.use { readBoundedBytes(it, MAX_RESPONSE_BYTES) }
-                    } else {
-                        conn.errorStream?.use { readBoundedBytes(it, MAX_RESPONSE_BYTES) } ?: ByteArray(0)
-                    } ?: return@runCatching errorResponse(413, "Payload Too Large")
                 val contentType = conn.contentType ?: mimeTypeFor(fallbackPath)
                 val mime = contentType.substringBefore(';').trim().ifEmpty { mimeTypeFor(fallbackPath) }
                 val encoding = if (isUtf8Mime(mime)) "UTF-8" else null
-                WebResourceResponse(
-                    mime,
-                    encoding,
-                    code,
-                    conn.responseMessage ?: if (code == 200) "OK" else "Error",
-                    buildResponseHeaders(coi),
-                    ByteArrayInputStream(body),
-                )
+                val headers = buildResponseHeaders(coi, resolveCspForStatus(descriptor, code))
+                val reason = conn.responseMessage ?: if (code == 200) "OK" else "Error"
+                if (code in 200..299) {
+                    val boundedStream = BoundedConnectionInputStream(conn, conn.inputStream, MAX_RESPONSE_BYTES)
+                    streamOwnedByResponse = true
+                    WebResourceResponse(mime, encoding, code, reason, headers, boundedStream)
+                } else {
+                    val errBody =
+                        conn.errorStream?.use { readBoundedBytes(it, MAX_RESPONSE_BYTES) } ?: ByteArray(0)
+                    WebResourceResponse(mime, encoding, code, reason, headers, ByteArrayInputStream(errBody))
+                }
             } finally {
-                conn.disconnect()
+                if (!streamOwnedByResponse) {
+                    conn.disconnect()
+                }
             }
         }.getOrElse { err ->
             val safeUrl = WebViewDiagnosticsSanitizer.sanitizeUrl(targetUrl)
@@ -206,15 +214,19 @@ class PluginAssetFetcher(
         status: Int,
         reason: String,
         headers: Map<String, String> = emptyMap(),
-    ): WebResourceResponse =
-        WebResourceResponse(
+    ): WebResourceResponse {
+        val mergedHeaders = LinkedHashMap<String, String>(headers.size + 1)
+        mergedHeaders["X-Content-Type-Options"] = "nosniff"
+        mergedHeaders.putAll(headers)
+        return WebResourceResponse(
             "text/plain",
             "UTF-8",
             status,
             reason,
-            headers,
+            mergedHeaders,
             ByteArrayInputStream(reason.toByteArray(Charsets.UTF_8)),
         )
+    }
 
     companion object {
         private const val TAG = "SideVeilAssetFetcher"
@@ -231,18 +243,32 @@ class PluginAssetFetcher(
         /** Resolves the MIME type for [path] based on its lowercase file extension. */
         fun mimeTypeFor(path: String): String = PluginAssetMimeTypes.mimeTypeFor(path)
 
-        /** Builds HTTP response headers with optional COOP/COEP isolation headers. */
-        fun buildResponseHeaders(crossOriginIsolated: Boolean): Map<String, String> =
-            if (crossOriginIsolated) {
-                mapOf(
-                    "Cache-Control" to "no-store",
-                    "Cross-Origin-Opener-Policy" to "same-origin",
-                    "Cross-Origin-Embedder-Policy" to "require-corp",
-                    "Cross-Origin-Resource-Policy" to "same-origin",
-                )
-            } else {
-                mapOf("Cache-Control" to "no-store")
+        /** Returns the document CSP header for all virtual-origin 2xx responses (including JS workers, SVG, and XML). */
+        internal fun resolveCspForStatus(
+            descriptor: PluginDescriptor,
+            statusCode: Int,
+        ): String? = if (statusCode in 200..299) PluginCspBuilder.buildDocumentCsp(descriptor) else null
+
+        /** Builds HTTP response headers with `nosniff`, optional CSP, and optional COOP/COEP isolation. */
+        fun buildResponseHeaders(
+            crossOriginIsolated: Boolean,
+            contentSecurityPolicy: String? = null,
+        ): Map<String, String> =
+            buildMap {
+                put("Cache-Control", "no-store")
+                put("X-Content-Type-Options", "nosniff")
+                if (!contentSecurityPolicy.isNullOrBlank()) {
+                    put("Content-Security-Policy", contentSecurityPolicy)
+                }
+                if (crossOriginIsolated) {
+                    put("Cross-Origin-Opener-Policy", "same-origin")
+                    put("Cross-Origin-Embedder-Policy", "require-corp")
+                    put("Cross-Origin-Resource-Policy", "same-origin")
+                }
             }
+
+        /** Percent-encodes each path segment of a decoded relative asset path for safe [URI] construction. */
+        fun encodeRelativePath(rawPath: String): String = PluginAssetMimeTypes.encodeRelativePath(rawPath)
 
         /** Returns `true` if [raw] is a valid loopback HTTP/HTTPS dev-server base URL. */
         fun isValidLoopbackDevUrl(raw: String): Boolean = NetworkOriginParser.isValidLoopbackDevUrl(raw)

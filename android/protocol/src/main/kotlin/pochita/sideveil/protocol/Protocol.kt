@@ -7,18 +7,20 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 
+typealias SideVeilProtocolVersions = pochita.sideveil.protocol.generated.SideVeilProtocolVersions
 typealias SideVeilEvents = pochita.sideveil.protocol.generated.SideVeilEvents
 typealias SideVeilMethods = pochita.sideveil.protocol.generated.SideVeilMethods
 typealias SideVeilErrorCodes = pochita.sideveil.protocol.generated.SideVeilErrorCodes
 typealias SideVeilThemes = pochita.sideveil.protocol.generated.SideVeilThemes
 typealias SideVeilBuiltinDiagnostic = pochita.sideveil.protocol.generated.SideVeilBuiltinDiagnostic
-typealias SideVeilBuiltinTestPlugins = pochita.sideveil.protocol.generated.SideVeilBuiltinTestPlugins
 typealias SideVeilTimeoutBounds = pochita.sideveil.protocol.generated.SideVeilTimeoutBounds
 typealias SideVeilHudDefaults = pochita.sideveil.protocol.generated.SideVeilHudDefaults
 typealias SideVeilConfigDefaults = pochita.sideveil.protocol.generated.SideVeilConfigDefaults
 typealias SideVeilConfigBounds = pochita.sideveil.protocol.generated.SideVeilConfigBounds
 typealias DaemonStatus = pochita.sideveil.protocol.generated.DaemonStatus
 typealias DaemonHealth = pochita.sideveil.protocol.generated.DaemonHealth
+typealias HostReadyPayload = pochita.sideveil.protocol.generated.HostReadyPayload
+typealias HostLocalAuditPayload = pochita.sideveil.protocol.generated.HostLocalAuditPayload
 
 object SideVeilTimeouts {
     const val MIN_PLUGIN_INVOKE_MS = SideVeilTimeoutBounds.MIN_PLUGIN_INVOKE_MS
@@ -65,6 +67,9 @@ enum class PanelCommand {
 
     @SerialName("toggle")
     TOGGLE,
+
+    @SerialName("reloadPlugin")
+    RELOAD_PLUGIN,
 }
 
 @Serializable

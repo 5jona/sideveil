@@ -27,6 +27,7 @@ import kotlin.math.roundToInt
 enum class RailQuickAction {
     PIN_TOP,
     DISABLE,
+    REFRESH_WEBVIEW,
     RELOAD,
 }
 

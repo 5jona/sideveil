@@ -3,14 +3,13 @@ package pochita.sideveil.host.plugin
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Color
-import android.util.Log
 import android.view.View
-import android.webkit.CookieManager
 import android.webkit.WebSettings
 import android.webkit.WebView
 import pochita.sideveil.host.overlay.OverlayWindowFlags
 import pochita.sideveil.host.panel.PanelInsetsCoordinator
 import pochita.sideveil.protocol.DebugWebViewSnapshot
+import pochita.sideveil.protocol.HostWebViewErrorPayload
 import pochita.sideveil.protocol.PluginDescriptor
 import pochita.sideveil.protocol.PluginPresentationMode
 import pochita.sideveil.protocol.PluginSurfaceBackdrop
@@ -70,8 +69,8 @@ object PluginWebViewSettings {
         webView.overScrollMode = WebView.OVER_SCROLL_NEVER
         webView.isVerticalScrollBarEnabled = false
         webView.isHorizontalScrollBarEnabled = false
+        PluginWebViewProfileManager.configureProfileAndCookies(webView, descriptor.id, isUntrustedEmbed)
         applyWebSettings(webView, descriptor)
-        configureCookies(webView, descriptor.id, isUntrustedEmbed)
         webView.setInitialScale(0)
 
         val dm = context.resources.displayMetrics
@@ -95,6 +94,9 @@ object PluginWebViewSettings {
             domStorageEnabled = true
             allowFileAccess = false
             allowContentAccess = false
+            setGeolocationEnabled(false)
+            javaScriptCanOpenWindowsAutomatically = false
+            setSupportMultipleWindows(false)
             cacheMode = WebSettings.LOAD_DEFAULT
             mixedContentMode =
                 if (PluginNetworkPolicy.shouldAllowMixedContent(target)) {
@@ -114,7 +116,11 @@ object PluginWebViewSettings {
     internal fun didWebSettingsInputsChange(
         prev: PluginDescriptor,
         next: PluginDescriptor,
-    ): Boolean = prev.embed != next.embed || prev.network != next.network || prev.capabilities != next.capabilities
+    ): Boolean =
+        prev.embed != next.embed ||
+            prev.network != next.network ||
+            prev.capabilities != next.capabilities ||
+            prev.grantedCapabilities != next.grantedCapabilities
 
     internal fun shouldReloadOnDescriptorChange(
         prev: PluginDescriptor,
@@ -126,6 +132,7 @@ object PluginWebViewSettings {
             prev.devServerUrl != next.devServerUrl ||
             EmbedSessionController.didEmbedRoutingChange(prev.embed, next.embed) ||
             prev.network != next.network ||
+            prev.grantedCapabilities != next.grantedCapabilities ||
             prev.surface.crossOriginIsolated != next.surface.crossOriginIsolated
 
     internal fun buildWebViewDebugSnapshot(
@@ -165,22 +172,20 @@ object PluginWebViewSettings {
             heightPx = webView.height,
         )
 
-    internal fun configureCookies(
-        webView: WebView,
+    internal fun flushCookies(
+        webView: WebView?,
         pluginId: String,
         isUntrustedEmbed: Boolean,
-    ) {
-        runCatching {
-            val cookies = CookieManager.getInstance()
-            cookies.setAcceptCookie(true)
-            cookies.setAcceptThirdPartyCookies(webView, isUntrustedEmbed)
-        }.onFailure { err ->
-            Log.w(TAG, "CookieManager setup failed for $pluginId: ${err.message}")
-        }
-    }
+    ) = PluginWebViewProfileManager.flushCookies(webView, pluginId, isUntrustedEmbed)
 
-    internal fun flushCookies(pluginId: String) {
-        runCatching { CookieManager.getInstance().flush() }
-            .onFailure { err -> Log.w(TAG, "CookieManager.flush failed for $pluginId: ${err.message}") }
+    internal fun formatMainFrameErrorDetail(payload: HostWebViewErrorPayload): String {
+        val codeLabel =
+            when (payload.kind) {
+                "http", "loopback" -> "HTTP ${payload.code}"
+                "ssl" -> "SSL 错误 (${payload.code})"
+                else -> "网络错误 (${payload.code})"
+            }
+        val desc = payload.description.trim()
+        return if (desc.isNotEmpty()) "$codeLabel · $desc" else codeLabel
     }
 }

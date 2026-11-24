@@ -67,7 +67,7 @@ data class DebugSafeBoundsSnapshot(
 data class DebugAgslSnapshot(
     val shaderCompiled: Boolean = false,
     val fallbackActive: Boolean = true,
-    val themeId: String = "coloros-glass",
+    val themeId: String = SideVeilThemes.COLOROS_GLASS,
     val isDark: Boolean = true,
     val blurActive: Boolean = false,
     val cornerRadiusPx: Float = 0f,
@@ -101,7 +101,7 @@ data class DebugPanelWindowSnapshot(
     val appliedBlurRadiusPx: Int = 0,
     val targetBlurRadiusPx: Int = 0,
     val systemBlurSupported: Boolean = false,
-    val themeId: String = "coloros-glass",
+    val themeId: String = SideVeilThemes.COLOROS_GLASS,
     val colorScheme: String = "dark",
     val motionProgress: Float = 0f,
     val agsl: DebugAgslSnapshot = DebugAgslSnapshot(),

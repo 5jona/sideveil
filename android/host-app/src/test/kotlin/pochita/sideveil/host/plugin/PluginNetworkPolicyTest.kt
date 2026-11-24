@@ -28,6 +28,7 @@ class PluginNetworkPolicyTest {
 
     private fun trustedDescriptor(
         capabilities: List<PluginCapability> = emptyList(),
+        grantedCapabilities: List<PluginCapability> = capabilities,
         network: PluginNetworkPrefs? = null,
     ): PluginDescriptor =
         PluginDescriptor(
@@ -35,6 +36,7 @@ class PluginNetworkPolicyTest {
             name = "Local",
             version = "1.0.0",
             capabilities = capabilities,
+            grantedCapabilities = grantedCapabilities,
             network = network,
         )
 
@@ -44,6 +46,8 @@ class PluginNetworkPolicyTest {
             listOf(
                 "localhost",
                 "127.0.0.1",
+                "127.0.0.2",
+                "127.255.255.254",
                 "::1",
                 "[::1]",
                 "0:0:0:0:0:0:0:1",
@@ -53,6 +57,7 @@ class PluginNetworkPolicyTest {
                 "172.31.255.254",
                 "192.168.0.1",
                 "192.168.1.100",
+                "169.254.1.1",
                 "fc00::1",
                 "fd12:3456:789a::1",
                 "fe80::1",
@@ -69,6 +74,10 @@ class PluginNetworkPolicyTest {
         for (host in allowed) {
             assertTrue("expected private/loopback for $host", PluginNetworkPolicy.isPrivateOrLoopbackHost(host))
         }
+        assertTrue(PluginNetworkPolicy.isLoopbackHost("127.0.0.1"))
+        assertTrue(PluginNetworkPolicy.isLoopbackHost("127.0.0.2"))
+        assertTrue(PluginNetworkPolicy.isLoopbackHost("127.255.255.254"))
+        assertFalse(PluginNetworkPolicy.isLoopbackHost("192.168.1.1"))
 
         val rejected =
             listOf(
@@ -80,9 +89,7 @@ class PluginNetworkPolicyTest {
                 "172.15.255.255",
                 "172.32.0.1",
                 "192.167.1.1",
-                "169.254.1.1",
                 "0.0.0.0",
-                "127.0.0.2",
                 "010.0.0.1",
                 "2001:4860:4860::8888",
                 "fbff::1",
@@ -193,6 +200,7 @@ class PluginNetworkPolicyTest {
                             listOf(
                                 "http://192.168.1.1:9090",
                                 "http://example.com",
+                                "https://example.com",
                                 "http://127.0.0.1:9090",
                                 "https://192.168.1.1:8443",
                             ),
@@ -202,8 +210,46 @@ class PluginNetworkPolicyTest {
         assertTrue(PluginNetworkPolicy.shouldAllowNativeNetwork(lanPlugin, "http://192.168.1.1:9090/status", false))
         assertTrue(PluginNetworkPolicy.shouldAllowNativeNetwork(lanPlugin, "https://192.168.1.1:8443/v1", false))
         assertTrue(PluginNetworkPolicy.shouldAllowNativeNetwork(lanPlugin, "wss://192.168.1.1:8443/ws", false))
+        assertTrue(PluginNetworkPolicy.shouldAllowNativeNetwork(lanPlugin, "http://127.0.0.1:9090/status", false))
         assertFalse(PluginNetworkPolicy.shouldAllowNativeNetwork(lanPlugin, "http://example.com/status", false))
-        assertFalse(PluginNetworkPolicy.shouldAllowNativeNetwork(lanPlugin, "http://127.0.0.1:9090/status", false))
+        assertFalse(PluginNetworkPolicy.shouldAllowNativeNetwork(lanPlugin, "https://example.com/exfil", false))
+        assertFalse(PluginNetworkPolicy.shouldAllowNativeNetwork(lanPlugin, "wss://example.com/ws", false))
+
+        val internetPlugin =
+            trustedDescriptor(
+                capabilities = listOf(PluginCapability.NETWORK_INTERNET),
+                network =
+                    PluginNetworkPrefs(
+                        allowedOrigins = listOf("https://api.example.com", "http://api.example.com", "https://192.168.1.1:8443"),
+                        allowCleartext = true,
+                    ),
+            )
+        assertTrue(PluginNetworkPolicy.shouldAllowNativeNetwork(internetPlugin, "https://api.example.com/v1", false))
+        assertTrue(PluginNetworkPolicy.shouldAllowNativeNetwork(internetPlugin, "wss://api.example.com/stream", false))
+        assertFalse(PluginNetworkPolicy.shouldAllowNativeNetwork(internetPlugin, "http://api.example.com/v1", false))
+        assertFalse(PluginNetworkPolicy.shouldAllowNativeNetwork(internetPlugin, "ws://api.example.com/stream", false))
+        assertFalse(PluginNetworkPolicy.shouldAllowNativeNetwork(internetPlugin, "https://192.168.1.1:8443/v1", false))
+
+        val ungrantedPlugin =
+            trustedDescriptor(
+                capabilities = listOf(PluginCapability.NETWORK_LAN, PluginCapability.NETWORK_INTERNET),
+                grantedCapabilities = emptyList(),
+                network =
+                    PluginNetworkPrefs(
+                        allowedOrigins = listOf("https://api.example.com", "https://192.168.1.1:8443"),
+                        allowCleartext = true,
+                    ),
+            )
+        assertFalse(PluginNetworkPolicy.shouldAllowNativeNetwork(ungrantedPlugin, "https://api.example.com/v1", false))
+        assertFalse(PluginNetworkPolicy.shouldAllowNativeNetwork(ungrantedPlugin, "https://192.168.1.1:8443/v1", false))
+        assertFalse(PluginNetworkPolicy.shouldAllowMixedContent(ungrantedPlugin))
+
+        val loopbackRangePlugin =
+            trustedDescriptor(
+                capabilities = listOf(PluginCapability.NETWORK_LOOPBACK),
+                network = PluginNetworkPrefs(allowedOrigins = listOf("http://127.0.0.2:8080"), allowCleartext = true),
+            )
+        assertTrue(PluginNetworkPolicy.shouldAllowNativeNetwork(loopbackRangePlugin, "http://127.0.0.2:8080/health", false))
 
         val noCleartextLan =
             lanPlugin.copy(network = lanPlugin.network?.copy(allowCleartext = false))

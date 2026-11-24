@@ -13,6 +13,7 @@ import pochita.sideveil.host.NativeHudRenderer
 import pochita.sideveil.protocol.HudTextAlign
 import pochita.sideveil.protocol.HudTextOverlay
 import pochita.sideveil.protocol.NativeHudSceneHeader
+import pochita.sideveil.protocol.SideVeilHudDefaults
 import kotlin.math.roundToInt
 
 /**
@@ -51,7 +52,7 @@ internal class NativeHudView(
             frontBitmap = dst
             backBitmap = prevFront
         }
-        currentTexts = header.texts
+        currentTexts = header.texts.take(SideVeilHudDefaults.MAX_TEXTS.toInt())
         invalidate()
         return rendered
     }
@@ -87,12 +88,17 @@ internal class NativeHudView(
                     HudTextAlign.CENTER -> Paint.Align.CENTER
                     HudTextAlign.END -> Paint.Align.RIGHT
                 }
+            val boundedText = overlay.text.take(MAX_TEXT_CHARS)
             val drawnText =
                 overlay.maxWidthDp?.takeIf { it > 4f }?.let { maxDp ->
-                    TextUtils.ellipsize(overlay.text, textPaint, maxDp * density, TextUtils.TruncateAt.END).toString()
-                } ?: overlay.text
+                    TextUtils.ellipsize(boundedText, textPaint, maxDp * density, TextUtils.TruncateAt.END).toString()
+                } ?: boundedText
             canvas.drawText(drawnText, overlay.x * density, overlay.y * density, textPaint)
         }
+    }
+
+    private companion object {
+        const val MAX_TEXT_CHARS = 128
     }
 
     private fun ensureBackBuffer(

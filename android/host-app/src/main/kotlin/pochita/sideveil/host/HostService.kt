@@ -18,6 +18,7 @@ import pochita.sideveil.host.overlay.DynamicThemeExtractor
 import pochita.sideveil.host.overlay.EdgeHapticsController
 import pochita.sideveil.host.panel.SidebarPanelWindow
 import pochita.sideveil.host.pinned.PinnedContainerWindow
+import pochita.sideveil.host.plugin.PluginPanelOverlayState
 import pochita.sideveil.host.plugin.PluginWebViewManager
 import pochita.sideveil.host.rail.PluginRailWindow
 import pochita.sideveil.host.rail.RailIconLoader
@@ -259,7 +260,7 @@ class HostService : LifecycleService() {
         panelWindow.overlayWindow?.let { frameMetricsTracker.attach("panel", it) }
         pinnedWindow.overlayWindow?.let { frameMetricsTracker.attach("pinned", it) }
         nativeHudWindow.overlayWindow?.let { frameMetricsTracker.attach("hud", it) }
-        pluginManager.warmStartDefault()
+        panelWindow.setPanelOverlayState(PluginPanelOverlayState.Empty)
         dynamicThemeExtractor.start(serviceBridge.latestDarkSurface)
     }
 

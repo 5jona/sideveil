@@ -113,6 +113,7 @@ internal class WebViewCrashRecoveryCoordinator(
     fun schedule(
         pluginId: String,
         onRecover: () -> Unit,
+        onCircuitOpen: (CrashRecoveryDecision.CircuitOpen) -> Unit = {},
     ) {
         cancel(pluginId, resetBackoff = false)
         when (val decision = backoff.recordCrashAndDecide(pluginId)) {
@@ -136,6 +137,7 @@ internal class WebViewCrashRecoveryCoordinator(
                     "WebView crash circuit breaker open for plugin=$pluginId " +
                         "(attempts=${decision.attempt}, cooldownMs=${decision.cooldownRemainingMs}); halting auto-recovery",
                 )
+                onCircuitOpen(decision)
             }
         }
     }

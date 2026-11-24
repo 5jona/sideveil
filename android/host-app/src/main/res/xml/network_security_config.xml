@@ -2,9 +2,13 @@
 <network-security-config xmlns:tools="http://schemas.android.com/tools">
     <!--
         Scheme B RFC1918 private-net cleartext policy:
-        Android's static network_security_config cannot express CIDR/RFC1918 ranges or local DNS
-        suffixes (10/8, 172.16/12, 192.168/16, .lan, .local). PluginNetworkPolicy enforces a strict
-        in-app triple-lock and blocks all public cleartext HTTP/WS traffic inside WebViewClient.
+        Android's static network_security_config schema cannot express RFC1918 CIDR ranges
+        (10/8, 172.16/12, 192.168/16, 127/8) or .lan/.local/.home.arpa mDNS domains required by
+        explicit allowCleartext=true LAN web-embeds and network-lan plugins.
+        Public cleartext HTTP and WS traffic is strictly denied at runtime by:
+          1. PluginNetworkPolicy (triple-lock private-host + allowCleartext + grantedCapability check),
+          2. PluginWebViewClient.shouldInterceptRequest / shouldOverrideUrlLoading, and
+          3. Host-injected Content-Security-Policy (connect-src derived solely from granted origins).
     -->
     <base-config
         cleartextTrafficPermitted="true"

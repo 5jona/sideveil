@@ -47,10 +47,11 @@ class SensorProtocolTest {
     }
 
     @Test
-    fun `SensorUdsHello includes role sensor and UdsHandshakeAck decodes cleanly`() {
+    fun `SensorUdsHello includes role sensor and protocolVersion and UdsHandshakeAck decodes cleanly`() {
         val hello = SideVeilWireJson.encodeToString(SensorUdsHello(pid = 999, version = "0.1.0"))
         assertTrue(hello.contains("\"role\":\"sensor\""))
         assertTrue(hello.contains("\"pid\":999"))
+        assertTrue(hello.contains("\"protocolVersion\":${SideVeilProtocolVersions.PROTOCOL_VERSION}"))
 
         val ack = SideVeilWireJson.decodeFromString<UdsHandshakeAck>("""{"ok":true}""")
         assertTrue(ack.ok)

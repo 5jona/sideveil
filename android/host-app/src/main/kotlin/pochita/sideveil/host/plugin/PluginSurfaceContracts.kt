@@ -27,6 +27,40 @@ data class EmbedToolbarBinding(
     val bindStatusListener: (((String?, Boolean) -> Unit)?) -> Unit = {},
 )
 
+/**
+ * Actionable error or crash-recovery state shown natively over [pochita.sideveil.host.panel.SidebarPanelWindow].
+ */
+data class PluginSurfaceErrorState(
+    val pluginId: String,
+    val pluginName: String,
+    val title: String,
+    val detail: String,
+    val onRetry: () -> Unit,
+)
+
+/** Native panel overlay state rendered when no plugin matches or an active plugin fails to load/crashes. */
+sealed interface PluginPanelOverlayState {
+    data object None : PluginPanelOverlayState
+
+    data object Empty : PluginPanelOverlayState
+
+    data class Error(
+        val error: PluginSurfaceErrorState,
+    ) : PluginPanelOverlayState
+}
+
+/** Identifies which auxiliary overlay window must be torn down when its owning plugin is evicted. */
+enum class EvictedOverlayKind {
+    PINNED,
+    HUD,
+}
+
+/** Snapshot of whether a plugin currently owns the active sidebar panel and/or pinned window. */
+data class PluginOwnershipState(
+    val active: Boolean,
+    val pinned: Boolean,
+)
+
 internal enum class DescriptorUpdateOutcome {
     UNCHANGED,
     SURFACE_UPDATED,
@@ -34,10 +68,12 @@ internal enum class DescriptorUpdateOutcome {
 }
 
 /**
- * Callbacks emitted by an individual [PluginWebViewInstance] sandbox when its container state
- * or render process transitions.
+ * Callbacks emitted by an individual [PluginWebViewInstance] sandbox when its container state,
+ * main-frame load status, or render process transitions.
  */
 interface PluginContainerCallbacks {
+    fun pluginOwnership(pluginId: String): PluginOwnershipState
+
     fun onDismissRequested(pluginId: String)
 
     fun onImeFocusRequested(
@@ -76,6 +112,12 @@ interface PluginContainerCallbacks {
         status: EdgeStatusPayload?,
     )
 
+    fun onMainFrameStatusChanged(
+        pluginId: String,
+        errorTitle: String?,
+        errorDetail: String?,
+    )
+
     fun onRenderProcessCrashed(pluginId: String)
 }
 
@@ -91,20 +133,29 @@ interface PluginHostSurfaceDelegate {
         embedToolbar: EmbedToolbarBinding? = null,
     )
 
+    fun setPanelOverlayState(state: PluginPanelOverlayState)
+
+    fun onOverlayPluginEvicted(
+        kind: EvictedOverlayKind,
+        pluginId: String,
+    )
+
     fun onDismissPanel()
 
-    fun onSetImeFocused(focused: Boolean)
-
-    fun onSetPinnedImeFocused(focused: Boolean)
+    fun onSetImeFocused(
+        focused: Boolean,
+        pinned: Boolean,
+    )
 
     fun onSyncAppearance(
         themeId: String,
         colorScheme: String,
     )
 
-    fun onPluginSizeChanged(sizeOverride: PluginSizeOverride)
-
-    fun onPluginBackdropChanged(backdrop: PluginSurfaceBackdrop)
+    fun onPluginSurfaceChanged(
+        sizeOverride: PluginSizeOverride? = null,
+        backdrop: PluginSurfaceBackdrop? = null,
+    )
 
     fun onPluginPresentationChanged(
         pluginId: String,

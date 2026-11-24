@@ -47,6 +47,7 @@ data class SensorUdsHello(
     val role: String = "sensor",
     val pid: Int,
     val version: String,
+    val protocolVersion: Long = SideVeilProtocolVersions.PROTOCOL_VERSION,
 )
 
 @Serializable

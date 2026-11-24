@@ -3,6 +3,7 @@ package pochita.sideveil.host.service
 import android.content.Context
 import android.content.res.Configuration
 import android.os.Process
+import android.util.Log
 import kotlinx.serialization.json.encodeToJsonElement
 import pochita.sideveil.host.BuildConfig
 import pochita.sideveil.host.edge.EdgeIndicatorWindow
@@ -20,12 +21,15 @@ import pochita.sideveil.protocol.PanelCommand
 import pochita.sideveil.protocol.PanelState
 import pochita.sideveil.protocol.PanelStateChangedPayload
 import pochita.sideveil.protocol.PluginBackendStatePayload
+import pochita.sideveil.protocol.PluginProtocolDiagnostics
 import pochita.sideveil.protocol.PluginScopedEventPayload
 import pochita.sideveil.protocol.PluginSelectEventPayload
 import pochita.sideveil.protocol.PluginsSnapshotPayload
 import pochita.sideveil.protocol.ScopeChangedPayload
 import pochita.sideveil.protocol.SideVeilConfig
 import pochita.sideveil.protocol.SideVeilEvents
+import pochita.sideveil.protocol.SideVeilProtocolVersions
+import pochita.sideveil.protocol.SideVeilThemes
 import pochita.sideveil.protocol.SideVeilWireJson
 
 /**
@@ -57,6 +61,12 @@ class HostServiceBridge(
     private var latestForegroundPackage: String = ""
     private var latestPluginIconSignature: String = ""
 
+    init {
+        PluginProtocolDiagnostics.onUnknownToken = { field, token ->
+            Log.w(TAG, "Ignored unknown forward-compat wire token field=$field token=$token")
+        }
+    }
+
     /** Handles Android configuration changes (rotation, density, night mode). */
     fun onConfigurationChanged(newConfig: Configuration) {
         latestDarkSurface = HostServiceSupport.resolveDarkSurface(latestConfig, newConfig)
@@ -66,11 +76,15 @@ class HostServiceBridge(
         dynamicThemeExtractor.refresh(latestDarkSurface)
     }
 
-    /** Synchronizes runtime appearance requested by a plugin's `syncTheme` container action. */
+    /** Synchronizes runtime appearance requested by a builtin plugin's `syncTheme` container action. */
     fun onSyncAppearance(
         themeId: String,
         colorScheme: String,
     ) {
+        if (themeId != SideVeilThemes.COLOROS_GLASS && themeId != SideVeilThemes.MODERN_SAAS_DARK) {
+            Log.w(TAG, "Ignored disallowed themeId in onSyncAppearance: $themeId")
+            return
+        }
         latestThemeId = themeId
         latestDarkSurface = colorScheme != "light"
         panelWindow.syncRuntimeAppearance(themeId, colorScheme)
@@ -131,6 +145,7 @@ class HostServiceBridge(
                     pid = Process.myPid(),
                     version = BuildConfig.VERSION_NAME,
                     crossWindowBlurSupported = panelWindow.isSystemBlurSupported,
+                    protocolVersion = SideVeilProtocolVersions.PROTOCOL_VERSION,
                 ),
             ),
         )
@@ -168,7 +183,7 @@ class HostServiceBridge(
         overlayCoordinator.refreshOverlayStyles()
         refreshEdgeIndicator()
         dynamicThemeExtractor.refresh(latestDarkSurface)
-        pluginManager.broadcastGlobalEvent(rawEnvelope)
+        pluginManager.broadcastConfigUpdated(decoded, rawEnvelope)
     }
 
     override fun onScopeChanged(
@@ -189,7 +204,9 @@ class HostServiceBridge(
         latestForegroundPackage = decoded.foregroundPackage
         latestScopeActive = decoded.matchedPluginIds.isNotEmpty()
         val iconSig =
-            decoded.plugins.joinToString("|") { p -> "${p.id}:${p.version}:${p.icon.orEmpty()}" }
+            decoded.plugins.joinToString("|") { p ->
+                "${p.id}:${p.version}:${p.assetRevision.orEmpty()}:${p.icon.orEmpty()}"
+            }
         if (iconSig != latestPluginIconSignature) {
             latestPluginIconSignature = iconSig
             iconLoader.clear()
@@ -206,6 +223,8 @@ class HostServiceBridge(
     override fun onPluginBackendState(decoded: PluginBackendStatePayload) = pluginManager.routeBackendState(decoded)
 
     override fun onPluginScopedEvent(decoded: PluginScopedEventPayload) = pluginManager.routePluginScopedEvent(decoded)
+
+    override fun onPluginBusMessage(rawEnvelope: HostEventEnvelope) = pluginManager.routePluginBusMessage(rawEnvelope)
 
     override fun onNetworkContextChanged(rawEnvelope: HostEventEnvelope) = pluginManager.routeNetworkContextChanged(rawEnvelope)
 
@@ -226,7 +245,15 @@ class HostServiceBridge(
                 }
                 panelWindow.toggle()
             }
+
+            PanelCommand.RELOAD_PLUGIN -> {
+                // Handled via onReloadPluginWebView when pluginId is present.
+            }
         }
+    }
+
+    override fun onReloadPluginWebView(pluginId: String) {
+        pluginManager.reloadPluginWebView(pluginId)
     }
 
     override fun onFallbackGlobalEvent(envelope: HostEventEnvelope) = pluginManager.broadcastGlobalEvent(envelope)
@@ -239,5 +266,9 @@ class HostServiceBridge(
             panelWindow.currentState,
             latestDarkSurface,
         )
+    }
+
+    companion object {
+        private const val TAG = "SideVeilHostBridge"
     }
 }

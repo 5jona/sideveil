@@ -8,7 +8,9 @@ import pochita.sideveil.host.panel.SidebarPanelWindow
 import pochita.sideveil.host.pinned.PinnedBoundsSpec
 import pochita.sideveil.host.pinned.PinnedContainerWindow
 import pochita.sideveil.host.plugin.EmbedToolbarBinding
+import pochita.sideveil.host.plugin.EvictedOverlayKind
 import pochita.sideveil.host.plugin.PluginHostSurfaceDelegate
+import pochita.sideveil.host.plugin.PluginPanelOverlayState
 import pochita.sideveil.host.plugin.PluginSizeOverride
 import pochita.sideveil.host.plugin.PluginWebViewManager
 import pochita.sideveil.host.rail.PluginRailWindow
@@ -192,6 +194,30 @@ class HostOverlayCoordinator(
                 panelWindow.setContentWebView(webView, embedToolbar)
             }
 
+            override fun setPanelOverlayState(state: PluginPanelOverlayState) {
+                if (state == PluginPanelOverlayState.Empty) {
+                    panelWindow.setPluginBackdrop(PluginSurfaceBackdrop.NATIVE_GLASS)
+                    panelWindow.setPluginSizeOverride(PluginSizeOverride(), PluginPresentationMode.DRAWER)
+                }
+                panelWindow.setPanelOverlayState(state)
+            }
+
+            override fun onOverlayPluginEvicted(
+                kind: EvictedOverlayKind,
+                pluginId: String,
+            ) {
+                when (kind) {
+                    EvictedOverlayKind.PINNED -> {
+                        pendingPinnedBounds = null
+                        pinnedWindow.hide()
+                    }
+
+                    EvictedOverlayKind.HUD -> {
+                        nativeHudWindow.dismiss(pluginId)
+                    }
+                }
+            }
+
             override fun onDismissPanel() {
                 if (pinnedWindow.isVisible) {
                     handleDismissPinned()
@@ -199,22 +225,27 @@ class HostOverlayCoordinator(
                 panelWindow.close()
             }
 
-            override fun onSetImeFocused(focused: Boolean) = panelWindow.setImeFocused(focused)
-
-            override fun onSetPinnedImeFocused(focused: Boolean) = pinnedWindow.setImeFocused(focused)
+            override fun onSetImeFocused(
+                focused: Boolean,
+                pinned: Boolean,
+            ) = if (pinned) pinnedWindow.setImeFocused(focused) else panelWindow.setImeFocused(focused)
 
             override fun onSyncAppearance(
                 themeId: String,
                 colorScheme: String,
             ) = onSyncAppearance(themeId, colorScheme)
 
-            override fun onPluginSizeChanged(sizeOverride: PluginSizeOverride) = panelWindow.setPluginSizeOverride(sizeOverride)
-
-            override fun onPluginBackdropChanged(backdrop: PluginSurfaceBackdrop) {
-                if (pinnedWindow.isVisible) {
-                    pinnedWindow.updateBackdrop(backdrop)
+            override fun onPluginSurfaceChanged(
+                sizeOverride: PluginSizeOverride?,
+                backdrop: PluginSurfaceBackdrop?,
+            ) {
+                sizeOverride?.let(panelWindow::setPluginSizeOverride)
+                if (backdrop != null) {
+                    if (pinnedWindow.isVisible) {
+                        pinnedWindow.updateBackdrop(backdrop)
+                    }
+                    panelWindow.setPluginBackdrop(backdrop)
                 }
-                panelWindow.setPluginBackdrop(backdrop)
             }
 
             override fun onPluginPresentationChanged(

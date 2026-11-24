@@ -1,11 +1,17 @@
 package pochita.sideveil.host.plugin
 
+import java.io.FilterInputStream
+import java.io.IOException
+import java.io.InputStream
+import java.net.HttpURLConnection
 import java.util.Locale
 
 /**
- * Pure-Kotlin static web asset MIME table and UTF-8 text classification for [PluginAssetFetcher].
+ * Pure-Kotlin static web asset MIME table, RFC 3986 path-segment percent encoding, and bounded
+ * streaming [HttpURLConnection] wrapper for [PluginAssetFetcher].
  */
 internal object PluginAssetMimeTypes {
+    private const val HEX_DIGITS = "0123456789ABCDEF"
     private val UTF8_MIME_SUBSTRINGS = listOf("javascript", "json", "xml")
 
     private val MIME_TYPES_BY_EXT: Map<String, String> =
@@ -43,4 +49,81 @@ internal object PluginAssetMimeTypes {
     }
 
     fun isUtf8Mime(mime: String): Boolean = mime.startsWith("text/") || UTF8_MIME_SUBSTRINGS.any { mime.contains(it) }
+
+    fun encodeRelativePath(rawPath: String): String =
+        rawPath
+            .trimStart('/')
+            .split('/')
+            .joinToString("/") { segment -> encodePathSegment(segment) }
+
+    private fun encodePathSegment(segment: String): String {
+        val bytes = segment.toByteArray(Charsets.UTF_8)
+        val sb = StringBuilder(bytes.size)
+        for (byte in bytes) {
+            val u = byte.toInt() and 0xFF
+            val unreserved =
+                (u in 'A'.code..'Z'.code) ||
+                    (u in 'a'.code..'z'.code) ||
+                    (u in '0'.code..'9'.code) ||
+                    u == '-'.code ||
+                    u == '.'.code ||
+                    u == '_'.code ||
+                    u == '~'.code
+            if (unreserved) {
+                sb.append(u.toChar())
+            } else {
+                sb.append('%')
+                sb.append(HEX_DIGITS[u ushr 4])
+                sb.append(HEX_DIGITS[u and 0x0F])
+            }
+        }
+        return sb.toString()
+    }
+}
+
+/**
+ * Streaming [FilterInputStream] enforcing a hard byte ceiling while releasing the underlying
+ * [HttpURLConnection] on close.
+ */
+internal class BoundedConnectionInputStream(
+    private val conn: HttpURLConnection,
+    delegate: InputStream,
+    private val maxBytes: Int,
+) : FilterInputStream(delegate) {
+    private var bytesRead = 0
+    private var closed = false
+
+    override fun read(): Int {
+        val b = super.read()
+        if (b >= 0) advance(1)
+        return b
+    }
+
+    override fun read(
+        b: ByteArray,
+        off: Int,
+        len: Int,
+    ): Int {
+        val n = super.read(b, off, len)
+        if (n > 0) advance(n)
+        return n
+    }
+
+    private fun advance(count: Int) {
+        bytesRead += count
+        if (bytesRead > maxBytes) {
+            close()
+            throw IOException("Asset response exceeded $maxBytes bytes")
+        }
+    }
+
+    override fun close() {
+        if (closed) return
+        closed = true
+        try {
+            super.close()
+        } finally {
+            conn.disconnect()
+        }
+    }
 }

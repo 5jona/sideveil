@@ -157,8 +157,75 @@ class PluginProtocolTest {
         assertEquals(BUILTIN_DIAG_PLUGIN_ID, diag.id)
         assertEquals("内置诊断", diag.name)
         assertEquals("0.1.0", diag.version)
+        assertEquals(PluginOrigin.BUILTIN, diag.origin)
         assertFalse(diag.global)
         assertEquals(20, diag.priority)
         assertEquals(listOf(PluginCapability.STORAGE, PluginCapability.TOAST), diag.capabilities)
+        assertEquals(listOf(PluginCapability.STORAGE, PluginCapability.TOAST), diag.grantedCapabilities)
+    }
+
+    @Test
+    fun `decodes future unknown capabilities and enum tokens without dropping snapshot`() {
+        val warnings = mutableListOf<Pair<String, String>>()
+        val prevHook = PluginProtocolDiagnostics.onUnknownToken
+        PluginProtocolDiagnostics.onUnknownToken = { field, token -> warnings += field to token }
+        try {
+            val futureJson =
+                """
+                {
+                  "plugins": [
+                    {
+                      "id": "com.example.future",
+                      "name": "Future Plugin",
+                      "version": "2.0.0",
+                      "origin": "marketplace-v2",
+                      "backend": "wasm-wasi",
+                      "backendState": "warming",
+                      "approvalStatus": "future-state",
+                      "daemonStatus": "restarting-v2",
+                      "capabilities": ["storage", "future-cap-v2", "network-internet"],
+                      "grantedCapabilities": ["storage", "future-cap-v2"],
+                      "surface": { "backdrop": "acrylic-v2", "presentation": "split-view" },
+                      "brandNewFutureField": { "nested": true }
+                    }
+                  ],
+                  "matchedPluginIds": ["com.example.future"],
+                  "activePluginId": "com.example.future",
+                  "foregroundPackage": "com.example.app"
+                }
+                """.trimIndent()
+            val snapshot = SideVeilWireJson.decodeFromString<PluginsSnapshotPayload>(futureJson)
+            assertEquals(1, snapshot.plugins.size)
+            val plugin = snapshot.plugins.single()
+            assertEquals("com.example.future", plugin.id)
+            assertEquals(PluginOrigin.INSTALLED, plugin.origin)
+            assertEquals(PluginBackendKind.NONE, plugin.backend)
+            assertEquals(PluginBackendState.NONE, plugin.backendState)
+            assertEquals(PluginApprovalStatus.PENDING_REVIEW, plugin.approvalStatus)
+            assertEquals(PluginDaemonStatus.NOT_CONFIGURED, plugin.daemonStatus)
+            assertEquals(PluginSurfaceBackdrop.NATIVE_GLASS, plugin.surface.backdrop)
+            assertEquals(PluginPresentationMode.DRAWER, plugin.surface.presentation)
+            assertEquals(listOf(PluginCapability.STORAGE, PluginCapability.NETWORK_INTERNET), plugin.capabilities)
+            assertEquals(listOf(PluginCapability.STORAGE), plugin.grantedCapabilities)
+            assertTrue(warnings.any { (f, t) -> f == "capability" && t == "future-cap-v2" })
+            assertTrue(warnings.any { (f, t) -> f == "origin" && t == "marketplace-v2" })
+        } finally {
+            PluginProtocolDiagnostics.onUnknownToken = prevHook
+        }
+    }
+
+    @Test
+    fun `PanelCommandPayload decodes both legacy command and reloadPlugin action`() {
+        val actionJson = """{"action":"reloadPlugin","pluginId":"com.example.dev"}"""
+        val decodedAction = SideVeilWireJson.decodeFromString<PanelCommandPayload>(actionJson)
+        assertEquals("com.example.dev", decodedAction.reloadPluginId())
+
+        val commandJson = """{"command":"reloadPlugin","pluginId":"com.example.dev"}"""
+        val decodedCommand = SideVeilWireJson.decodeFromString<PanelCommandPayload>(commandJson)
+        assertEquals("com.example.dev", decodedCommand.reloadPluginId())
+
+        val openDecoded = SideVeilWireJson.decodeFromString<PanelCommandPayload>("""{"command":"open"}""")
+        assertEquals(PanelCommand.OPEN, openDecoded.command)
+        assertEquals(null, openDecoded.reloadPluginId())
     }
 }

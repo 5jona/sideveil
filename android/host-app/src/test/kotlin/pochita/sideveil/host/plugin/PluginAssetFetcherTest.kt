@@ -10,16 +10,27 @@ import java.io.ByteArrayInputStream
 
 class PluginAssetFetcherTest {
     @Test
-    fun `injects COOP COEP CORP headers strictly when crossOriginIsolated is enabled`() {
+    fun `injects nosniff CSP and COOP COEP CORP headers appropriately`() {
         val plain = PluginAssetFetcher.buildResponseHeaders(crossOriginIsolated = false)
         assertEquals("no-store", plain["Cache-Control"])
+        assertEquals("nosniff", plain["X-Content-Type-Options"])
+        assertFalse(plain.containsKey("Content-Security-Policy"))
         assertFalse(plain.containsKey("Cross-Origin-Opener-Policy"))
         assertFalse(plain.containsKey("Cross-Origin-Embedder-Policy"))
+
+        val withCsp = PluginAssetFetcher.buildResponseHeaders(crossOriginIsolated = false, contentSecurityPolicy = "default-src 'self'")
+        assertEquals("default-src 'self'", withCsp["Content-Security-Policy"])
 
         val isolated = PluginAssetFetcher.buildResponseHeaders(crossOriginIsolated = true)
         assertEquals("same-origin", isolated["Cross-Origin-Opener-Policy"])
         assertEquals("require-corp", isolated["Cross-Origin-Embedder-Policy"])
         assertEquals("same-origin", isolated["Cross-Origin-Resource-Policy"])
+    }
+
+    @Test
+    fun `percent-encodes decoded relative asset paths safely for URI construction`() {
+        assertEquals("web/my%20file%231.js", PluginAssetFetcher.encodeRelativePath("/web/my file#1.js"))
+        assertEquals("assets/app-1.0_~test.wasm", PluginAssetFetcher.encodeRelativePath("assets/app-1.0_~test.wasm"))
     }
 
     @Test

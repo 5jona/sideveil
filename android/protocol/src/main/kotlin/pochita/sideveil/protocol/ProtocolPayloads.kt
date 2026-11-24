@@ -96,8 +96,22 @@ data class HostFullscreenChangedPayload(
 
 @Serializable
 data class PanelCommandPayload(
-    val command: PanelCommand,
-)
+    val command: PanelCommand? = null,
+    val action: String? = null,
+    val pluginId: String? = null,
+) {
+    /** Resolves reload-plugin target ID across both `command="reloadPlugin"` and `action="reloadPlugin"` wire shapes. */
+    fun reloadPluginId(): String? =
+        if (command == PanelCommand.RELOAD_PLUGIN || action == ACTION_RELOAD_PLUGIN) {
+            pluginId?.trim()?.takeIf { it.isNotEmpty() }
+        } else {
+            null
+        }
+
+    companion object {
+        const val ACTION_RELOAD_PLUGIN = "reloadPlugin"
+    }
+}
 
 /**
  * Payload carried by `syncTheme` container actions.
@@ -144,6 +158,7 @@ data class HostHelloPayload(
     val pid: Int,
     val version: String,
     val crossWindowBlurSupported: Boolean,
+    val protocolVersion: Long = SideVeilProtocolVersions.PROTOCOL_VERSION,
 )
 
 @Serializable

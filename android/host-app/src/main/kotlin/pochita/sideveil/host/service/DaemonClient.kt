@@ -94,7 +94,7 @@ class DaemonClient(
     /** Forwards a JSON-RPC request to `sideveild` and awaits its correlated reply. */
     suspend fun forwardRpc(req: RpcRequest): RpcResponse {
         if (!isConnected()) {
-            return RpcResponse(id = req.id, error = RpcError(-32001, "Daemon WebSocket disconnected"))
+            return RpcResponse(id = req.id, error = RpcError(SideVeilErrorCodes.DAEMON_DISCONNECTED, "Daemon WebSocket disconnected"))
         }
 
         val wireId = "h${rpcSeq.incrementAndGet()}_${req.id}"
@@ -105,13 +105,13 @@ class DaemonClient(
         val forwardTimeoutMs = SideVeilTimeouts.resolveForwardTimeoutMs(req)
         return try {
             if (!writer.sendText(wireJson)) {
-                RpcResponse(id = req.id, error = RpcError(-32001, "Failed to transmit RPC to daemon"))
+                RpcResponse(id = req.id, error = RpcError(SideVeilErrorCodes.DAEMON_DISCONNECTED, "Failed to transmit RPC to daemon"))
             } else {
                 withTimeout(forwardTimeoutMs) { deferred.await() }.copy(id = req.id)
             }
         } catch (t: Throwable) {
             if (t is CancellationException) throw t
-            RpcResponse(id = req.id, error = RpcError(-32002, t.message ?: "RPC timed out"))
+            RpcResponse(id = req.id, error = RpcError(SideVeilErrorCodes.RPC_TIMEOUT, t.message ?: "RPC timed out"))
         } finally {
             pendingRpcs.remove(wireId)
         }
@@ -207,6 +207,7 @@ class DaemonClient(
                     onPing = writer::sendPong,
                     onBinary = { size -> Log.d(TAG, "Received binary frame ($size bytes)") },
                     onMessage = ::handleInboundMessage,
+                    onDecodeError = { reason -> Log.w(TAG, "Dropped malformed daemon frame: $reason") },
                 )
         }
     }
@@ -265,7 +266,7 @@ class DaemonClient(
         val entries = pendingRpcs.entries.toList()
         pendingRpcs.clear()
         for ((id, deferred) in entries) {
-            deferred.complete(RpcResponse(id = id, error = RpcError(-32001, reason)))
+            deferred.complete(RpcResponse(id = id, error = RpcError(SideVeilErrorCodes.DAEMON_DISCONNECTED, reason)))
         }
     }
 

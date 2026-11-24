@@ -7,7 +7,9 @@ import kotlinx.serialization.json.encodeToJsonElement
 import pochita.sideveil.host.debug.PluginManagerDebugState
 import pochita.sideveil.host.debug.buildHostDiagnosticsPayload
 import pochita.sideveil.host.service.DaemonClient
+import pochita.sideveil.protocol.ConfigUpdatedPayload
 import pochita.sideveil.protocol.HostEventEnvelope
+import pochita.sideveil.protocol.HostLocalAuditPayload
 import pochita.sideveil.protocol.HostWebViewErrorPayload
 import pochita.sideveil.protocol.NetworkContextSnapshot
 import pochita.sideveil.protocol.PanelState
@@ -30,13 +32,13 @@ internal class PluginWebViewEventBridge(
     private val crashRegistry: WebViewCrashRegistry,
 ) {
     private var lastConfigEnvelope: HostEventEnvelope? = null
+    private var lastSanitizedConfigEnvelope: HostEventEnvelope? = null
     private var lastPaletteEnvelope: HostEventEnvelope? = null
     private var lastNetworkContextEnvelope: HostEventEnvelope? = null
 
     fun recordGlobalEnvelope(envelope: HostEventEnvelope) {
-        when (envelope.event) {
-            SideVeilEvents.CONFIG_UPDATED -> lastConfigEnvelope = envelope
-            SideVeilEvents.THEME_PALETTE_UPDATED -> lastPaletteEnvelope = envelope
+        if (envelope.event == SideVeilEvents.THEME_PALETTE_UPDATED) {
+            lastPaletteEnvelope = envelope
         }
     }
 
@@ -44,10 +46,41 @@ internal class PluginWebViewEventBridge(
         lastNetworkContextEnvelope = envelope
     }
 
+    fun broadcastConfigUpdated(
+        decoded: ConfigUpdatedPayload,
+        rawEnvelope: HostEventEnvelope,
+        pool: PluginWebViewPool<PluginWebViewInstance>,
+    ) {
+        val sanitized = PluginEventSecurityPolicy.sanitizeConfigUpdatedEnvelope(decoded)
+        lastConfigEnvelope = rawEnvelope
+        lastSanitizedConfigEnvelope = sanitized
+        pool.forEachInstance { inst ->
+            if (!inst.isUntrustedEmbed) {
+                val env = PluginEventSecurityPolicy.selectConfigEnvelope(inst.descriptor, rawEnvelope, sanitized)
+                inst.pushEnvelope(env)
+            }
+        }
+    }
+
+    fun routePluginBusMessage(
+        envelope: HostEventEnvelope,
+        pool: PluginWebViewPool<PluginWebViewInstance>,
+    ) {
+        pool.forEachInstance { inst ->
+            if (PluginEventSecurityPolicy.shouldDeliverBusMessage(inst.descriptor)) {
+                inst.pushEnvelope(envelope)
+            }
+        }
+    }
+
     fun broadcastGlobalEvent(
         envelope: HostEventEnvelope,
         pool: PluginWebViewPool<PluginWebViewInstance>,
     ) {
+        if (envelope.event == SideVeilEvents.PLUGIN_BUS_MESSAGE) {
+            routePluginBusMessage(envelope, pool)
+            return
+        }
         recordGlobalEnvelope(envelope)
         pool.forEachInstance { it.pushEnvelope(envelope) }
     }
@@ -76,7 +109,7 @@ internal class PluginWebViewEventBridge(
                 if (snapshot != null) {
                     inst.updateNetworkRoute(nextRoute)
                 }
-            } else if (inst.descriptor.capabilities.contains(PluginCapability.NETWORK_CONTEXT)) {
+            } else if (inst.descriptor.hasGrantedCapability(PluginCapability.NETWORK_CONTEXT)) {
                 inst.pushEnvelope(envelope)
             }
         }
@@ -112,7 +145,7 @@ internal class PluginWebViewEventBridge(
     }
 
     fun buildManagerDebugState(
-        activePluginId: String,
+        activePluginId: String?,
         pinnedPluginId: String?,
         activeHudPluginId: String?,
         matchedPluginIds: List<String>,
@@ -121,7 +154,7 @@ internal class PluginWebViewEventBridge(
         isKeepAlivePlugin: (PluginDescriptor) -> Boolean,
     ): PluginManagerDebugState =
         PluginManagerDebugState(
-            activePluginId = activePluginId,
+            activePluginId = activePluginId.orEmpty(),
             pinnedPluginId = pinnedPluginId,
             activeHudPluginId = activeHudPluginId,
             matchedPluginIds = matchedPluginIds.toList(),
@@ -138,7 +171,7 @@ internal class PluginWebViewEventBridge(
 
     fun trimPoolOnMemoryPressure(
         level: Int,
-        activePluginId: String,
+        activePluginId: String?,
         pinnedPluginId: String?,
         activeHudPluginId: String?,
         protectedIds: Set<String>,
@@ -168,9 +201,15 @@ internal class PluginWebViewEventBridge(
         restoreUrl: String? = null,
     ) {
         instance.loadEntry(restoreUrl)
-        lastConfigEnvelope?.let(instance::pushEnvelope)
+        if (!instance.isUntrustedEmbed) {
+            val fullConfig = lastConfigEnvelope
+            val sanitizedConfig = lastSanitizedConfigEnvelope
+            if (fullConfig != null && sanitizedConfig != null) {
+                instance.pushEnvelope(PluginEventSecurityPolicy.selectConfigEnvelope(descriptor, fullConfig, sanitizedConfig))
+            }
+        }
         lastPaletteEnvelope?.let(instance::pushEnvelope)
-        if (!instance.isUntrustedEmbed && descriptor.capabilities.contains(PluginCapability.NETWORK_CONTEXT)) {
+        if (!instance.isUntrustedEmbed && descriptor.hasGrantedCapability(PluginCapability.NETWORK_CONTEXT)) {
             lastNetworkContextEnvelope?.let(instance::pushEnvelope)
         }
         instance.pushBackendState()
@@ -210,6 +249,13 @@ internal class PluginWebViewEventBridge(
                     isMainFrame = isMainFrame,
                 ),
             ),
+        )
+    }
+
+    fun emitLocalAudit(payload: HostLocalAuditPayload) {
+        daemonClient.sendEvent(
+            SideVeilEvents.HOST_LOCAL_AUDIT,
+            SideVeilWireJson.encodeToJsonElement(payload),
         )
     }
 

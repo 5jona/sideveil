@@ -121,6 +121,10 @@ class HostGestureCoordinator(
         action: RailQuickAction,
     ) {
         haptics.onRailSwitch()
+        if (action == RailQuickAction.REFRESH_WEBVIEW) {
+            pluginManager.reloadPluginWebView(pluginId)
+            return
+        }
         val rpc =
             when (action) {
                 RailQuickAction.PIN_TOP -> {
@@ -156,6 +160,10 @@ class HostGestureCoordinator(
                         method = SideVeilMethods.PLUGINS_RELOAD,
                         pluginId = BUILTIN_DIAG_PLUGIN_ID,
                     )
+                }
+
+                RailQuickAction.REFRESH_WEBVIEW -> {
+                    return
                 }
             }
         scope.launch {

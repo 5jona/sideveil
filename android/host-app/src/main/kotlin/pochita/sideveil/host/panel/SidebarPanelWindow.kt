@@ -10,6 +10,7 @@ import android.webkit.WebView
 import pochita.sideveil.host.R
 import pochita.sideveil.host.debug.buildPanelDebugSnapshot
 import pochita.sideveil.host.plugin.EmbedToolbarBinding
+import pochita.sideveil.host.plugin.PluginPanelOverlayState
 import pochita.sideveil.host.plugin.PluginSizeOverride
 import pochita.sideveil.protocol.DebugPanelWindowSnapshot
 import pochita.sideveil.protocol.EdgeSide
@@ -116,13 +117,17 @@ class SidebarPanelWindow(
         embedToolbar: EmbedToolbarBinding? = null,
     ) {
         val alpha = if (currentState == PanelState.OPEN) 1f else motionDriver.currentProgress
-        contentMount.mount(
-            webView,
-            embedToolbar,
-            alpha,
-            currentState == PanelState.OPEN && attached,
-            motionDriver::recomputeDimensions,
-        ) { motionDriver.updateLeftEdgeGestureExclusion(contentMount.hasEmbedToolbar) }
+        val focusable = currentState == PanelState.OPEN && attached
+        contentMount.mount(webView, embedToolbar, alpha, focusable, motionDriver::recomputeDimensions) {
+            motionDriver.updateLeftEdgeGestureExclusion(contentMount.hasEmbedToolbar)
+        }
+    }
+
+    fun setPanelOverlayState(state: PluginPanelOverlayState) {
+        val alpha = if (currentState == PanelState.OPEN) 1f else motionDriver.currentProgress
+        contentMount.setOverlayState(state, alpha, motionDriver::recomputeDimensions) {
+            motionDriver.updateLeftEdgeGestureExclusion(false)
+        }
     }
 
     fun setRailInsetDp(insetDp: Int) {

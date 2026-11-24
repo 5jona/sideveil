@@ -82,25 +82,38 @@ object DaemonFrameCodec {
     fun encodeRpcResponse(response: RpcResponse): String = SideVeilWireJson.encodeToString(response)
 
     /** Classifies and decodes an incoming text frame into a [DaemonInboundMessage]. */
-    fun decodeIncomingText(text: String): DaemonInboundMessage? {
-        val obj = runCatching { SideVeilWireJson.parseToJsonElement(text).jsonObject }.getOrNull() ?: return null
+    fun decodeIncomingText(
+        text: String,
+        onDecodeError: ((String) -> Unit)? = null,
+    ): DaemonInboundMessage? {
+        val obj =
+            runCatching { SideVeilWireJson.parseToJsonElement(text).jsonObject }
+                .onFailure { err -> onDecodeError?.invoke("invalid JSON object: ${err.message}") }
+                .getOrNull() ?: return null
         if (obj.containsKey("jsonrpc") && obj.containsKey("id")) {
             val methodElem = obj["method"]
             if (methodElem != null) {
-                if (methodElem is JsonNull) return null
+                if (methodElem is JsonNull) {
+                    onDecodeError?.invoke("RPC request had null method")
+                    return null
+                }
                 return runCatching { SideVeilWireJson.decodeFromJsonElement<RpcRequest>(obj) }
+                    .onFailure { err -> onDecodeError?.invoke("RpcRequest decode failed: ${err.message}") }
                     .getOrNull()
                     ?.let(DaemonInboundMessage::InboundRpc)
             }
             return runCatching { SideVeilWireJson.decodeFromJsonElement<RpcResponse>(obj) }
+                .onFailure { err -> onDecodeError?.invoke("RpcResponse decode failed: ${err.message}") }
                 .getOrNull()
                 ?.let(DaemonInboundMessage::RpcReply)
         }
         if (obj.containsKey("event")) {
             return runCatching { SideVeilWireJson.decodeFromJsonElement<HostEventEnvelope>(obj) }
+                .onFailure { err -> onDecodeError?.invoke("HostEventEnvelope decode failed: ${err.message}") }
                 .getOrNull()
                 ?.let(DaemonInboundMessage::Event)
         }
+        onDecodeError?.invoke("unrecognized frame shape (keys=${obj.keys.take(6)})")
         return null
     }
 
@@ -111,9 +124,10 @@ object DaemonFrameCodec {
         onPing: (ByteArray) -> Unit,
         onBinary: (Int) -> Unit,
         onMessage: (DaemonInboundMessage) -> Unit,
+        onDecodeError: ((String) -> Unit)? = null,
     ): Boolean {
         val frame = WebSocketCodec.readFrame(input, requireMasked = false) ?: return false
-        return dispatchFrame(frame, onClose, onPing, onBinary, onMessage)
+        return dispatchFrame(frame, onClose, onPing, onBinary, onMessage, onDecodeError)
     }
 
     private fun dispatchFrame(
@@ -122,6 +136,7 @@ object DaemonFrameCodec {
         onPing: (ByteArray) -> Unit,
         onBinary: (Int) -> Unit,
         onMessage: (DaemonInboundMessage) -> Unit,
+        onDecodeError: ((String) -> Unit)?,
     ): Boolean =
         when (frame.opcode) {
             WsOpcode.CLOSE -> {
@@ -144,7 +159,7 @@ object DaemonFrameCodec {
             }
 
             WsOpcode.TEXT -> {
-                frame.textOrNull()?.let(::decodeIncomingText)?.let(onMessage)
+                frame.textOrNull()?.let { decodeIncomingText(it, onDecodeError) }?.let(onMessage)
                 true
             }
         }

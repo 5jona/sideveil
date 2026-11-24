@@ -1,5 +1,6 @@
 package pochita.sideveil.host.service
 
+import android.util.Log
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.JsonElement
 import pochita.sideveil.protocol.ConfigUpdatedPayload
@@ -67,9 +68,13 @@ internal interface HostEventCallbacks {
 
     fun onPluginScopedEvent(decoded: PluginScopedEventPayload)
 
+    fun onPluginBusMessage(rawEnvelope: HostEventEnvelope)
+
     fun onNetworkContextChanged(rawEnvelope: HostEventEnvelope)
 
     fun onPanelCommand(command: PanelCommand)
+
+    fun onReloadPluginWebView(pluginId: String)
 
     fun onFallbackGlobalEvent(envelope: HostEventEnvelope)
 }
@@ -82,6 +87,9 @@ class HostEventDispatcher internal constructor(
     private val callbacks: HostEventCallbacks,
     private val gestureCallbacks: HostGestureEventCallbacks,
     private val overlayCallbacks: HostOverlayEventCallbacks,
+    private val onDecodeFailure: (event: String, reason: String) -> Unit = { event, reason ->
+        Log.w(TAG, "Failed to decode daemon event '$event': $reason")
+    },
 ) {
     private val handlers: Map<String, (HostEventEnvelope) -> Unit> =
         mapOf(
@@ -105,6 +113,9 @@ class HostEventDispatcher internal constructor(
             SideVeilEvents.PLUGIN_EVENT to { env ->
                 decode(env, PluginScopedEventPayload.serializer())?.let(callbacks::onPluginScopedEvent)
             },
+            SideVeilEvents.PLUGIN_BUS_MESSAGE to { env ->
+                callbacks.onPluginBusMessage(env)
+            },
             SideVeilEvents.NETWORK_CONTEXT_CHANGED to { env ->
                 callbacks.onNetworkContextChanged(env)
             },
@@ -117,6 +128,8 @@ class HostEventDispatcher internal constructor(
                         val header = SideVeilWireJson.decodeFromJsonElement(NativeHudSceneHeader.serializer(), payload)
                         val rawJson = SideVeilWireJson.encodeToString(JsonElement.serializer(), payload)
                         overlayCallbacks.onHudSceneUpdated(rawJson, header)
+                    }.onFailure { err ->
+                        onDecodeFailure(env.event, err.message ?: err.javaClass.simpleName)
                     }
                 }
             },
@@ -140,7 +153,14 @@ class HostEventDispatcher internal constructor(
                 decode(env, EdgeRepositionPayload.serializer())?.let(gestureCallbacks::onEdgeReposition)
             },
             SideVeilEvents.PANEL_COMMAND to { env ->
-                decode(env, PanelCommandPayload.serializer())?.let { callbacks.onPanelCommand(it.command) }
+                decode(env, PanelCommandPayload.serializer())?.let { payload ->
+                    val reloadId = payload.reloadPluginId()
+                    if (reloadId != null) {
+                        callbacks.onReloadPluginWebView(reloadId)
+                    } else {
+                        payload.command?.let(callbacks::onPanelCommand)
+                    }
+                }
             },
         )
 
@@ -157,8 +177,14 @@ class HostEventDispatcher internal constructor(
     private fun <T> decode(
         envelope: HostEventEnvelope,
         serializer: KSerializer<T>,
-    ): T? =
-        envelope.payload?.let { element ->
-            runCatching { SideVeilWireJson.decodeFromJsonElement(serializer, element) }.getOrNull()
-        }
+    ): T? {
+        val element = envelope.payload ?: return null
+        return runCatching { SideVeilWireJson.decodeFromJsonElement(serializer, element) }
+            .onFailure { err -> onDecodeFailure(envelope.event, err.message ?: err.javaClass.simpleName) }
+            .getOrNull()
+    }
+
+    companion object {
+        private const val TAG = "SideVeilEventDispatcher"
+    }
 }

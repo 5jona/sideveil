@@ -144,6 +144,21 @@ class SideVeilConfigTest {
         val legacyDecoded = SideVeilPrettyJson.decodeFromString<SideVeilConfig>(legacyJson)
         assertFalse(legacyDecoded.debug.webviewDebuggingEnabled)
         assertEquals(EdgeSide.LEFT, legacyDecoded.edge.side)
+
+        val legacyWithRuntimeMode =
+            """
+            {
+              "version": 1,
+              "enabled": true,
+              "debug": {
+                "webviewDebuggingEnabled": true,
+                "runtimeMode": "debug",
+                "futureFlag": 42
+              }
+            }
+            """.trimIndent()
+        val decodedLegacyRuntime = SideVeilWireJson.decodeFromString<SideVeilConfig>(legacyWithRuntimeMode)
+        assertTrue(decodedLegacyRuntime.debug.webviewDebuggingEnabled)
     }
 
     @Test

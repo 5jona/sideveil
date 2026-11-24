@@ -21,6 +21,7 @@ import kotlinx.coroutines.withContext
 import pochita.sideveil.host.R
 import pochita.sideveil.host.overlay.GlassBackdropDrawable
 import pochita.sideveil.host.overlay.OverlayWindowFlags
+import pochita.sideveil.host.plugin.PluginAssetFetcher
 import pochita.sideveil.protocol.PluginDescriptor
 import java.net.HttpURLConnection
 import java.net.URI
@@ -185,6 +186,7 @@ class RailIconLoader(
             val conn =
                 (url.openConnection() as HttpURLConnection).apply {
                     requestMethod = "GET"
+                    instanceFollowRedirects = false
                     connectTimeout = CONNECT_TIMEOUT_MS
                     readTimeout = READ_TIMEOUT_MS
                     useCaches = false
@@ -194,8 +196,11 @@ class RailIconLoader(
                 if (conn.responseCode != HttpURLConnection.HTTP_OK) {
                     return@runCatching null
                 }
-                val bytes = conn.inputStream.use { it.readBytes() }
-                if (bytes.isEmpty() || bytes.size > MAX_ICON_BYTES) {
+                if (conn.contentLengthLong > MAX_ICON_BYTES) {
+                    return@runCatching null
+                }
+                val bytes = conn.inputStream.use { PluginAssetFetcher.readBoundedBytes(it, MAX_ICON_BYTES) }
+                if (bytes == null || bytes.isEmpty()) {
                     return@runCatching null
                 }
                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size)

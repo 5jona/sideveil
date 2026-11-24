@@ -7,7 +7,7 @@ import pochita.sideveil.host.debug.PluginManagerDebugState
 import pochita.sideveil.host.debug.WebViewDebuggingController
 import pochita.sideveil.host.overlay.EdgeHapticsController
 import pochita.sideveil.host.service.DaemonClient
-import pochita.sideveil.protocol.BUILTIN_DIAG_PLUGIN_ID
+import pochita.sideveil.protocol.ConfigUpdatedPayload
 import pochita.sideveil.protocol.HostEventEnvelope
 import pochita.sideveil.protocol.PanelState
 import pochita.sideveil.protocol.PluginBackendStatePayload
@@ -18,7 +18,7 @@ import pochita.sideveil.protocol.PluginsSnapshotPayload
 
 /**
  * Coordinates isolated plugin WebView sandboxes, active plugin switching, scoped event routing,
- * back-press interception, diagnostics reporting, and crash recovery.
+ * back-press interception, diagnostics reporting, lifecycle eviction, and crash recovery.
  */
 class PluginWebViewManager(
     private val context: Context,
@@ -32,30 +32,34 @@ class PluginWebViewManager(
     private val eventBridge = PluginWebViewEventBridge(daemonClient, crashRegistry)
     private val assetFetcher =
         PluginAssetFetcher(context, { daemonClient.currentEndpoint() }, eventBridge::reportLoopbackFetchError)
+    private val localRpcHandler =
+        PluginLocalRpcHandler(context = context, haptics = haptics, onAudit = eventBridge::emitLocalAudit)
     private val webViewDeps =
-        PluginWebViewDeps(scope, daemonClient, PluginLocalRpcHandler(context, haptics), assetFetcher, crashRegistry)
+        PluginWebViewDeps(scope, daemonClient, localRpcHandler, assetFetcher, crashRegistry)
     private val descriptors = LinkedHashMap<String, PluginDescriptor>()
     private val pool =
         PluginWebViewPool<PluginWebViewInstance>(
-            maxWarmInstances = PluginWebViewPool.DEFAULT_MAX_WARM_INSTANCES,
-            maxKeepAliveInstances = PluginWebViewPool.DEFAULT_MAX_KEEP_ALIVE_INSTANCES,
-            isCrossOriginIsolated = { it.descriptor.surface.crossOriginIsolated },
-            setForegroundPriority = { inst, foreground -> inst.setForegroundPriority(foreground) },
-            onDestroy = { it.destroy() },
-            onEvicted = { id -> Log.i(TAG, "Evicting LRU warm plugin WebView: $id") },
+            PluginWebViewPool.DEFAULT_MAX_WARM_INSTANCES,
+            PluginWebViewPool.DEFAULT_MAX_KEEP_ALIVE_INSTANCES,
+            { it.descriptor.surface.crossOriginIsolated },
+            { inst, foreground -> inst.setForegroundPriority(foreground) },
+            { it.destroy() },
+            { id -> Log.i(TAG, "Evicting LRU warm plugin WebView: $id") },
         )
     private val containerCallbacks =
         PluginSurfaceCallbackRouter(
-            context = context,
-            surfaceDelegate = surfaceDelegate,
-            activePluginIdProvider = { activePluginId },
-            pinnedPluginIdProvider = { pinnedPluginId },
-            instanceLookup = { id -> pool.peek(id) },
-            onCrash = ::recoverCrashedPlugin,
+            context,
+            surfaceDelegate,
+            { activePluginId },
+            { pinnedPluginId },
+            { id -> descriptors[id] },
+            { id -> pool.peek(id) },
+            ::reloadPluginWebView,
+            ::recoverCrashedPlugin,
         )
 
     private var matchedPluginIds: List<String> = emptyList()
-    private var activePluginId: String = BUILTIN_DIAG_PLUGIN_ID
+    private var activePluginId: String? = null
     private var pinnedPluginId: String? = null
     private var activeHudPluginId: String? = null
     private var panelState: PanelState = PanelState.CLOSED
@@ -66,10 +70,6 @@ class PluginWebViewManager(
 
     val webViewDebuggingEnabled: Boolean
         get() = webViewDebugging.effectiveEnabled
-
-    init {
-        descriptors[BUILTIN_DIAG_PLUGIN_ID] = PluginDescriptor.builtinDiagnostic()
-    }
 
     fun setConfigWebViewDebugging(enabled: Boolean): Boolean = webViewDebugging.setConfigEnabled(enabled)
 
@@ -83,8 +83,6 @@ class PluginWebViewManager(
             pool,
             isKeepAlivePlugin,
         )
-
-    fun warmStartDefault() = activatePlugin(BUILTIN_DIAG_PLUGIN_ID, forceMount = true)
 
     fun setPinnedPlugin(pluginId: String?) {
         if (pinnedPluginId == pluginId) return
@@ -102,89 +100,130 @@ class PluginWebViewManager(
     fun setActiveHudPlugin(pluginId: String?) {
         if (activeHudPluginId == pluginId) return
         activeHudPluginId = pluginId
-        reportDiagnostics()
+        eventBridge.reportDiagnostics(pool.warmPluginIds(), activeHudPluginId)
     }
 
     fun notifyActiveClickThroughChanged(clickThrough: Boolean) {
-        pool.peek(pinnedPluginId ?: activePluginId)?.notifyClickThroughChanged(clickThrough)
+        val targetId = pinnedPluginId ?: activePluginId ?: return
+        pool.peek(targetId)?.notifyClickThroughChanged(clickThrough)
     }
 
     fun resetActiveToDrawer() {
         val targetId = pinnedPluginId ?: activePluginId
         pinnedPluginId = null
-        pool.peek(targetId)?.takeIf { it.presentationMode == PluginPresentationMode.PINNED }?.resetPresentationToDrawer()
-        pool.get(activePluginId)?.let(containerCallbacks::mountInstance)
+        if (targetId != null) {
+            pool.peek(targetId)?.takeIf { it.presentationMode == PluginPresentationMode.PINNED }?.resetPresentationToDrawer()
+        }
+        activePluginId?.let(pool::get)?.let(containerCallbacks::mountInstance)
         pool.updateRendererPriorities(panelState, activePluginId, pinnedPluginId)
     }
 
     /** Applies a full plugin catalog and active/matched selection snapshot from `sideveild`. */
     fun onPluginsSnapshot(snapshot: PluginsSnapshotPayload) {
+        val previousPluginIds = descriptors.keys.toSet()
         val activeNeedsRemount =
-            containerCallbacks.applyDescriptorUpdates(
-                plugins = snapshot.plugins,
-                descriptors = descriptors,
-                pool = pool,
-                crashRecovery = crashRecovery,
-                onClearPinned = { pinnedPluginId = null },
-            )
-        webViewDebugging.setHasDevServer(descriptors.values.any { !it.devServerUrl.isNullOrBlank() })
-        val evicted = pool.evictStale { id -> descriptors[id]?.enabled == true }
-        evicted.forEach { crashRecovery.cancel(it, resetBackoff = true) }
-        if (pinnedPluginId != null && evicted.contains(pinnedPluginId)) pinnedPluginId = null
+            containerCallbacks.applyDescriptorUpdates(snapshot.plugins, descriptors, pool, crashRecovery) { id ->
+                evictOverlay(EvictedOverlayKind.PINNED, id)
+            }
+        webViewDebugging.setHasDevServer(descriptors.values.any { it.enabled && !it.devServerUrl.isNullOrBlank() })
 
-        matchedPluginIds = snapshot.matchedPluginIds.filter(descriptors::containsKey)
-        val targetId =
-            snapshot.activePluginId?.takeIf(descriptors::containsKey)
-                ?: matchedPluginIds.firstOrNull()
-                ?: BUILTIN_DIAG_PLUGIN_ID
-        activatePlugin(targetId, forceMount = activeNeedsRemount)
-        notifyRail()
+        val plan =
+            PluginLifecycleEvictionPolicy.planSnapshotTransition(
+                previousPluginIds,
+                descriptors,
+                snapshot.matchedPluginIds,
+                snapshot.activePluginId,
+                pinnedPluginId,
+                activeHudPluginId,
+            )
+        containerCallbacks.evictStaleAndUninstalled(plan, descriptors, pool, crashRecovery, lastUrlByPlugin, assetFetcher, ::evictOverlay)
+
+        matchedPluginIds = snapshot.matchedPluginIds.filter { id -> descriptors[id]?.enabled == true }
+        val targetId = plan.nextActivePluginId
+        if (targetId != null) {
+            activatePlugin(targetId, forceMount = activeNeedsRemount)
+        } else {
+            val prev = activePluginId?.let(pool::peek)
+            if (panelState != PanelState.CLOSED) eventBridge.pushVisibility(prev, visible = false, state = PanelState.CLOSED)
+            prev?.flushCookies()
+            activePluginId = null
+            pool.updateRendererPriorities(panelState, activePluginId = null, pinnedPluginId = pinnedPluginId)
+            surfaceDelegate.setPanelOverlayState(PluginPanelOverlayState.Empty)
+            eventBridge.reportDiagnostics(pool.warmPluginIds(), activeHudPluginId)
+        }
+        surfaceDelegate.onMatchedPluginsUpdated(matchedPluginIds.mapNotNull(descriptors::get), activePluginId.orEmpty())
     }
 
     fun selectPlugin(pluginId: String): Boolean {
-        if (!descriptors.containsKey(pluginId)) return false
+        if (descriptors[pluginId]?.enabled != true) return false
         crashRecovery.cancel(pluginId, resetBackoff = true)
         activatePlugin(pluginId, forceMount = false)
-        notifyRail()
+        surfaceDelegate.onMatchedPluginsUpdated(matchedPluginIds.mapNotNull(descriptors::get), activePluginId.orEmpty())
         return true
+    }
+
+    /** Clears cache, resets crash backoff, and reloads or recreates [pluginId]'s WebView sandbox. */
+    fun reloadPluginWebView(pluginId: String) {
+        val desc = descriptors[pluginId]?.takeIf { it.enabled } ?: return
+        crashRecovery.cancel(pluginId, resetBackoff = true)
+        if (pluginId == activePluginId) surfaceDelegate.setPanelOverlayState(PluginPanelOverlayState.None)
+        val existing = pool.peek(pluginId)
+        when {
+            existing != null -> {
+                existing.reloadWithCacheClear()
+                if (pluginId == activePluginId && pluginId != pinnedPluginId && existing.webView.parent == null) {
+                    containerCallbacks.mountInstance(existing)
+                }
+            }
+
+            pluginId == activePluginId -> {
+                activatePlugin(pluginId, forceMount = true)
+            }
+
+            else -> {
+                getOrCreateInstance(desc).reloadWithCacheClear()
+            }
+        }
     }
 
     fun onPanelStateChanged(nextState: PanelState) {
         panelState = nextState
         pool.updateRendererPriorities(panelState, activePluginId, pinnedPluginId)
-        val active = pool.peek(activePluginId)
-        if (nextState != PanelState.CLOSED || activePluginId != pinnedPluginId) {
+        val activeId = activePluginId
+        val active = activeId?.let(pool::peek)
+        if (nextState != PanelState.CLOSED || activeId != pinnedPluginId) {
             eventBridge.pushVisibility(active, visible = nextState != PanelState.CLOSED, state = nextState)
         }
         if (nextState == PanelState.CLOSED) active?.flushCookies()
-        reportDiagnostics()
+        eventBridge.reportDiagnostics(pool.warmPluginIds(), activeHudPluginId)
     }
 
     fun onTrimMemory(level: Int) =
-        eventBridge.trimPoolOnMemoryPressure(
-            level,
-            activePluginId,
-            pinnedPluginId,
-            activeHudPluginId,
-            keepAliveIds(),
-            pool,
-        )
+        eventBridge.trimPoolOnMemoryPressure(level, activePluginId, pinnedPluginId, activeHudPluginId, keepAliveIds, pool)
 
-    fun reportDiagnostics() = eventBridge.reportDiagnostics(pool.warmPluginIds(), activeHudPluginId)
-
-    fun isBackIntercepted(): Boolean = pool.peek(activePluginId)?.canConsumeBack() == true
+    fun isBackIntercepted(): Boolean = activePluginId?.let(pool::peek)?.canConsumeBack() == true
 
     fun maxPluginPriority(): Int = descriptors.values.maxOfOrNull { it.priority } ?: 0
 
-    fun dispatchBackPress(): Boolean = pool.peek(activePluginId)?.consumeBackPress() == true
+    fun dispatchBackPress(): Boolean = activePluginId?.let(pool::peek)?.consumeBackPress() == true
+
+    fun broadcastConfigUpdated(
+        decoded: ConfigUpdatedPayload,
+        rawEnvelope: HostEventEnvelope,
+    ) = eventBridge.broadcastConfigUpdated(decoded, rawEnvelope, pool)
 
     fun broadcastGlobalEvent(envelope: HostEventEnvelope) = eventBridge.broadcastGlobalEvent(envelope, pool)
+
+    fun routePluginBusMessage(envelope: HostEventEnvelope) = eventBridge.routePluginBusMessage(envelope, pool)
 
     fun routeNetworkContextChanged(envelope: HostEventEnvelope) {
         latestNetworkRoute = eventBridge.routeNetworkContextChanged(envelope, latestNetworkRoute, pool)
     }
 
-    fun routeBackendState(payload: PluginBackendStatePayload) = eventBridge.routeBackendState(payload, descriptors, pool, ::notifyRail)
+    fun routeBackendState(payload: PluginBackendStatePayload) =
+        eventBridge.routeBackendState(payload, descriptors, pool) {
+            surfaceDelegate.onMatchedPluginsUpdated(matchedPluginIds.mapNotNull(descriptors::get), activePluginId.orEmpty())
+        }
 
     fun routePluginScopedEvent(payload: PluginScopedEventPayload) = eventBridge.routePluginScopedEvent(payload, pool)
 
@@ -192,6 +231,7 @@ class PluginWebViewManager(
         crashRecovery.clearAll()
         pinnedPluginId = null
         activeHudPluginId = null
+        activePluginId = null
         pool.destroyAll()
     }
 
@@ -199,28 +239,29 @@ class PluginWebViewManager(
         pluginId: String,
         forceMount: Boolean,
     ) {
-        val descriptor = descriptors[pluginId] ?: descriptors[BUILTIN_DIAG_PLUGIN_ID] ?: return
+        val descriptor = descriptors[pluginId]?.takeIf { it.enabled } ?: return
         val previousId = activePluginId
         val switching = previousId != descriptor.id
-        if (switching) {
+        if (switching && previousId != null) {
             val previous = pool.peek(previousId)
             if (previousId == pinnedPluginId) {
                 previous?.resetPresentationToDrawer()
-                pinnedPluginId = null
+                evictOverlay(EvictedOverlayKind.PINNED, previousId)
             }
             if (panelState != PanelState.CLOSED) eventBridge.pushVisibility(previous, visible = false, state = PanelState.CLOSED)
             previous?.flushCookies()
         }
 
         activePluginId = descriptor.id
+        surfaceDelegate.setPanelOverlayState(PluginPanelOverlayState.None)
         val instance = getOrCreateInstance(descriptor)
         if (instance.presentationMode == PluginPresentationMode.PINNED) {
             instance.resetPresentationToDrawer()
-            if (pinnedPluginId == descriptor.id) pinnedPluginId = null
+            if (pinnedPluginId == descriptor.id) evictOverlay(EvictedOverlayKind.PINNED, descriptor.id)
         }
         pool.updateRendererPriorities(panelState, activePluginId, pinnedPluginId)
         if (switching || forceMount || instance.webView.parent == null) containerCallbacks.mountInstance(instance)
-        reportDiagnostics()
+        eventBridge.reportDiagnostics(pool.warmPluginIds(), activeHudPluginId)
         if (switching && panelState != PanelState.CLOSED) {
             eventBridge.pushVisibility(instance, visible = true, state = panelState)
         }
@@ -229,21 +270,13 @@ class PluginWebViewManager(
     private fun getOrCreateInstance(descriptor: PluginDescriptor): PluginWebViewInstance {
         pool.peek(descriptor.id)?.let { existing ->
             if (existing.isUntrustedEmbed != PluginNetworkPolicy.isUntrustedEmbed(descriptor)) {
-                if (descriptor.id == pinnedPluginId) pinnedPluginId = null
+                if (descriptor.id == pinnedPluginId) evictOverlay(EvictedOverlayKind.PINNED, descriptor.id)
                 pool.removeAndDestroy(descriptor.id)
             }
         }
-        return pool.getOrCreate(
-            pluginId = descriptor.id,
-            activePluginId = activePluginId,
-            pinnedPluginId = pinnedPluginId,
-            protectedIds = keepAliveIds(),
-            onHit = { existing -> existing.updateDescriptor(descriptor) },
-        ) {
+        return pool.getOrCreate(descriptor.id, activePluginId, pinnedPluginId, keepAliveIds, { it.updateDescriptor(descriptor) }) {
             PluginWebViewInstance(context, webViewDeps, descriptor, containerCallbacks, latestNetworkRoute).also { created ->
-                val visible =
-                    (panelState != PanelState.CLOSED && descriptor.id == activePluginId) ||
-                        descriptor.id == pinnedPluginId
+                val visible = (panelState != PanelState.CLOSED && descriptor.id == activePluginId) || descriptor.id == pinnedPluginId
                 eventBridge.hydrateNewInstance(created, descriptor, panelState, visible, lastUrlByPlugin.remove(descriptor.id))
             }
         }
@@ -255,20 +288,41 @@ class PluginWebViewManager(
         if (!lastUrl.isNullOrBlank() && (lastUrl.startsWith("http://") || lastUrl.startsWith("https://"))) {
             lastUrlByPlugin[pluginId] = lastUrl
         }
-        if (pluginId == pinnedPluginId) pinnedPluginId = null
-        pool.removeAndDestroy(pluginId)
-        reportDiagnostics()
-        if (pluginId != activePluginId || !descriptors.containsKey(pluginId)) return
-        crashRecovery.schedule(pluginId) {
-            if (pluginId == activePluginId && descriptors.containsKey(pluginId)) {
-                activatePlugin(pluginId, forceMount = true)
-            }
+        if (PluginLifecycleEvictionPolicy.shouldHidePinnedOnCrash(pluginId, pinnedPluginId)) {
+            evictOverlay(EvictedOverlayKind.PINNED, pluginId)
         }
+        pool.removeAndDestroy(pluginId)
+        eventBridge.reportDiagnostics(pool.warmPluginIds(), activeHudPluginId)
+        val desc = descriptors[pluginId]?.takeIf { it.enabled } ?: return
+        if (pluginId != activePluginId) return
+        crashRecovery.schedule(
+            pluginId,
+            onRecover = {
+                if (pluginId == activePluginId && descriptors[pluginId]?.enabled == true) activatePlugin(pluginId, forceMount = true)
+            },
+            onCircuitOpen = { decision ->
+                if (pluginId == activePluginId) {
+                    val err =
+                        PluginLifecycleEvictionPolicy.buildCrashCircuitError(pluginId, desc.name, decision.attempt) {
+                            reloadPluginWebView(pluginId)
+                        }
+                    surfaceDelegate.setPanelOverlayState(err)
+                }
+            },
+        )
     }
 
-    private fun keepAliveIds(): Set<String> = descriptors.values.filter(isKeepAlivePlugin).mapTo(LinkedHashSet()) { it.id }
+    private fun evictOverlay(
+        kind: EvictedOverlayKind,
+        pluginId: String,
+    ) {
+        if (kind == EvictedOverlayKind.PINNED && pinnedPluginId == pluginId) pinnedPluginId = null
+        if (kind == EvictedOverlayKind.HUD && activeHudPluginId == pluginId) activeHudPluginId = null
+        surfaceDelegate.onOverlayPluginEvicted(kind, pluginId)
+    }
 
-    private fun notifyRail() = surfaceDelegate.onMatchedPluginsUpdated(matchedPluginIds.mapNotNull(descriptors::get), activePluginId)
+    private val keepAliveIds: Set<String>
+        get() = descriptors.values.filter(isKeepAlivePlugin).mapTo(LinkedHashSet()) { it.id }
 
     companion object {
         private const val TAG = "SideVeilPluginMgr"

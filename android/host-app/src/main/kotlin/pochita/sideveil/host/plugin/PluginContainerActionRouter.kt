@@ -1,122 +1,244 @@
 package pochita.sideveil.host.plugin
 
-import android.util.Log
 import pochita.sideveil.host.pinned.PinnedBoundsSpec
 import pochita.sideveil.protocol.ContainerActionPayload
+import pochita.sideveil.protocol.PluginApprovalStatus
+import pochita.sideveil.protocol.PluginDescriptor
+import pochita.sideveil.protocol.PluginOrigin
 import pochita.sideveil.protocol.PluginPresentationMode
 import pochita.sideveil.protocol.PluginSurfaceBackdrop
+import pochita.sideveil.protocol.SideVeilThemes
 
-/**
- * Buffers pre-ready WebView messages while isolating RPC replies from evictable event bursts so
- * high-frequency host events can never evict an in-flight JSON-RPC response.
- */
-class PendingWebMessageQueue(
-    private val maxPendingEvents: Int = DEFAULT_MAX_PENDING_EVENTS,
-) {
-    private val pendingResponses = ArrayDeque<String>()
-    private val pendingEvents = ArrayDeque<String>(maxPendingEvents)
+/** Structured outcome of a host-local `container.action` invocation. */
+sealed interface ContainerActionResult {
+    data object Ok : ContainerActionResult
 
-    /** Buffers an outbound JSON-RPC response without eviction limits. */
-    fun enqueueResponse(rawJson: String) {
-        pendingResponses.addLast(rawJson)
-    }
+    data class Denied(
+        val message: String,
+    ) : ContainerActionResult
 
-    /** Buffers an outbound event frame, dropping the oldest queued event when full. */
-    fun enqueueEvent(rawJson: String) {
-        if (maxPendingEvents <= 0) return
-        if (pendingEvents.size >= maxPendingEvents) {
-            pendingEvents.removeFirst()
-        }
-        pendingEvents.addLast(rawJson)
-    }
-
-    /** Drains all buffered responses first, followed by buffered events in FIFO order. */
-    fun drainAll(deliver: (String) -> Unit) {
-        while (pendingResponses.isNotEmpty()) {
-            deliver(pendingResponses.removeFirst())
-        }
-        while (pendingEvents.isNotEmpty()) {
-            deliver(pendingEvents.removeFirst())
-        }
-    }
-
-    /** Clears all queued responses and events. */
-    fun clear() {
-        pendingResponses.clear()
-        pendingEvents.clear()
-    }
-
-    /** Current number of queued RPC responses. */
-    fun responseCount(): Int = pendingResponses.size
-
-    /** Current number of queued host events. */
-    fun eventCount(): Int = pendingEvents.size
-
-    companion object {
-        const val DEFAULT_MAX_PENDING_EVENTS = 16
-    }
+    data class Invalid(
+        val message: String,
+    ) : ContainerActionResult
 }
 
 /**
- * Decodes and routes `container.action` payloads issued by a plugin WebView to local instance
- * state setters and host-level [PluginContainerCallbacks].
+ * Decodes, validates, and routes `container.action` payloads issued by a plugin WebView to local
+ * instance state setters and host-level [PluginContainerCallbacks], returning structured
+ * [ContainerActionResult] outcomes for JSON-RPC error propagation.
  */
-internal object PluginContainerActionRouter {
-    private const val TAG = "SideVeilPluginWebView"
+object PluginContainerActionRouter {
+    private val ALLOWED_THEMES = setOf(SideVeilThemes.COLOROS_GLASS, SideVeilThemes.MODERN_SAAS_DARK)
+    private val ALLOWED_COLOR_SCHEMES = setOf("light", "dark")
 
     fun dispatch(
-        pluginId: String,
+        descriptor: PluginDescriptor,
         action: ContainerActionPayload?,
         callbacks: PluginContainerCallbacks,
+        isActive: Boolean,
+        isPinned: Boolean,
         onSizeOverride: (PluginSizeOverride) -> Unit,
         onBackIntercept: (Boolean) -> Unit,
         onBackdrop: (PluginSurfaceBackdrop) -> Unit,
         onPresentationMode: (PluginPresentationMode) -> Unit,
-    ) {
-        when (action?.type) {
+    ): ContainerActionResult =
+        when {
+            PluginNetworkPolicy.isUntrustedEmbed(descriptor) -> {
+                ContainerActionResult.Denied("Untrusted web-embed cannot invoke container.action")
+            }
+
+            action == null -> {
+                ContainerActionResult.Invalid("Invalid container.action params")
+            }
+
+            else -> {
+                routeAction(
+                    descriptor = descriptor,
+                    action = action,
+                    callbacks = callbacks,
+                    isActive = isActive,
+                    activeOrPinned = isActive || isPinned,
+                    onSizeOverride = onSizeOverride,
+                    onBackIntercept = onBackIntercept,
+                    onBackdrop = onBackdrop,
+                    onPresentationMode = onPresentationMode,
+                )
+            }
+        }
+
+    private fun routeAction(
+        descriptor: PluginDescriptor,
+        action: ContainerActionPayload,
+        callbacks: PluginContainerCallbacks,
+        isActive: Boolean,
+        activeOrPinned: Boolean,
+        onSizeOverride: (PluginSizeOverride) -> Unit,
+        onBackIntercept: (Boolean) -> Unit,
+        onBackdrop: (PluginSurfaceBackdrop) -> Unit,
+        onPresentationMode: (PluginPresentationMode) -> Unit,
+    ): ContainerActionResult =
+        when (action.type) {
             "dismiss" -> {
-                callbacks.onDismissRequested(pluginId)
+                runIfAllowed(activeOrPinned, descriptor.id, action.type) {
+                    callbacks.onDismissRequested(descriptor.id)
+                }
             }
 
             "requestImeFocus" -> {
-                callbacks.onImeFocusRequested(pluginId, action.focused == true)
+                runIfAllowed(activeOrPinned, descriptor.id, action.type) {
+                    callbacks.onImeFocusRequested(descriptor.id, action.focused == true)
+                }
             }
 
             "syncTheme" -> {
-                val payload = action.payload ?: return
-                callbacks.onAppearanceSynced(pluginId, payload.themeId, payload.colorScheme)
+                handleSyncTheme(descriptor, action, isActive, callbacks)
             }
 
             "setPreferredSize" -> {
-                val next =
-                    PluginSizeOverride(
-                        widthDp = action.widthDp,
-                        heightDp = action.heightDp,
-                        heightPercent = action.heightPercent,
-                    )
-                onSizeOverride(next)
-                callbacks.onPreferredSizeChanged(pluginId, next)
+                runIfAllowed(isActive, descriptor.id, action.type) {
+                    val next =
+                        PluginSizeOverride(
+                            widthDp = action.widthDp,
+                            heightDp = action.heightDp,
+                            heightPercent = action.heightPercent,
+                        )
+                    onSizeOverride(next)
+                    callbacks.onPreferredSizeChanged(descriptor.id, next)
+                }
             }
 
             "setBackIntercept" -> {
-                onBackIntercept(action.enabled == true)
+                runIfAllowed(isActive, descriptor.id, action.type) {
+                    onBackIntercept(action.enabled == true)
+                }
             }
 
             "setSurfaceBackdrop" -> {
-                val parsed = parseBackdrop(action.backdrop) ?: return
-                onBackdrop(parsed)
-                callbacks.onBackdropChanged(pluginId, parsed)
+                handleSurfaceBackdrop(descriptor.id, action, activeOrPinned, onBackdrop, callbacks)
             }
 
             "setPresentationMode" -> {
-                val parsed = parsePresentationMode(action.mode) ?: return
-                onPresentationMode(parsed)
-                callbacks.onPresentationModeChanged(pluginId, parsed)
+                handlePresentationMode(descriptor, action, activeOrPinned, onPresentationMode, callbacks)
             }
 
             "setPinnedBounds" -> {
+                handleSetPinnedBounds(descriptor, action, activeOrPinned, callbacks)
+            }
+
+            "setEdgeStatus" -> {
+                handleEdgeStatus(descriptor, action, activeOrPinned, callbacks)
+            }
+
+            else -> {
+                ContainerActionResult.Invalid("Unknown container.action type '${action.type}'")
+            }
+        }
+
+    private inline fun runIfAllowed(
+        allowed: Boolean,
+        pluginId: String,
+        actionType: String,
+        block: () -> Unit,
+    ): ContainerActionResult {
+        if (!allowed) return inactiveDenied(pluginId, actionType)
+        block()
+        return ContainerActionResult.Ok
+    }
+
+    private fun handleSyncTheme(
+        descriptor: PluginDescriptor,
+        action: ContainerActionPayload,
+        isActive: Boolean,
+        callbacks: PluginContainerCallbacks,
+    ): ContainerActionResult {
+        val payload = action.payload
+        return when {
+            descriptor.origin != PluginOrigin.BUILTIN -> {
+                ContainerActionResult.Denied("Only builtin plugins may invoke syncTheme")
+            }
+
+            !isActive -> {
+                inactiveDenied(descriptor.id, action.type)
+            }
+
+            payload == null -> {
+                ContainerActionResult.Invalid("syncTheme requires payload")
+            }
+
+            payload.themeId !in ALLOWED_THEMES -> {
+                ContainerActionResult.Invalid("Unsupported themeId '${payload.themeId}'")
+            }
+
+            payload.colorScheme !in ALLOWED_COLOR_SCHEMES -> {
+                ContainerActionResult.Invalid("Unsupported colorScheme '${payload.colorScheme}'")
+            }
+
+            else -> {
+                callbacks.onAppearanceSynced(descriptor.id, payload.themeId, payload.colorScheme)
+                ContainerActionResult.Ok
+            }
+        }
+    }
+
+    private fun handleSurfaceBackdrop(
+        pluginId: String,
+        action: ContainerActionPayload,
+        activeOrPinned: Boolean,
+        onBackdrop: (PluginSurfaceBackdrop) -> Unit,
+        callbacks: PluginContainerCallbacks,
+    ): ContainerActionResult {
+        if (!activeOrPinned) return inactiveDenied(pluginId, action.type)
+        val parsed =
+            parseBackdrop(action.backdrop)
+                ?: return ContainerActionResult.Invalid("Unsupported surface backdrop '${action.backdrop}'")
+        onBackdrop(parsed)
+        callbacks.onBackdropChanged(pluginId, parsed)
+        return ContainerActionResult.Ok
+    }
+
+    private fun handlePresentationMode(
+        descriptor: PluginDescriptor,
+        action: ContainerActionPayload,
+        activeOrPinned: Boolean,
+        onPresentationMode: (PluginPresentationMode) -> Unit,
+        callbacks: PluginContainerCallbacks,
+    ): ContainerActionResult {
+        if (!activeOrPinned) return inactiveDenied(descriptor.id, action.type)
+        val parsed =
+            parsePresentationMode(action.mode)
+                ?: return ContainerActionResult.Invalid("Unsupported presentation mode '${action.mode}'")
+        if (parsed == PluginPresentationMode.PINNED &&
+            descriptor.approvalStatus != PluginApprovalStatus.APPROVED
+        ) {
+            return ContainerActionResult.Denied("Unapproved plugin '${descriptor.id}' cannot enter pinned mode")
+        }
+        onPresentationMode(parsed)
+        callbacks.onPresentationModeChanged(descriptor.id, parsed)
+        return ContainerActionResult.Ok
+    }
+
+    private fun handleSetPinnedBounds(
+        descriptor: PluginDescriptor,
+        action: ContainerActionPayload,
+        activeOrPinned: Boolean,
+        callbacks: PluginContainerCallbacks,
+    ): ContainerActionResult =
+        when {
+            !activeOrPinned -> {
+                inactiveDenied(descriptor.id, action.type)
+            }
+
+            action.clickThrough == true && descriptor.approvalStatus != PluginApprovalStatus.APPROVED -> {
+                ContainerActionResult.Denied("Unapproved plugin '${descriptor.id}' cannot enable click-through")
+            }
+
+            action.xPercent?.isFinite() == false || action.yPercent?.isFinite() == false -> {
+                ContainerActionResult.Invalid("Pinned coordinates must be finite numbers")
+            }
+
+            else -> {
                 callbacks.onPinnedBoundsChanged(
-                    pluginId,
+                    descriptor.id,
                     PinnedBoundsSpec(
                         widthDp = action.widthDp,
                         heightDp = action.heightDp,
@@ -125,17 +247,35 @@ internal object PluginContainerActionRouter {
                         clickThrough = action.clickThrough,
                     ),
                 )
+                ContainerActionResult.Ok
+            }
+        }
+
+    private fun handleEdgeStatus(
+        descriptor: PluginDescriptor,
+        action: ContainerActionPayload,
+        activeOrPinned: Boolean,
+        callbacks: PluginContainerCallbacks,
+    ): ContainerActionResult =
+        when {
+            !activeOrPinned -> {
+                inactiveDenied(descriptor.id, action.type)
             }
 
-            "setEdgeStatus" -> {
-                callbacks.onEdgeStatusChanged(pluginId, action.status)
+            descriptor.approvalStatus != PluginApprovalStatus.APPROVED -> {
+                ContainerActionResult.Denied("Unapproved plugin '${descriptor.id}' cannot update edge status")
             }
 
             else -> {
-                Log.d(TAG, "Ignored unknown container.action type=${action?.type}")
+                callbacks.onEdgeStatusChanged(descriptor.id, action.status)
+                ContainerActionResult.Ok
             }
         }
-    }
+
+    private fun inactiveDenied(
+        pluginId: String,
+        actionType: String,
+    ): ContainerActionResult.Denied = ContainerActionResult.Denied("Plugin '$pluginId' is not active for container.action '$actionType'")
 
     private fun parseBackdrop(raw: String?): PluginSurfaceBackdrop? =
         when (raw) {

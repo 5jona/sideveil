@@ -219,13 +219,15 @@ internal class RailSlotFactory(
     ) {
         val menu = PopupMenu(themedContext, anchor)
         menu.menu.add(Menu.NONE, MENU_PIN_TOP, 0, "置顶该插件")
+        menu.menu.add(Menu.NONE, MENU_REFRESH_WEBVIEW, 1, "刷新页面")
         if (!plugin.builtin) {
-            menu.menu.add(Menu.NONE, MENU_DISABLE, 1, "停用此插件")
+            menu.menu.add(Menu.NONE, MENU_DISABLE, 2, "停用此插件")
         }
-        menu.menu.add(Menu.NONE, MENU_RELOAD, 2, "重新扫描插件")
+        menu.menu.add(Menu.NONE, MENU_RELOAD, 3, "重新扫描插件")
         menu.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 MENU_PIN_TOP -> onQuickAction(plugin.id, RailQuickAction.PIN_TOP)
+                MENU_REFRESH_WEBVIEW -> onQuickAction(plugin.id, RailQuickAction.REFRESH_WEBVIEW)
                 MENU_DISABLE -> onQuickAction(plugin.id, RailQuickAction.DISABLE)
                 MENU_RELOAD -> onQuickAction(plugin.id, RailQuickAction.RELOAD)
                 else -> return@setOnMenuItemClickListener false
@@ -252,5 +254,6 @@ internal class RailSlotFactory(
         private const val MENU_PIN_TOP = 1
         private const val MENU_DISABLE = 2
         private const val MENU_RELOAD = 3
+        private const val MENU_REFRESH_WEBVIEW = 4
     }
 }

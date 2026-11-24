@@ -59,17 +59,9 @@ class ContractFixturesTest {
 
         val withDebug = assertRoundTrip<SideVeilConfig>("config/SideVeilConfig.with-debug.json")
         assertTrue(withDebug.debug.webviewDebuggingEnabled)
-        assertEquals(RuntimeMode.RELEASE, withDebug.debug.runtimeMode)
         assertEquals(SideVeilThemes.MODERN_SAAS_DARK, withDebug.panel.themeId)
 
-        val runtimeRelease = assertRoundTrip<SideVeilConfig>("config/SideVeilConfig.runtime-release.json")
-        assertEquals(RuntimeMode.RELEASE, runtimeRelease.debug.runtimeMode)
-
-        val runtimeDebug = assertRoundTrip<SideVeilConfig>("config/SideVeilConfig.runtime-debug.json")
-        assertEquals(RuntimeMode.DEBUG, runtimeDebug.debug.runtimeMode)
-
         assertInvalidRejects<SideVeilConfig>("config/SideVeilConfig.invalid-mode.json")
-        assertInvalidRejects<SideVeilConfig>("config/SideVeilConfig.invalid-runtime-mode.json")
     }
 
     @Test
@@ -144,18 +136,49 @@ class ContractFixturesTest {
     }
 
     @Test
+    fun `generated plugin manifest and host handshake fixtures round-trip cleanly`() {
+        val ready = assertRoundTrip<HostReadyPayload>("events/HostReadyPayload.full.json")
+        assertEquals(SideVeilProtocolVersions.PROTOCOL_VERSION, ready.protocolVersion)
+        assertEquals(SideVeilProtocolVersions.PLUGIN_API_VERSION, ready.apiVersion)
+        assertEquals("example.vello-scope", ready.pluginId)
+        assertInvalidRejects<HostReadyPayload>("events/HostReadyPayload.invalid-missing-plugin.json")
+
+        val audit = assertRoundTrip<HostLocalAuditPayload>("events/HostLocalAuditPayload.allowed.json")
+        assertTrue(audit.allowed)
+        assertEquals("clipboard.get", audit.method)
+        assertInvalidRejects<HostLocalAuditPayload>("events/HostLocalAuditPayload.invalid-missing-allowed.json")
+
+        val minimal = assertRoundTrip<PluginManifest>("plugin-manifest/PluginManifest.minimal.json")
+        assertEquals(1L, minimal.schemaVersion)
+        val nativeDaemon = assertRoundTrip<PluginManifest>("plugin-manifest/PluginManifest.native-daemon.json")
+        assertEquals(PluginBackendKind.UDS_NATIVE, nativeDaemon.backend)
+        val webEmbed = assertRoundTrip<PluginManifest>("plugin-manifest/PluginManifest.web-embed.json")
+        assertNotNull(webEmbed.embed)
+        assertInvalidRejects<PluginManifest>("plugin-manifest/PluginManifest.invalid-capability.json")
+
+        val runtimeDesc = assertRoundTrip<PluginRuntimeDescriptor>("plugin-manifest/PluginRuntimeDescriptor.full.json")
+        assertEquals(PluginOrigin.BUNDLED, runtimeDesc.origin)
+        assertEquals(PluginApprovalStatus.APPROVED, runtimeDesc.approvalStatus)
+        assertEquals(PluginDaemonStatus.RUNNING, runtimeDesc.daemonStatus)
+        assertInvalidRejects<PluginRuntimeDescriptor>("plugin-manifest/PluginRuntimeDescriptor.invalid-origin.json")
+    }
+
+    @Test
     fun `generated constants align complete method and event registries`() {
+        assertEquals(1L, SideVeilProtocolVersions.PROTOCOL_VERSION)
         assertEquals("daemon.health", SideVeilMethods.DAEMON_HEALTH)
         assertEquals("plugins.setScopeOverride", SideVeilMethods.PLUGINS_SET_SCOPE_OVERRIDE)
-        assertEquals("debug.setRuntimeMode", SideVeilMethods.DEBUG_SET_RUNTIME_MODE)
+        assertEquals("plugins.grantCapabilities", SideVeilMethods.PLUGINS_GRANT_CAPABILITIES)
+        assertEquals("plugins.reloadWebView", SideVeilMethods.PLUGINS_RELOAD_WEBVIEW)
         assertEquals("fs.writeAtomic", SideVeilMethods.FS_WRITE_ATOMIC)
         assertEquals("panel.visibilityChanged", SideVeilEvents.PANEL_VISIBILITY_CHANGED)
         assertEquals("appearance.changed", SideVeilEvents.APPEARANCE_CHANGED)
+        assertEquals("host.ready", SideVeilEvents.HOST_READY)
+        assertEquals("host.localAudit", SideVeilEvents.HOST_LOCAL_AUDIT)
         assertEquals("container.presentationChanged", SideVeilEvents.CONTAINER_PRESENTATION_CHANGED)
         assertEquals("container.clickThroughChanged", SideVeilEvents.CONTAINER_CLICK_THROUGH_CHANGED)
-        assertTrue(isBuiltinTestPlugin(SideVeilBuiltinTestPlugins.DIAGNOSTIC))
-        assertTrue(isBuiltinTestPlugin(SideVeilBuiltinTestPlugins.VELLO_SCOPE))
-        assertTrue(isBuiltinTestPlugin(SideVeilBuiltinTestPlugins.NATIVE_PERF_HUD))
-        assertFalse(isBuiltinTestPlugin("sideveil.proxy"))
+        assertEquals(-32001, SideVeilErrorCodes.DAEMON_DISCONNECTED)
+        assertEquals(-32002, SideVeilErrorCodes.RPC_TIMEOUT)
+        assertEquals(-32004, SideVeilErrorCodes.RATE_LIMITED)
     }
 }
