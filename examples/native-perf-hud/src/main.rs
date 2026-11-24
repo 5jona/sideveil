@@ -14,10 +14,10 @@ use scene::{PLUGIN_ID, build_scene};
 use serde_json::{Value, json};
 use sideveil_plugin_sdk::{
     CancellationToken, PluginBackendConfig, PluginBackendHandle, PluginBackendRunner,
-    PluginRpcContext, PluginRpcError, PluginRpcHandler,
+    PluginRpcContext, PluginRpcError, PluginRpcHandler, SdkError, wait_shutdown_signal,
 };
 use sideveil_protocol::paths;
-use sideveil_protocol::rpc::{RpcRequest, events, methods};
+use sideveil_protocol::rpc::{RpcRequest, events};
 use tokio::sync::Notify;
 
 const HISTORY_LEN: usize = 24;
@@ -95,10 +95,7 @@ impl PluginRpcHandler for PerfHudHandler {
 
     async fn on_system_event(&self, event: String, payload: Value, _ctx: PluginRpcContext) {
         if event == events::APPEARANCE_CHANGED
-            && let Some(flag) = payload
-                .get("isDark")
-                .or_else(|| payload.get("dark"))
-                .and_then(Value::as_bool)
+            && let Some(flag) = parse_dark_surface(&payload)
         {
             self.state.dark_surface.store(flag, Ordering::Relaxed);
             self.state.wake.notify_one();
@@ -108,6 +105,24 @@ impl PluginRpcHandler for PerfHudHandler {
     async fn on_connected(&self, _ctx: PluginRpcContext) {
         self.state.wake.notify_one();
     }
+
+    async fn on_error(&self, err: &SdkError) {
+        eprintln!("[{PLUGIN_ID}] hub session error: {err}");
+    }
+}
+
+fn parse_dark_surface(payload: &Value) -> Option<bool> {
+    if let Some(mode) = payload.get("colorMode").and_then(Value::as_str) {
+        match mode {
+            "light" => return Some(false),
+            "dark" => return Some(true),
+            _ => {}
+        }
+    }
+    payload
+        .get("isDark")
+        .or_else(|| payload.get("dark"))
+        .and_then(Value::as_bool)
 }
 
 async fn run_sampler_loop(
@@ -134,7 +149,7 @@ async fn run_sampler_loop(
         if !state.enabled.load(Ordering::Relaxed) {
             if was_enabled {
                 was_enabled = false;
-                let _ = handle.emit_event(methods::HUD_DISMISS, None, false).await;
+                let _ = handle.dismiss_hud().await;
             }
             tokio::select! {
                 biased;
@@ -161,13 +176,7 @@ async fn run_sampler_loop(
             state.click_through.load(Ordering::Relaxed),
             state.dark_surface.load(Ordering::Relaxed),
         );
-        let _ = handle
-            .emit_event(
-                methods::HUD_UPDATE_SCENE,
-                serde_json::to_value(scene).ok(),
-                true,
-            )
-            .await;
+        let _ = handle.push_hud(&scene).await;
 
         tokio::select! {
             biased;
@@ -180,10 +189,12 @@ async fn run_sampler_loop(
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let socket = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| paths::HUB_SOCKET.to_owned());
-    let config = PluginBackendConfig::new(PLUGIN_ID).with_socket_path(socket);
+    let config = PluginBackendConfig::from_env().unwrap_or_else(|_| {
+        let socket = std::env::args()
+            .nth(1)
+            .unwrap_or_else(|| paths::HUB_SOCKET.to_owned());
+        PluginBackendConfig::new(PLUGIN_ID).with_socket_path(socket)
+    });
     let cancel = CancellationToken::new();
 
     let (handle, runner) = match PluginBackendRunner::new(config, cancel.clone()) {
@@ -205,8 +216,8 @@ async fn main() {
     ));
 
     let shutdown_cancel = cancel.clone();
-    tokio::spawn(async move {
-        let _ = tokio::signal::ctrl_c().await;
+    let signal_task = tokio::spawn(async move {
+        wait_shutdown_signal().await;
         shutdown_cancel.cancel();
     });
 
@@ -214,6 +225,7 @@ async fn main() {
         eprintln!("[{PLUGIN_ID}] backend exited with error: {err}");
     }
     cancel.cancel();
+    signal_task.abort();
     let _ = sampler_task.await;
 }
 

@@ -1,5 +1,6 @@
 //! Configuration builder for SideVeil plugin backend UDS sessions.
 
+use std::env;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -24,6 +25,8 @@ pub struct PluginBackendConfig {
     pub plugin_id: String,
     /// Target Hub Unix domain socket path (defaults to [`paths::HUB_SOCKET`]).
     pub socket_path: PathBuf,
+    /// Optional isolated plugin data directory (`SIDEVEIL_DATA_DIR`).
+    pub data_dir: Option<PathBuf>,
     /// Optional Android package name (required only for `uds-app` peers on `app.sock`).
     pub package_name: Option<String>,
     /// Maximum wait time when establishing a Unix socket connection.
@@ -51,6 +54,7 @@ impl PluginBackendConfig {
         Self {
             plugin_id: plugin_id.into(),
             socket_path: PathBuf::from(paths::HUB_SOCKET),
+            data_dir: None,
             package_name: None,
             connect_timeout: DEFAULT_CONNECT_TIMEOUT,
             handshake_timeout: DEFAULT_HANDSHAKE_TIMEOUT,
@@ -63,10 +67,43 @@ impl PluginBackendConfig {
         }
     }
 
+    /// Reads standard supervisor-injected environment variables (`SIDEVEIL_PLUGIN_ID`,
+    /// `SIDEVEIL_HUB_SOCK`, `SIDEVEIL_DATA_DIR`) to build a [`PluginBackendConfig`].
+    pub fn from_env() -> Result<Self, SdkError> {
+        let plugin_id = env::var("SIDEVEIL_PLUGIN_ID")
+            .ok()
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                SdkError::InvalidConfig(
+                    "SIDEVEIL_PLUGIN_ID environment variable is missing or empty".to_owned(),
+                )
+            })?;
+        let mut cfg = Self::new(plugin_id);
+        if let Ok(sock) = env::var("SIDEVEIL_HUB_SOCK")
+            && !sock.trim().is_empty()
+        {
+            cfg.socket_path = PathBuf::from(sock.trim());
+        }
+        if let Ok(data_dir) = env::var("SIDEVEIL_DATA_DIR")
+            && !data_dir.trim().is_empty()
+        {
+            cfg.data_dir = Some(PathBuf::from(data_dir.trim()));
+        }
+        Ok(cfg)
+    }
+
     /// Overrides the target Unix domain socket path.
     #[must_use]
     pub fn with_socket_path(mut self, socket_path: impl Into<PathBuf>) -> Self {
         self.socket_path = socket_path.into();
+        self
+    }
+
+    /// Overrides the plugin's isolated data directory path.
+    #[must_use]
+    pub fn with_data_dir(mut self, data_dir: impl Into<PathBuf>) -> Self {
+        self.data_dir = Some(data_dir.into());
         self
     }
 

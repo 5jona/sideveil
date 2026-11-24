@@ -8,6 +8,7 @@ use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
 use sideveil_protocol::rpc::{HostEventEnvelope, RpcResponse};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::Semaphore;
 use tokio::time::MissedTickBehavior;
 use tokio_tungstenite::accept_hdr_async;
 use tokio_tungstenite::tungstenite::Message;
@@ -19,6 +20,8 @@ use crate::rpc::{self, RpcCaller};
 use crate::state::HubState;
 
 const PING_INTERVAL: Duration = Duration::from_secs(15);
+const MAX_HOST_CONNECTIONS: usize = 64;
+const WS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(4);
 
 /// Authenticated loopback WebSocket and HTTP asset listener for `SideVeilHost`.
 #[derive(Debug)]
@@ -49,11 +52,20 @@ impl HostWsServer {
             self.port
         ));
 
+        let conn_limiter = Arc::new(Semaphore::new(MAX_HOST_CONNECTIONS));
         loop {
             match self.listener.accept().await {
                 Ok((stream, _addr)) => {
+                    let Ok(permit) = Arc::clone(&conn_limiter).try_acquire_owned() else {
+                        state
+                            .logs()
+                            .warn("Host WS/asset server connection limit reached; dropping peer");
+                        drop(stream);
+                        continue;
+                    };
                     let st = Arc::clone(&state);
                     tokio::spawn(async move {
+                        let _permit = permit;
                         handle_connection(stream, st).await;
                     });
                 }
@@ -81,21 +93,28 @@ async fn handle_connection(stream: TcpStream, state: Arc<HubState>) {
 
     let expected_auth = format!("Bearer {}", state.ws_token());
 
-    let ws_stream = match accept_hdr_async(
-        stream,
-        #[allow(clippy::result_large_err)]
-        |req: &Request, resp: Response| match validate_ws_request(req, &expected_auth) {
-            Ok(()) => Ok(resp),
-            Err((status, body)) => Err(reject_response(status, body)),
-        },
+    let ws_stream = match tokio::time::timeout(
+        WS_HANDSHAKE_TIMEOUT,
+        accept_hdr_async(
+            stream,
+            #[allow(clippy::result_large_err)]
+            |req: &Request, resp: Response| match validate_ws_request(req, &expected_auth) {
+                Ok(()) => Ok(resp),
+                Err((status, body)) => Err(reject_response(status, body)),
+            },
+        ),
     )
     .await
     {
-        Ok(ws) => ws,
-        Err(err) => {
+        Ok(Ok(ws)) => ws,
+        Ok(Err(err)) => {
             state
                 .logs()
                 .warn(format!("Rejected Host WebSocket handshake: {err}"));
+            return;
+        }
+        Err(_) => {
+            state.logs().warn("Host WebSocket handshake timed out (4s)");
             return;
         }
     };
@@ -199,9 +218,7 @@ fn validate_ws_request(req: &Request, expected_auth: &str) -> Result<(), (u16, &
         return Err((404, "Not Found"));
     }
 
-    if let Some(origin) = req.headers().get("origin")
-        && !origin.as_bytes().is_empty()
-    {
+    if req.headers().get_all("origin").iter().count() > 0 {
         return Err((403, "Origin header is forbidden"));
     }
 

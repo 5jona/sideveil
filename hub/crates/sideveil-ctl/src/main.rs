@@ -1,12 +1,16 @@
-//! Native CLI utility communicating with `sideveild` over `hub.sock` (`SO_PEERCRED`).
+//! Native CLI utility communicating with `sideveild` over `hub.sock` (`SO_PEERCRED`),
+//! plus offline plugin developer commands (`validate`, `pack`, `init`).
 
 mod cli;
+mod dx;
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
+
+const MAX_STDIN_PARAMS_BYTES: usize = 24 * 1024 * 1024;
 
 use serde_json::{Value, json};
 use sideveil_protocol::rpc::{RpcRequest, RpcResponse};
@@ -43,29 +47,26 @@ fn execute(inv: &CliInvocation) -> Result<String, String> {
             output_mode,
         } => {
             let resp = execute_rpc(&inv.socket_path, inv.io_timeout, method, params.clone())?;
-            match output_mode {
-                OutputMode::UnwrapResult => {
-                    let result = resp.result.unwrap_or(Value::Null);
-                    serde_json::to_string(&result)
-                        .map_err(|e| format!("Failed encoding output: {e}"))
-                }
-                OutputMode::FullEnvelope => {
-                    serde_json::to_string(&resp).map_err(|e| format!("Failed encoding output: {e}"))
-                }
-                OutputMode::RuntimeMode => {
-                    let mode = resp
-                        .result
-                        .as_ref()
-                        .and_then(|v| v.pointer("/debug/runtimeMode"))
-                        .and_then(Value::as_str)
-                        .unwrap_or(
-                            sideveil_protocol::generated::config_bounds::defaults::DEFAULT_RUNTIME_MODE,
-                        );
-                    serde_json::to_string(&json!({ "runtimeMode": mode }))
-                        .map_err(|e| format!("Failed encoding output: {e}"))
-                }
-            }
+            format_rpc_output(&resp, output_mode)
         }
+        CliAction::RpcFromStdin {
+            method,
+            output_mode,
+        } => {
+            let params = read_json_params_from_reader(io::stdin().lock())?;
+            let resp = execute_rpc(&inv.socket_path, inv.io_timeout, method, params)?;
+            format_rpc_output(&resp, output_mode)
+        }
+        CliAction::ValidatePlugin { target } => dx::run_validate(target),
+        CliAction::PackPlugin {
+            source_dir,
+            output_path,
+        } => dx::run_pack(source_dir, output_path.as_deref()),
+        CliAction::InitPlugin {
+            plugin_id,
+            template,
+            output_dir,
+        } => dx::run_init(plugin_id, *template, output_dir.as_deref()),
     }
 }
 
@@ -123,6 +124,41 @@ fn execute_rpc(
     }
 
     Ok(resp)
+}
+
+fn format_rpc_output(resp: &RpcResponse, output_mode: &OutputMode) -> Result<String, String> {
+    match output_mode {
+        OutputMode::UnwrapResult => {
+            let result = resp.result.clone().unwrap_or(Value::Null);
+            serde_json::to_string(&result).map_err(|e| format!("Failed encoding output: {e}"))
+        }
+        OutputMode::FullEnvelope => {
+            serde_json::to_string(resp).map_err(|e| format!("Failed encoding output: {e}"))
+        }
+    }
+}
+
+pub(crate) fn read_json_params_from_reader<R: Read>(reader: R) -> Result<Option<Value>, String> {
+    let mut raw = Vec::new();
+    let limit = (MAX_STDIN_PARAMS_BYTES as u64).saturating_add(1);
+    reader
+        .take(limit)
+        .read_to_end(&mut raw)
+        .map_err(|e| format!("Failed reading JSON params from stdin: {e}"))?;
+    if raw.len() > MAX_STDIN_PARAMS_BYTES {
+        return Err(format!(
+            "Stdin JSON params exceed maximum {} MiB limit",
+            MAX_STDIN_PARAMS_BYTES / (1024 * 1024)
+        ));
+    }
+    let text = String::from_utf8(raw)
+        .map_err(|e| format!("Stdin JSON params are not valid UTF-8: {e}"))?;
+    if text.trim().is_empty() {
+        return Ok(None);
+    }
+    serde_json::from_str::<Value>(&text)
+        .map(Some)
+        .map_err(|e| format!("Invalid JSON params from stdin: {e}"))
 }
 
 fn connect_socket(path: &Path, timeout: Duration) -> Result<UnixStream, String> {

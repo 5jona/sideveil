@@ -22,6 +22,8 @@ use crate::config_store::ConfigStore;
 use crate::log_ring::LogRing;
 use crate::plugin_backends::PluginBackends;
 use crate::plugin_registry::PluginRegistry;
+use crate::rate_limiter::PluginRateLimiter;
+use crate::supervisor::PluginDaemonManager;
 
 /// Central shared state coordinating configuration, plugins, UDS/WS sessions, and events.
 #[derive(Debug)]
@@ -31,6 +33,8 @@ pub struct HubState {
     pub(super) config: Arc<ConfigStore>,
     pub(super) plugins: Arc<PluginRegistry>,
     pub(super) backends: Arc<PluginBackends>,
+    pub(super) daemon_manager: Arc<PluginDaemonManager>,
+    pub(super) rate_limiter: Arc<PluginRateLimiter>,
     data_dir: PathBuf,
     cache_dir: PathBuf,
     pub(super) logs: Arc<LogRing>,
@@ -64,6 +68,8 @@ impl HubState {
             config,
             plugins,
             backends: Arc::new(PluginBackends::new()),
+            daemon_manager: PluginDaemonManager::new(),
+            rate_limiter: Arc::new(PluginRateLimiter::new()),
             data_dir,
             cache_dir,
             logs,
@@ -93,6 +99,16 @@ impl HubState {
     #[must_use]
     pub fn plugin_backends(&self) -> &Arc<PluginBackends> {
         &self.backends
+    }
+
+    #[must_use]
+    pub fn daemon_manager(&self) -> &Arc<PluginDaemonManager> {
+        &self.daemon_manager
+    }
+
+    #[must_use]
+    pub fn rate_limiter(&self) -> &Arc<PluginRateLimiter> {
+        &self.rate_limiter
     }
 
     #[must_use]
@@ -149,7 +165,9 @@ impl HubState {
             )
         };
         let online = self.backends.online_ids();
-        self.plugins.snapshot(&fg_pkg, &fg_act, &cfg, &online)
+        let daemons = self.daemon_manager.snapshot_all();
+        self.plugins
+            .snapshot_with_daemons(&fg_pkg, &fg_act, &cfg, &online, &daemons)
     }
 
     #[must_use]

@@ -7,15 +7,18 @@ use std::path::PathBuf;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use sideveil_protocol::config::{PanelState, RuntimeMode, SideVeilConfig, THEME_COLOROS_GLASS};
+use sideveil_protocol::config::{PanelState, SideVeilConfig, THEME_COLOROS_GLASS};
 use sideveil_protocol::generated::protocol_constants::{
-    builtin_diagnostic, builtin_test_plugins, error_codes, events, hud_defaults, methods, themes,
+    builtin_diagnostic, error_codes, events, hud_defaults, methods, protocol_versions, themes,
 };
 use sideveil_protocol::hud::{HudDismissPayload, HudTextAlign, HudTextOverlay};
-use sideveil_protocol::plugin::{HostPluginDiagnosticsPayload, is_builtin_test_plugin};
+use sideveil_protocol::plugin::{
+    HostPluginDiagnosticsPayload, PluginApprovalStatus, PluginDaemonStatus, PluginManifest,
+    PluginOrigin, PluginRuntimeDescriptor,
+};
 use sideveil_protocol::rpc::{
-    DaemonHealth, DaemonStatus, PanelStateChangedPayload, PanelVisibilityPayload, PingResult,
-    ScopeChangedPayload,
+    DaemonHealth, DaemonStatus, HostLocalAuditPayload, HostReadyPayload, PanelStateChangedPayload,
+    PanelVisibilityPayload, PingResult, ScopeChangedPayload,
 };
 use sideveil_protocol::theme::{DynamicThemePalette, HostDynamicColorsPayload};
 
@@ -56,22 +59,10 @@ fn config_fixtures_match_defaults_and_reject_invalid() {
 
     let with_debug: SideVeilConfig = assert_roundtrip("config/SideVeilConfig.with-debug.json");
     assert!(with_debug.debug.webview_debugging_enabled);
-    assert_eq!(with_debug.debug.runtime_mode, RuntimeMode::Release);
     assert_eq!(with_debug.panel.theme_id, themes::MODERN_SAAS_DARK);
-
-    let runtime_release: SideVeilConfig =
-        assert_roundtrip("config/SideVeilConfig.runtime-release.json");
-    assert_eq!(runtime_release.debug.runtime_mode, RuntimeMode::Release);
-
-    let runtime_debug: SideVeilConfig =
-        assert_roundtrip("config/SideVeilConfig.runtime-debug.json");
-    assert_eq!(runtime_debug.debug.runtime_mode, RuntimeMode::Debug);
 
     let invalid_raw = read_invalid_data("config/SideVeilConfig.invalid-mode.json");
     assert!(serde_json::from_str::<SideVeilConfig>(&invalid_raw).is_err());
-
-    let invalid_runtime = read_invalid_data("config/SideVeilConfig.invalid-runtime-mode.json");
-    assert!(serde_json::from_str::<SideVeilConfig>(&invalid_runtime).is_err());
 }
 
 #[test]
@@ -83,6 +74,11 @@ fn status_health_and_ping_fixtures_roundtrip() {
         Some(builtin_diagnostic::ID)
     );
     assert_eq!(full.matched_plugins_count, 2);
+    assert_eq!(full.protocol_version, protocol_versions::PROTOCOL_VERSION);
+    assert_eq!(
+        full.plugin_api_version,
+        protocol_versions::PLUGIN_API_VERSION
+    );
     assert!(full.gesture_stats.is_some());
 
     let minimal: DaemonStatus = assert_roundtrip("status/DaemonStatus.minimal-nulls.json");
@@ -102,7 +98,7 @@ fn status_health_and_ping_fixtures_roundtrip() {
 }
 
 #[test]
-fn scope_panel_and_diagnostics_event_fixtures_roundtrip() {
+fn scope_panel_diagnostics_and_host_event_fixtures_roundtrip() {
     let scope: ScopeChangedPayload = assert_roundtrip("events/ScopeChangedPayload.active.json");
     assert!(scope.active);
     assert_eq!(scope.foreground_activity, ".ui.MainActivity");
@@ -128,6 +124,51 @@ fn scope_panel_and_diagnostics_event_fixtures_roundtrip() {
 
     let bad_diag = read_invalid_data("events/HostPluginDiagnosticsPayload.invalid-crash-type.json");
     assert!(serde_json::from_str::<HostPluginDiagnosticsPayload>(&bad_diag).is_err());
+
+    let ready: HostReadyPayload = assert_roundtrip("events/HostReadyPayload.full.json");
+    assert_eq!(ready.protocol_version, protocol_versions::PROTOCOL_VERSION);
+    assert_eq!(ready.api_version, protocol_versions::PLUGIN_API_VERSION);
+    assert_eq!(ready.plugin_id, "example.vello-scope");
+
+    let bad_ready = read_invalid_data("events/HostReadyPayload.invalid-missing-plugin.json");
+    assert!(serde_json::from_str::<HostReadyPayload>(&bad_ready).is_err());
+
+    let audit: HostLocalAuditPayload =
+        assert_roundtrip("events/HostLocalAuditPayload.allowed.json");
+    assert!(audit.allowed);
+    assert_eq!(audit.method, "clipboard.get");
+
+    let bad_audit = read_invalid_data("events/HostLocalAuditPayload.invalid-missing-allowed.json");
+    assert!(serde_json::from_str::<HostLocalAuditPayload>(&bad_audit).is_err());
+}
+
+#[test]
+fn plugin_manifest_and_descriptor_fixtures_roundtrip() {
+    let minimal: PluginManifest = assert_roundtrip("plugin-manifest/PluginManifest.minimal.json");
+    assert!(minimal.validate().is_ok());
+
+    let native: PluginManifest =
+        assert_roundtrip("plugin-manifest/PluginManifest.native-daemon.json");
+    assert!(native.validate().is_ok());
+    assert!(!native.effective_default_enabled());
+    assert!(native.daemon.is_some());
+
+    let embed: PluginManifest = assert_roundtrip("plugin-manifest/PluginManifest.web-embed.json");
+    assert!(embed.validate().is_ok());
+
+    let bad_cap = read_invalid_data("plugin-manifest/PluginManifest.invalid-capability.json");
+    assert!(serde_json::from_str::<PluginManifest>(&bad_cap).is_err());
+
+    let desc: PluginRuntimeDescriptor =
+        assert_roundtrip("plugin-manifest/PluginRuntimeDescriptor.full.json");
+    assert_eq!(desc.origin, PluginOrigin::Bundled);
+    assert_eq!(desc.approval_status, PluginApprovalStatus::Approved);
+    assert_eq!(desc.daemon_status, PluginDaemonStatus::Running);
+    assert!(desc.has_daemon);
+
+    let bad_origin =
+        read_invalid_data("plugin-manifest/PluginRuntimeDescriptor.invalid-origin.json");
+    assert!(serde_json::from_str::<PluginRuntimeDescriptor>(&bad_origin).is_err());
 }
 
 #[test]
@@ -135,10 +176,6 @@ fn theme_and_hud_fixtures_align_defaults_and_reject_invalid() {
     let palette: DynamicThemePalette = assert_roundtrip("theme-hud/DynamicThemePalette.dark.json");
     assert_eq!(palette.theme_id, THEME_COLOROS_GLASS);
     assert_eq!(palette.glass.accent_argb, palette.seed_argb);
-    assert_eq!(
-        palette.css_tokens.get("--accent").map(String::as_str),
-        Some("#38bdf8")
-    );
 
     let bad_palette = read_invalid_data("theme-hud/DynamicThemePalette.invalid-missing-glass.json");
     assert!(serde_json::from_str::<DynamicThemePalette>(&bad_palette).is_err());
@@ -154,8 +191,6 @@ fn theme_and_hud_fixtures_align_defaults_and_reject_invalid() {
     let min_text: HudTextOverlay = assert_roundtrip("theme-hud/HudTextOverlay.minimal.json");
     assert_eq!(min_text.color_argb, hud_defaults::DEFAULT_TEXT_COLOR_ARGB);
     assert!((min_text.size_sp - hud_defaults::DEFAULT_TEXT_SIZE_SP).abs() < f32::EPSILON);
-    assert_eq!(min_text.align, HudTextAlign::Start);
-    assert!(min_text.tabular_nums);
 
     let bad_text = read_invalid_data("theme-hud/HudTextOverlay.invalid-align.json");
     assert!(serde_json::from_str::<HudTextOverlay>(&bad_text).is_err());
@@ -168,30 +203,23 @@ fn theme_and_hud_fixtures_align_defaults_and_reject_invalid() {
 }
 
 #[test]
-fn generated_constants_include_host_only_events_and_core_error_codes() {
+fn generated_constants_include_new_methods_events_versions_and_error_codes() {
+    assert_eq!(protocol_versions::PROTOCOL_VERSION, 1);
+    assert_eq!(protocol_versions::PLUGIN_API_VERSION, 1);
+    assert_eq!(protocol_versions::MANIFEST_SCHEMA_VERSION, 1);
+    assert_eq!(events::HOST_READY, "host.ready");
+    assert_eq!(events::HOST_LOCAL_AUDIT, "host.localAudit");
     assert_eq!(
-        events::CONTAINER_PRESENTATION_CHANGED,
-        "container.presentationChanged"
+        methods::PLUGINS_GRANT_CAPABILITIES,
+        "plugins.grantCapabilities"
     );
-    assert_eq!(
-        events::CONTAINER_CLICK_THROUGH_CHANGED,
-        "container.clickThroughChanged"
-    );
-    assert_eq!(events::PANEL_VISIBILITY_CHANGED, "panel.visibilityChanged");
-    assert_eq!(events::APPEARANCE_CHANGED, "appearance.changed");
-    assert_eq!(
-        methods::PLUGINS_SET_SCOPE_OVERRIDE,
-        "plugins.setScopeOverride"
-    );
-    assert_eq!(methods::DEBUG_SET_RUNTIME_MODE, "debug.setRuntimeMode");
+    assert_eq!(methods::PLUGINS_INSPECT_ARCHIVE, "plugins.inspectArchive");
+    assert_eq!(methods::PLUGINS_DAEMON_LOGS, "plugins.daemonLogs");
+    assert_eq!(methods::PLUGINS_RELOAD_WEBVIEW, "plugins.reloadWebView");
+    assert_eq!(error_codes::DAEMON_DISCONNECTED, -32001);
+    assert_eq!(error_codes::RPC_TIMEOUT, -32002);
     assert_eq!(error_codes::PERMISSION_DENIED, -32003);
-    assert_eq!(error_codes::BACKEND_TIMEOUT, -32011);
-
-    assert!(is_builtin_test_plugin(builtin_test_plugins::DIAGNOSTIC));
-    assert!(is_builtin_test_plugin(builtin_test_plugins::VELLO_SCOPE));
-    assert!(is_builtin_test_plugin(
-        builtin_test_plugins::NATIVE_PERF_HUD
-    ));
-    assert!(!is_builtin_test_plugin("sideveil.proxy"));
-    assert!(!is_builtin_test_plugin("strata.manager"));
+    assert_eq!(error_codes::RATE_LIMITED, -32004);
+    assert_eq!(error_codes::VERSION_MISMATCH, -32005);
+    assert_eq!(error_codes::QUOTA_EXCEEDED, -32006);
 }

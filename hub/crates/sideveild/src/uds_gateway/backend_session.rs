@@ -12,8 +12,9 @@ use sideveil_protocol::rpc::{RpcResponse, events, methods};
 use sideveil_protocol::sensor::NetworkTransportKind;
 use tokio::io::{AsyncRead, BufReader};
 
-use super::{read_bounded_line, write_json_line};
+use super::{DEFAULT_MAX_LINE_BYTES, read_bounded_line, write_json_line};
 use crate::peercred::PeerCred;
+use crate::rate_limiter::RateLimitBucket;
 use crate::state::HubState;
 
 /// Maximum reliable `plugin.event` frames forwarded per plugin backend per 1-second window.
@@ -75,14 +76,27 @@ pub(super) async fn handle_plugin_backend_session<R: AsyncRead + Unpin>(
     is_native: bool,
     state: Arc<HubState>,
 ) {
-    let (session_id, mut out_rx) = state.plugin_backends().register(&plugin_id, is_native);
+    let Ok((session_id, mut out_rx, mut disconnect_rx)) = state
+        .plugin_backends()
+        .register(&plugin_id, is_native, cred.uid)
+    else {
+        state.logs().warn(format!(
+            "Failed registering backend '{plugin_id}' for uid={}: owned by another UID",
+            cred.uid
+        ));
+        return;
+    };
     state.logs().info(format!(
         "Plugin backend connected: id={plugin_id} session=#{session_id} native={is_native} uid={} pid={:?} pkg={:?}",
         cred.uid, cred.pid, package_name
     ));
     state.emit_plugin_backend_state(&plugin_id, PluginBackendState::Online);
 
-    if is_native {
+    if is_native
+        && state
+            .plugin_registry()
+            .has_capability(&plugin_id, PluginCapability::NetworkContext)
+    {
         let net_ctx = state.network_context();
         if (net_ctx.transport != NetworkTransportKind::None
             || net_ctx.ssid.is_some()
@@ -109,7 +123,22 @@ pub(super) async fn handle_plugin_backend_session<R: AsyncRead + Unpin>(
     let mut limiter =
         PluginEventRateLimiter::new(RELIABLE_EVENTS_PER_WINDOW, RATE_WINDOW, Instant::now());
 
-    while let Ok(Some(line)) = read_bounded_line(&mut reader, &mut line_buf).await {
+    loop {
+        let line = tokio::select! {
+            biased;
+            res = disconnect_rx.changed() => {
+                if res.is_err() || *disconnect_rx.borrow() {
+                    break;
+                }
+                continue;
+            }
+            read_res = read_bounded_line(&mut reader, &mut line_buf, DEFAULT_MAX_LINE_BYTES) => {
+                match read_res {
+                    Ok(Some(line)) => line,
+                    Ok(None) | Err(_) => break,
+                }
+            }
+        };
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
@@ -131,7 +160,7 @@ pub(super) async fn handle_plugin_backend_session<R: AsyncRead + Unpin>(
         if obj.contains_key("event")
             && let Ok(env) = serde_json::from_value::<PluginBackendEvent>(val)
         {
-            route_backend_event(&state, &plugin_id, env, &mut limiter);
+            route_backend_event(&state, &plugin_id, session_id, env, &mut limiter);
         }
     }
 
@@ -148,14 +177,25 @@ pub(super) async fn handle_plugin_backend_session<R: AsyncRead + Unpin>(
 fn route_backend_event(
     state: &Arc<HubState>,
     plugin_id: &str,
+    session_id: u64,
     env: PluginBackendEvent,
     limiter: &mut PluginEventRateLimiter,
 ) {
+    if !state
+        .plugin_backends()
+        .is_session_active(plugin_id, session_id)
+        || !state.plugin_registry().is_plugin_enabled(plugin_id)
+    {
+        return;
+    }
     match env.event.as_str() {
         methods::HUD_UPDATE_SCENE => {
             if state
                 .plugin_registry()
                 .has_capability(plugin_id, PluginCapability::NativeHud)
+                && state
+                    .rate_limiter()
+                    .check_and_record(plugin_id, RateLimitBucket::HudUpdate)
                 && let Some(payload) = env.payload
                 && let Ok(mut scene) = serde_json::from_value::<NativeHudScene>(payload)
             {
@@ -163,9 +203,21 @@ fn route_backend_event(
                 state.push_hud_scene(scene);
             }
         }
-        methods::HUD_DISMISS => state.dismiss_hud(Some(plugin_id.to_owned())),
+        methods::HUD_DISMISS => {
+            if state
+                .plugin_registry()
+                .has_capability(plugin_id, PluginCapability::NativeHud)
+            {
+                state.dismiss_hud(Some(plugin_id.to_owned()));
+            }
+        }
         _ if env.ephemeral => {
-            state.emit_plugin_scoped_event_ephemeral(plugin_id, env.event, env.payload);
+            if state
+                .rate_limiter()
+                .check_and_record(plugin_id, RateLimitBucket::HudUpdate)
+            {
+                state.emit_plugin_scoped_event_ephemeral(plugin_id, env.event, env.payload);
+            }
         }
         _ => match limiter.check(Instant::now()) {
             RateDecision::Allow { prev_dropped } => {

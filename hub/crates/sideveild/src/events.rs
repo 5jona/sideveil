@@ -124,7 +124,14 @@ impl HubState {
     }
 
     pub fn send_panel_command(&self, command: PanelCommand) {
-        self.emit_host_event_critical(events::PANEL_COMMAND, &PanelCommandPayload { command });
+        self.emit_host_event_critical(events::PANEL_COMMAND, &PanelCommandPayload::simple(command));
+    }
+
+    pub fn send_panel_reload_plugin(&self, plugin_id: String) {
+        self.emit_host_event_critical(
+            events::PANEL_COMMAND,
+            &PanelCommandPayload::reload_plugin(plugin_id),
+        );
     }
 
     pub fn push_hud_scene(&self, scene: NativeHudScene) {

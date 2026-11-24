@@ -1,15 +1,18 @@
-//! `sideveil-ctl plugins ...` subcommand parser (list, reload, install, invoke, scope, dev, audit).
+//! `sideveil-ctl plugins ...` subcommand router.
 
-use std::fs;
-use std::path::Path;
 use std::time::Duration;
 
 use serde_json::{Value, json};
 use sideveil_protocol::plugin::{MAX_PLUGIN_INVOKE_TIMEOUT_MS, MIN_PLUGIN_INVOKE_TIMEOUT_MS};
 use sideveil_protocol::rpc::methods;
 
-use super::OutputMode;
+use super::plugins_dx_cmd::{
+    ParsedPluginAction, parse_plugins_daemon_logs, parse_plugins_grant, parse_plugins_init,
+    parse_plugins_inspect, parse_plugins_install, parse_plugins_pack, parse_plugins_reload_webview,
+    parse_plugins_validate,
+};
 use super::plugins_embed_cmd::parse_plugins_create_embed;
+use super::{CliAction, OutputMode};
 
 pub(super) struct ParsedPluginCmd {
     pub(super) method: String,
@@ -18,12 +21,34 @@ pub(super) struct ParsedPluginCmd {
     pub(super) io_timeout: Option<Duration>,
 }
 
-pub(super) fn parse_plugins_subcommand(args: &[String]) -> Result<ParsedPluginCmd, (u8, String)> {
+impl From<ParsedPluginCmd> for ParsedPluginAction {
+    fn from(value: ParsedPluginCmd) -> Self {
+        Self {
+            action: CliAction::Rpc {
+                method: value.method,
+                params: value.params,
+                output_mode: value.output_mode,
+            },
+            io_timeout: value.io_timeout,
+        }
+    }
+}
+
+pub(super) fn parse_plugins_subcommand(
+    args: &[String],
+) -> Result<ParsedPluginAction, (u8, String)> {
     let sub = args.first().map_or("list", String::as_str);
     match sub {
-        "list" => Ok(cmd(methods::PLUGINS_LIST, None)),
-        "reload" => Ok(cmd(methods::PLUGINS_RELOAD, None)),
+        "list" => Ok(cmd(methods::PLUGINS_LIST, None).into()),
+        "reload" => Ok(cmd(methods::PLUGINS_RELOAD, None).into()),
         "install" => parse_plugins_install(&args[1..]),
+        "inspect" => parse_plugins_inspect(&args[1..]),
+        "grant" => parse_plugins_grant(&args[1..]),
+        "daemon-logs" => parse_plugins_daemon_logs(&args[1..]),
+        "reload-webview" => parse_plugins_reload_webview(&args[1..]),
+        "validate" => parse_plugins_validate(&args[1..]),
+        "pack" => parse_plugins_pack(&args[1..]),
+        "init" => parse_plugins_init(&args[1..]),
         "uninstall" => {
             let Some(plugin_id) = args.get(1) else {
                 return Err((
@@ -34,10 +59,11 @@ pub(super) fn parse_plugins_subcommand(args: &[String]) -> Result<ParsedPluginCm
             Ok(cmd(
                 methods::PLUGINS_UNINSTALL,
                 Some(json!({ "pluginId": plugin_id })),
-            ))
+            )
+            .into())
         }
-        "create-embed" => parse_plugins_create_embed(&args[1..]),
-        "invoke" => parse_plugins_invoke(&args[1..]),
+        "create-embed" => parse_plugins_create_embed(&args[1..]).map(Into::into),
+        "invoke" => parse_plugins_invoke(&args[1..]).map(Into::into),
         "enable" | "disable" => {
             let Some(plugin_id) = args.get(1) else {
                 return Err((2, format!("Usage: sideveil-ctl plugins {sub} <plugin-id>")));
@@ -48,7 +74,8 @@ pub(super) fn parse_plugins_subcommand(args: &[String]) -> Result<ParsedPluginCm
                     "pluginId": plugin_id,
                     "enabled": sub == "enable",
                 })),
-            ))
+            )
+            .into())
         }
         "priority" => {
             let (Some(plugin_id), Some(raw_priority)) = (args.get(1), args.get(2)) else {
@@ -66,9 +93,10 @@ pub(super) fn parse_plugins_subcommand(args: &[String]) -> Result<ParsedPluginCm
                     "pluginId": plugin_id,
                     "priority": priority,
                 })),
-            ))
+            )
+            .into())
         }
-        "scope" => parse_plugins_scope(&args[1..]),
+        "scope" => parse_plugins_scope(&args[1..]).map(Into::into),
         "dev" => {
             let (Some(plugin_id), Some(second)) = (args.get(1), args.get(2)) else {
                 return Err((
@@ -85,9 +113,10 @@ pub(super) fn parse_plugins_subcommand(args: &[String]) -> Result<ParsedPluginCm
                     "devServerUrl": if clear { Value::Null } else { Value::String(second.clone()) },
                     "clear": clear,
                 })),
-            ))
+            )
+            .into())
         }
-        "audit" => Ok(cmd(methods::PLUGINS_AUDIT, None)),
+        "audit" => Ok(cmd(methods::PLUGINS_AUDIT, None).into()),
         "select" => {
             let Some(plugin_id) = args.get(1) else {
                 return Err((
@@ -102,29 +131,11 @@ pub(super) fn parse_plugins_subcommand(args: &[String]) -> Result<ParsedPluginCm
                     "pluginId": plugin_id,
                     "packageName": pkg,
                 })),
-            ))
+            )
+            .into())
         }
         other => Err((2, format!("Unknown plugins subcommand: {other}"))),
     }
-}
-
-fn parse_plugins_install(args: &[String]) -> Result<ParsedPluginCmd, (u8, String)> {
-    let Some(raw_dir) = args.first() else {
-        return Err((
-            2,
-            "Usage: sideveil-ctl plugins install <source-dir>".to_owned(),
-        ));
-    };
-    let resolved =
-        fs::canonicalize(Path::new(raw_dir)).unwrap_or_else(|_| Path::new(raw_dir).to_path_buf());
-    Ok(ParsedPluginCmd {
-        method: methods::PLUGINS_INSTALL.to_owned(),
-        params: Some(json!({
-            "sourceDir": resolved.to_string_lossy(),
-        })),
-        output_mode: OutputMode::FullEnvelope,
-        io_timeout: Some(Duration::from_secs(15)),
-    })
 }
 
 fn parse_plugins_invoke(args: &[String]) -> Result<ParsedPluginCmd, (u8, String)> {

@@ -129,6 +129,8 @@ def verify_health(dev: DeviceRunner) -> dict:
     assert status.get("gestureMonitorActive") is True, f"Gesture monitor inactive: {status}"
     assert status.get("taskListenerActive") is True, f"Task listener inactive: {status}"
     assert status.get("overlayPermissionGranted") is True, f"Overlay permission missing: {status}"
+    assert int(status.get("protocolVersion") or 0) >= 1, f"Missing protocolVersion: {status}"
+    assert int(status.get("pluginApiVersion") or 0) >= 1, f"Missing pluginApiVersion: {status}"
     print(
         f"[OK] ({dev.mode}) health/status: hub_pid={status['pid']} "
         f"sensor_pid={status.get('sensorPid')} host_pid={status.get('hostPid')} "

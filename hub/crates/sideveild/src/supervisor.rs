@@ -3,9 +3,19 @@
 //! Supervises the thin UID 1000 Kotlin `:sensor` child directly (no `su` wrapper),
 //! bundled native plugin daemons, and the AMS-managed `SideVeilHost` foreground service.
 
+mod daemon_spawn;
+mod daemon_state;
+mod daemon_worker;
 mod host_wake;
 mod plugin_daemons;
 mod sensor;
+
+pub use self::daemon_state::{DaemonRuntimeInfo, MAX_DAEMON_STDERR_LINES, PluginDaemonManager};
+#[cfg(test)]
+pub(crate) use self::plugin_daemons::run_daemon_supervisor_loop;
+
+#[cfg(test)]
+mod tests;
 
 use std::io;
 use std::path::PathBuf;
@@ -15,7 +25,7 @@ use std::time::Duration;
 use tokio::sync::{mpsc, watch};
 
 use self::host_wake::{force_stop_host, wake_host_service};
-use self::plugin_daemons::run_perf_hud_supervisor;
+use self::plugin_daemons::run_plugin_daemon_supervisor;
 use self::sensor::run_sensor_supervisor;
 use crate::pidfd::PidFd;
 use crate::state::{HostWakeSignal, HubState};
@@ -45,13 +55,13 @@ pub fn spawn_supervisors(
         Arc::clone(&state),
         shutdown_rx.clone(),
     ));
-    let perf_hud_handle = tokio::spawn(run_perf_hud_supervisor(
+    let plugin_daemons_handle = tokio::spawn(run_plugin_daemon_supervisor(
         cfg.clone(),
         Arc::clone(&state),
         shutdown_rx.clone(),
     ));
     let host_handle = tokio::spawn(run_host_supervisor(cfg, state, host_wake_rx, shutdown_rx));
-    vec![sensor_handle, perf_hud_handle, host_handle]
+    vec![sensor_handle, plugin_daemons_handle, host_handle]
 }
 
 async fn run_host_supervisor(

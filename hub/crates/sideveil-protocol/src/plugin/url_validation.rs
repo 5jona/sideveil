@@ -1,7 +1,8 @@
-//! RFC1918/LAN network URL validation for web-embed targets and plugin allowlists.
+//! Network URL and capability-scoped origin validation for web-embeds and plugin allowlists.
 
 use std::net::{Ipv4Addr, Ipv6Addr};
 
+use super::PluginCapability;
 use super::validation::ManifestValidationError;
 
 /// Validates an HTTP(S) URL for web-embed targets or network allowlists.
@@ -12,6 +13,51 @@ pub fn validate_network_url(
     raw: &str,
     allow_cleartext: bool,
 ) -> Result<String, ManifestValidationError> {
+    let (trimmed, _host) = parse_and_validate_url(raw, allow_cleartext, false)?;
+    Ok(trimmed)
+}
+
+/// Validates a `network.allowedOrigins` entry (`http(s)://` or `ws(s)://`) against declared
+/// `network-loopback`, `network-lan`, and `network-internet` capabilities.
+pub fn validate_origin_for_capabilities(
+    raw: &str,
+    allow_cleartext: bool,
+    capabilities: &[PluginCapability],
+) -> Result<String, ManifestValidationError> {
+    let (trimmed, host) = parse_and_validate_url(raw, allow_cleartext, true)?;
+    let has_loopback = capabilities.contains(&PluginCapability::NetworkLoopback);
+    let has_lan = capabilities.contains(&PluginCapability::NetworkLan);
+    let has_internet = capabilities.contains(&PluginCapability::NetworkInternet);
+
+    if is_loopback_host(&host) {
+        if !(has_loopback || has_lan) {
+            return Err(ManifestValidationError::OriginCapabilityMismatch {
+                url: trimmed,
+                required: "network-loopback (or network-lan)",
+            });
+        }
+    } else if is_private_or_lan_host(&host) {
+        if !has_lan {
+            return Err(ManifestValidationError::OriginCapabilityMismatch {
+                url: trimmed,
+                required: "network-lan",
+            });
+        }
+    } else if !has_internet {
+        return Err(ManifestValidationError::OriginCapabilityMismatch {
+            url: trimmed,
+            required: "network-internet",
+        });
+    }
+
+    Ok(trimmed)
+}
+
+fn parse_and_validate_url(
+    raw: &str,
+    allow_cleartext: bool,
+    allow_ws_schemes: bool,
+) -> Result<(String, String), ManifestValidationError> {
     let trimmed = raw.trim();
     if trimmed.is_empty()
         || trimmed
@@ -25,14 +71,23 @@ pub fn validate_network_url(
         });
     }
 
-    let (is_http, rest) = if let Some(r) = trimmed.strip_prefix("https://") {
+    let (is_cleartext, rest) = if let Some(r) = trimmed.strip_prefix("https://") {
         (false, r)
     } else if let Some(r) = trimmed.strip_prefix("http://") {
         (true, r)
+    } else if allow_ws_schemes && let Some(r) = trimmed.strip_prefix("wss://") {
+        (false, r)
+    } else if allow_ws_schemes && let Some(r) = trimmed.strip_prefix("ws://") {
+        (true, r)
     } else {
+        let expected = if allow_ws_schemes {
+            "http://, https://, ws://, or wss://"
+        } else {
+            "http:// or https://"
+        };
         return Err(ManifestValidationError::InvalidUrl {
             url: trimmed.to_owned(),
-            reason: "URL scheme must be http:// or https://".to_owned(),
+            reason: format!("URL scheme must be {expected}"),
         });
     };
 
@@ -47,7 +102,7 @@ pub fn validate_network_url(
 
     let host = extract_and_validate_host(authority, trimmed)?;
 
-    if is_http {
+    if is_cleartext {
         if !is_private_or_lan_host(host) {
             return Err(ManifestValidationError::PublicCleartextForbidden(
                 trimmed.to_owned(),
@@ -60,17 +115,35 @@ pub fn validate_network_url(
         }
     }
 
-    Ok(trimmed.to_owned())
+    Ok((trimmed.to_owned(), host.to_owned()))
 }
 
-/// Returns `true` when `host` is a loopback, RFC1918 private IPv4, private/link-local IPv6,
-/// or local mDNS/LAN hostname (`.lan`, `.local`, `.localhost`, `.home.arpa`).
+/// Returns `true` when `host` is strictly loopback (`localhost`, `*.localhost`, `127.0.0.0/8`, `::1`,
+/// or IPv4-mapped loopback `::ffff:127.0.0.0/104`).
+#[must_use]
+pub fn is_loopback_host(host: &str) -> bool {
+    let lower = host.to_ascii_lowercase();
+    if lower == "localhost" || has_nonempty_label_before_suffix(&lower, ".localhost") {
+        return true;
+    }
+    if let Ok(ip) = lower.parse::<Ipv4Addr>() {
+        return ip.is_loopback();
+    }
+    if let Ok(ip) = lower.parse::<Ipv6Addr>() {
+        return ip.is_loopback() || ip.to_ipv4_mapped().is_some_and(|v4| v4.is_loopback());
+    }
+    false
+}
+
+/// Returns `true` when `host` is a loopback, RFC1918 private IPv4, IPv4-mapped private IPv6,
+/// ULA/link-local IPv6, or local mDNS/LAN hostname (`.lan`, `.local`, `.localhost`, `.internal`, `.home.arpa`).
 #[must_use]
 pub fn is_private_or_lan_host(host: &str) -> bool {
+    if is_loopback_host(host) {
+        return true;
+    }
     let lower = host.to_ascii_lowercase();
-    if lower == "localhost"
-        || has_nonempty_label_before_suffix(&lower, ".localhost")
-        || has_nonempty_label_before_suffix(&lower, ".lan")
+    if has_nonempty_label_before_suffix(&lower, ".lan")
         || has_nonempty_label_before_suffix(&lower, ".local")
         || has_nonempty_label_before_suffix(&lower, ".internal")
         || has_nonempty_label_before_suffix(&lower, ".home.arpa")
@@ -79,20 +152,29 @@ pub fn is_private_or_lan_host(host: &str) -> bool {
     }
 
     if let Ok(ip) = lower.parse::<Ipv4Addr>() {
-        let [a, b, _, _] = ip.octets();
-        return a == 127
-            || a == 10
-            || (a == 172 && (16..=31).contains(&b))
-            || (a == 192 && b == 168)
-            || (a == 169 && b == 254);
+        return is_private_or_special_ipv4(ip);
     }
 
     if let Ok(ip) = lower.parse::<Ipv6Addr>() {
+        if let Some(v4) = ip.to_ipv4_mapped() {
+            return is_private_or_special_ipv4(v4);
+        }
         let seg0 = ip.segments()[0];
-        return ip.is_loopback() || (seg0 & 0xfe00) == 0xfc00 || (seg0 & 0xffc0) == 0xfe80;
+        return ip.is_unspecified() || (seg0 & 0xfe00) == 0xfc00 || (seg0 & 0xffc0) == 0xfe80;
     }
 
     false
+}
+
+fn is_private_or_special_ipv4(ip: Ipv4Addr) -> bool {
+    let [a, b, _, _] = ip.octets();
+    ip.is_loopback()
+        || ip.is_unspecified()
+        || a == 0
+        || a == 10
+        || (a == 172 && (16..=31).contains(&b))
+        || (a == 192 && b == 168)
+        || (a == 169 && b == 254)
 }
 
 fn has_nonempty_label_before_suffix(host: &str, suffix: &str) -> bool {
@@ -150,6 +232,23 @@ fn extract_and_validate_host<'a>(
         return Err(ManifestValidationError::InvalidUrl {
             url: full_url.to_owned(),
             reason: "invalid host name".to_owned(),
+        });
+    }
+
+    if let Ok(v4) = host.parse::<Ipv4Addr>()
+        && v4.is_unspecified()
+    {
+        return Err(ManifestValidationError::InvalidUrl {
+            url: full_url.to_owned(),
+            reason: "unspecified IPv4 address (0.0.0.0) is forbidden".to_owned(),
+        });
+    }
+    if let Ok(v6) = host.parse::<Ipv6Addr>()
+        && (v6.is_unspecified() || v6.to_ipv4_mapped().is_some_and(|v4| v4.is_unspecified()))
+    {
+        return Err(ManifestValidationError::InvalidUrl {
+            url: full_url.to_owned(),
+            reason: "unspecified IPv6 address (::) is forbidden".to_owned(),
         });
     }
 

@@ -6,8 +6,8 @@
 #
 # Options:
 #   --mode <debug|release>  Build mode (default: debug).
-#                           debug:   packages all bundled source-level test plugins
-#                                    (toggleable at runtime via debug.setRuntimeMode).
+#                           debug:   packages bundled reference example plugins under plugins/
+#                                    (disabled by default; enable/approve via Control Plane or CLI).
 #                           release: builds a lean archive skipping example.vello-scope
 #                                    and example.native-perf-hud binaries/assets.
 #
@@ -60,7 +60,7 @@ APK_SRC="${ANDROID_DIR}/host-app/build/outputs/apk/release/host-app-release.apk"
 APK_DST="${SCRIPT_DIR}/system/priv-app/SideVeilHost/SideVeilHost.apk"
 HUB_DST="${SCRIPT_DIR}/bin/sideveild"
 CTL_DST="${SCRIPT_DIR}/bin/sideveil-ctl"
-PERF_HUD_DST="${SCRIPT_DIR}/bin/sideveil-example-perf-hud"
+PERF_HUD_BIN="${SCRIPT_DIR}/examples/native-perf-hud/target/aarch64-linux-android/release/sideveil-example-perf-hud"
 HUD_JNI_DST="${ANDROID_DIR}/host-app/src/main/jniLibs/arm64-v8a/libsideveil_hud.so"
 DEX_DST="${SCRIPT_DIR}/bin/sideveil-sensor.dex"
 OUTPUT_DIR="${SCRIPT_DIR}/out"
@@ -93,8 +93,6 @@ if [ "${BUILD_MODE}" = "debug" ]; then
         run_in_env cargo clippy --all-targets -- -D warnings
         run_in_env cargo build --release --target aarch64-linux-android
     )
-    cp "${SCRIPT_DIR}/examples/native-perf-hud/target/aarch64-linux-android/release/sideveil-example-perf-hud" "${PERF_HUD_DST}"
-    chmod 0755 "${PERF_HUD_DST}"
 else
     echo "[*] Release mode: skipping bundled example plugin daemon (sideveil-example-perf-hud)."
 fi
@@ -126,7 +124,7 @@ echo "[*] Compiling Android modules (spotlessCheck, detekt, lintDebug, unit test
 
 REQUIRED_ARTIFACTS=("${HUB_DST}" "${CTL_DST}" "${DEX_DST}" "${APK_SRC}")
 if [ "${BUILD_MODE}" = "debug" ]; then
-    REQUIRED_ARTIFACTS+=("${PERF_HUD_DST}")
+    REQUIRED_ARTIFACTS+=("${PERF_HUD_BIN}")
 fi
 
 for required in "${REQUIRED_ARTIFACTS[@]}"; do
@@ -168,8 +166,6 @@ explicit_files = [
     ("bin/sideveil-ctl", 0o755),
     ("bin/sideveil-sensor.dex", 0o644),
 ]
-if build_mode == "debug":
-    explicit_files.append(("bin/sideveil-example-perf-hud", 0o755))
 
 bundled_plugins = []
 for raw_entry in os.environ.get("BUNDLED_PLUGINS_SPEC", "").splitlines():
@@ -223,6 +219,11 @@ with zipfile.ZipFile(output_zip, "w", zipfile.ZIP_DEFLATED) as zf:
                     full_path = os.path.join(root, fname)
                     rel_web = os.path.relpath(full_path, src_base).replace(os.sep, "/")
                     write_file(zf, full_path, f"{dst_prefix}/{rel_web}", 0o644)
+        if dst_prefix == "plugins/example.native-perf-hud":
+            perf_bin = "${PERF_HUD_BIN}"
+            if not os.path.isfile(perf_bin):
+                raise FileNotFoundError(f"Bundled daemon binary missing: {perf_bin}")
+            write_file(zf, perf_bin, f"{dst_prefix}/bin/sideveil-example-perf-hud", 0o755)
 
 print("[+] Packaged module archive:", output_zip)
 EOF

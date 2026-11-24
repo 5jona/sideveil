@@ -197,13 +197,40 @@ impl NativeHudScene {
             hud_defaults::DEFAULT_ANCHOR_Y_PERCENT,
         );
         out.primitives.truncate(MAX_HUD_PRIMITIVES);
+        for primitive in &mut out.primitives {
+            match primitive {
+                HudPrimitive::Sparkline { values, .. } => {
+                    values.truncate(MAX_SPARKLINE_POINTS);
+                }
+                HudPrimitive::Path { d, .. } if d.len() > MAX_HUD_PATH_BYTES => {
+                    truncate_utf8(d, MAX_HUD_PATH_BYTES);
+                }
+                _ => {}
+            }
+        }
         out.texts.truncate(MAX_HUD_TEXTS);
+        for text_item in &mut out.texts {
+            if text_item.text.len() > MAX_HUD_TEXT_BYTES {
+                truncate_utf8(&mut text_item.text, MAX_HUD_TEXT_BYTES);
+            }
+        }
         out
     }
 }
 
+fn truncate_utf8(s: &mut String, max_bytes: usize) {
+    let mut end = max_bytes.min(s.len());
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    s.truncate(end);
+}
+
 pub const MAX_HUD_PRIMITIVES: usize = hud_defaults::MAX_PRIMITIVES;
 pub const MAX_HUD_TEXTS: usize = hud_defaults::MAX_TEXTS;
+pub const MAX_SPARKLINE_POINTS: usize = 256;
+pub const MAX_HUD_PATH_BYTES: usize = 4096;
+pub const MAX_HUD_TEXT_BYTES: usize = 256;
 
 fn default_stroke_width() -> f32 {
     hud_defaults::DEFAULT_STROKE_WIDTH

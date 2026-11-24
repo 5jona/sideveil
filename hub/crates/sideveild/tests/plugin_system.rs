@@ -46,11 +46,7 @@ fn temp_test_dir(tag: &str) -> PathBuf {
 fn write_plugin(dir: &Path, id: &str, manifest: Value, html: &str) {
     let root = dir.join(id);
     fs::create_dir_all(root.join("web")).expect("mkdir web");
-    fs::write(
-        root.join("manifest.json"),
-        serde_json::to_string_pretty(&manifest).unwrap(),
-    )
-    .expect("write manifest");
+    fs::write(root.join("manifest.json"), manifest.to_string()).expect("write manifest");
     fs::write(root.join("web/index.html"), html).expect("write index.html");
 }
 
@@ -254,6 +250,7 @@ async fn plugin_registry_assets_backend_rpc_and_acls_work_end_to_end() {
     let hello = serde_json::to_string(&UdsClientHello::PluginBackend {
         plugin_id: "com.example.alpha".to_owned(),
         package_name: None,
+        protocol_version: 1,
     })
     .unwrap();
     bw.write_all(format!("{hello}\n").as_bytes()).await.unwrap();
@@ -291,7 +288,16 @@ async fn plugin_registry_assets_backend_rpc_and_acls_work_end_to_end() {
     );
     backend_echo_task.await.unwrap();
 
-    // 4. Verify capability ACLs: Alpha has storage (not system-exec); Beta has system-exec (not storage).
+    for id in ["com.example.alpha", "com.example.beta"] {
+        let params = Some(json!({ "pluginId": id, "grantAllPending": true }));
+        let resp = rpc::dispatch_rpc_request(
+            &state,
+            RpcRequest::new("g", methods::PLUGINS_GRANT_CAPABILITIES, params),
+            RpcCaller::Ctl,
+        )
+        .await;
+        assert!(resp.error.is_none());
+    }
     let mut write_req = RpcRequest::new(
         "fs-1",
         methods::FS_WRITE_ATOMIC,
@@ -304,7 +310,6 @@ async fn plugin_registry_assets_backend_rpc_and_acls_work_end_to_end() {
             .error
             .is_none()
     );
-
     let mut read_req = RpcRequest::new(
         "fs-2",
         methods::FS_READ,
@@ -313,8 +318,6 @@ async fn plugin_registry_assets_backend_rpc_and_acls_work_end_to_end() {
     read_req.plugin_id = Some("com.example.alpha".to_owned());
     let read_resp = rpc::dispatch_rpc_request(&state, read_req, RpcCaller::HostWebView).await;
     assert_eq!(read_resp.result, Some(json!({ "content": "{\"v\":1}" })));
-
-    // Path traversal inside fs.read must fail with PERMISSION_DENIED.
     let mut bad_read = RpcRequest::new(
         "fs-3",
         methods::FS_READ,

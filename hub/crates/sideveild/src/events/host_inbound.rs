@@ -3,11 +3,13 @@
 use std::sync::PoisonError;
 
 use serde_json::json;
+use sideveil_protocol::PROTOCOL_VERSION;
 use sideveil_protocol::config::PanelState;
 use sideveil_protocol::plugin::{HostPluginDiagnosticsPayload, PluginSelectParams};
 use sideveil_protocol::rpc::{
-    HostEventEnvelope, HostFullscreenChangedPayload, HostHelloPayload, HostWebViewConsolePayload,
-    HostWebViewCrashPayload, HostWebViewErrorPayload, PanelStateChangedPayload, events,
+    HostEventEnvelope, HostFullscreenChangedPayload, HostHelloPayload, HostLocalAuditPayload,
+    HostWebViewConsolePayload, HostWebViewCrashPayload, HostWebViewErrorPayload,
+    PanelStateChangedPayload, events,
 };
 use sideveil_protocol::theme::HostDynamicColorsPayload;
 
@@ -26,9 +28,18 @@ impl HubState {
                         rt.host_pid = Some(hello.pid);
                         rt.cross_window_blur_supported = Some(hello.cross_window_blur_supported);
                     }
+                    if hello.protocol_version != PROTOCOL_VERSION {
+                        self.logs().warn(format!(
+                            "Host hello protocolVersion={} differs from hub protocolVersion={PROTOCOL_VERSION}",
+                            hello.protocol_version
+                        ));
+                    }
                     self.logs().info(format!(
-                        "Host hello pid={} version={} blurSupported={}",
-                        hello.pid, hello.version, hello.cross_window_blur_supported
+                        "Host hello pid={} version={} protocolVersion={} blurSupported={}",
+                        hello.pid,
+                        hello.version,
+                        hello.protocol_version,
+                        hello.cross_window_blur_supported
                     ));
                     self.send_host_wake(HostWakeSignal::WatchHostPid(hello.pid));
                 }
@@ -116,6 +127,18 @@ impl HubState {
                             }),
                         );
                     }
+                }
+            }
+            events::HOST_LOCAL_AUDIT => {
+                if let Some(payload) = envelope.payload
+                    && let Ok(entry) = serde_json::from_value::<HostLocalAuditPayload>(payload)
+                {
+                    self.audit().record(
+                        entry.plugin_id,
+                        entry.method,
+                        entry.allowed,
+                        entry.detail.unwrap_or_default(),
+                    );
                 }
             }
             events::HOST_SELECT_PLUGIN => {

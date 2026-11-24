@@ -2,9 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::RuntimeMode;
 use crate::generated::protocol_constants::timeouts;
-use crate::plugin::PluginsSnapshotPayload;
 
 /// Minimum configurable `debug.inspectUi` timeout in milliseconds.
 pub const MIN_INSPECT_UI_TIMEOUT_MS: u64 = timeouts::MIN_INSPECT_UI_MS;
@@ -36,28 +34,6 @@ impl DebugInspectUiParams {
 #[serde(rename_all = "camelCase")]
 pub struct DebugSetWebViewDebuggingParams {
     pub enabled: bool,
-}
-
-/// Request parameters for `debug.setRuntimeMode`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DebugSetRuntimeModeParams {
-    /// Target runtime mode (`release` or `debug`).
-    pub runtime_mode: RuntimeMode,
-}
-
-/// Result payload returned by `debug.setRuntimeMode`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DebugSetRuntimeModeResult {
-    /// Whether the mode change succeeded.
-    pub ok: bool,
-    /// Newly active runtime mode.
-    pub runtime_mode: RuntimeMode,
-    /// Runtime mode active immediately prior to this call.
-    pub previous_mode: RuntimeMode,
-    /// Freshly re-evaluated plugin snapshot under the new runtime mode.
-    pub snapshot: PluginsSnapshotPayload,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -13,12 +13,15 @@ pub use self::payloads::*;
 pub use crate::sensor::DebugGestureStats;
 
 /// JSON-RPC 2.0 error object returned in a failed [`RpcResponse`].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RpcError {
     /// Numeric JSON-RPC or SideVeil-specific error code.
     pub code: i32,
     /// Human-readable diagnostic message.
     pub message: String,
+    /// Optional structured diagnostic payload attached to the error.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<Value>,
 }
 
 /// JSON-RPC 2.0 request frame exchanged across `hub.sock`, `app.sock`, and Host WebSocket.
@@ -76,6 +79,17 @@ impl RpcResponse {
     /// Constructs a JSON-RPC 2.0 error response for `id`.
     #[must_use]
     pub fn err(id: impl Into<String>, code: i32, message: impl Into<String>) -> Self {
+        Self::err_with_data(id, code, message, None)
+    }
+
+    /// Constructs a JSON-RPC 2.0 error response for `id` with optional structured `data`.
+    #[must_use]
+    pub fn err_with_data(
+        id: impl Into<String>,
+        code: i32,
+        message: impl Into<String>,
+        data: Option<Value>,
+    ) -> Self {
         Self {
             jsonrpc: default_jsonrpc(),
             id: id.into(),
@@ -83,6 +97,7 @@ impl RpcResponse {
             error: Some(RpcError {
                 code,
                 message: message.into(),
+                data,
             }),
         }
     }

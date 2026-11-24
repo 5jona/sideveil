@@ -8,6 +8,7 @@ use serde_json::Value;
 use sideveil_protocol::config::PanelState;
 use sideveil_protocol::rpc::{DaemonHealth, DaemonStatus, RpcRequest, RpcResponse, error_codes};
 use sideveil_protocol::sensor::HubToSensor;
+use sideveil_protocol::{PLUGIN_API_VERSION, PROTOCOL_VERSION};
 use tokio::sync::{mpsc, oneshot};
 
 use super::HubState;
@@ -56,17 +57,21 @@ impl HubState {
             .unwrap_or_else(PoisonError::into_inner)
             .clone();
         let online = self.backends.online_ids();
-        let plugins_snap = self.plugins.snapshot(
+        let daemons = self.daemon_manager.snapshot_all();
+        let plugins_snap = self.plugins.snapshot_with_daemons(
             &snap.foreground_package,
             &snap.foreground_activity,
             &cfg,
             &online,
+            &daemons,
         );
         let scope_active = !plugins_snap.matched_plugin_ids.is_empty();
         DaemonStatus {
             pid: std::process::id(),
             uid: current_uid(),
             uptime_ms: self.uptime_ms(),
+            protocol_version: PROTOCOL_VERSION,
+            plugin_api_version: PLUGIN_API_VERSION,
             config_version: cfg.version,
             enabled: cfg.enabled,
             scope_active,
@@ -243,6 +248,30 @@ impl HubState {
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
         pending.clear();
+    }
+
+    /// Records the PID of the currently supervised `:sensor` child process (or `None` when stopped).
+    pub fn set_supervised_sensor_pid(&self, pid: Option<u32>) {
+        let mut rt = self.runtime.write().unwrap_or_else(PoisonError::into_inner);
+        rt.supervised_sensor_pid = pid;
+    }
+
+    /// Verifies that an incoming `:sensor` peer PID matches the Hub-supervised `:sensor` child
+    /// whenever supervision is active.
+    pub fn verify_sensor_peer_pid(&self, peer_pid: Option<u32>) -> Result<(), String> {
+        let expected = self
+            .runtime
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .supervised_sensor_pid;
+        if let Some(expected_pid) = expected
+            && peer_pid != Some(expected_pid)
+        {
+            return Err(format!(
+                "sensor peer pid {peer_pid:?} does not match supervised sensor pid {expected_pid}"
+            ));
+        }
+        Ok(())
     }
 
     pub fn register_sensor_session(&self, sender: mpsc::UnboundedSender<HubToSensor>) -> u64 {

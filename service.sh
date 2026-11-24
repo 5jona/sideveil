@@ -151,19 +151,6 @@ if [ ! -f "$LIVE_CONFIG" ] && [ -f "$MODULE_CONFIG" ]; then
     chmod 0644 "$LIVE_CONFIG"
 fi
 
-if [ -d "${MODDIR}/plugins" ]; then
-    for pdir in "${MODDIR}/plugins"/*; do
-        [ -d "$pdir" ] || continue
-        pname="${pdir##*/}"
-        if [ ! -f "${PLUGINS_DIR}/${pname}/manifest.json" ]; then
-            cp -r "$pdir" "${PLUGINS_DIR}/${pname}"
-            chown -R 0:1000 "${PLUGINS_DIR}/${pname}"
-            find "${PLUGINS_DIR}/${pname}" -type d -exec chmod 0755 {} +
-            find "${PLUGINS_DIR}/${pname}" -type f -exec chmod 0644 {} +
-        fi
-    done
-fi
-
 if [ ! -x "$HUB_BIN" ]; then
     log_info "Error: $HUB_BIN not found or not executable."
     exit 1

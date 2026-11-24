@@ -1,5 +1,6 @@
 //! Open plugin manifest schema, trigger rules, overrides, and capability ACL definitions.
 
+mod capabilities;
 mod rpc_params;
 mod url_validation;
 mod validation;
@@ -9,117 +10,33 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub use rpc_params::*;
-pub use url_validation::{is_private_or_lan_host, validate_network_url};
-pub use validation::{ManifestValidationError, validate_plugin_id};
+pub use self::rpc_params::*;
+pub use self::url_validation::{
+    is_loopback_host, is_private_or_lan_host, validate_network_url,
+    validate_origin_for_capabilities,
+};
+pub use self::validation::{
+    ManifestValidationError, is_forbidden_daemon_env_key, validate_android_package_name,
+    validate_daemon_binary_path, validate_plugin_id,
+};
+pub use crate::generated::plugin_manifest::{
+    CapabilityRiskTier, PluginApprovalStatus, PluginBackendKind, PluginBackendState,
+    PluginCapability, PluginDaemonRestartPolicy, PluginDaemonSpec, PluginDaemonStatus,
+    PluginEmbedPrefs, PluginManifest, PluginManifestEmbedPrefs, PluginManifestNetworkPrefs,
+    PluginManifestSurfacePrefs, PluginManifestTriggers, PluginNetworkPrefs, PluginOrigin,
+    PluginPresentationMode, PluginRuntimeDescriptor, PluginScopeOverride, PluginSurfaceBackdrop,
+    PluginSurfacePrefs,
+};
+use crate::{MANIFEST_SCHEMA_VERSION, PLUGIN_API_VERSION};
 
-fn default_true() -> bool {
-    true
-}
+/// Backward-compatible alias for [`PluginRuntimeDescriptor`].
+pub type PluginDescriptor = PluginRuntimeDescriptor;
 
 /// Canonical identifier for the built-in diagnostic panel plugin.
 pub const BUILTIN_DIAG_PLUGIN_ID: &str =
     crate::generated::protocol_constants::builtin_diagnostic::ID;
 
-/// Returns `true` when `id` is one of the canonical source-level built-in test plugins
-/// gated by [`crate::config::RuntimeMode`].
-#[must_use]
-pub fn is_builtin_test_plugin(id: &str) -> bool {
-    use crate::generated::protocol_constants::builtin_test_plugins as test_plugins;
-    matches!(
-        id,
-        test_plugins::DIAGNOSTIC | test_plugins::VELLO_SCOPE | test_plugins::NATIVE_PERF_HUD
-    )
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum PluginBackendKind {
-    #[default]
-    None,
-    UdsNative,
-    UdsApp,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum PluginBackendState {
-    #[default]
-    None,
-    Online,
-    Offline,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum PluginCapability {
-    Storage,
-    Toast,
-    SystemExec,
-    NativeHud,
-    Clipboard,
-    Haptics,
-    Telemetry,
-    InterPluginBus,
-    NetworkLoopback,
-    NetworkLan,
-    NetworkContext,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PluginEmbedPrefs {
-    pub url: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub remote_url: Option<String>,
-    #[serde(default)]
-    pub lan_ssids: Vec<String>,
-    #[serde(default)]
-    pub allowed_origins: Vec<String>,
-    #[serde(default)]
-    pub allow_cleartext: bool,
-    #[serde(default = "default_true")]
-    pub wide_viewport: bool,
-    #[serde(default)]
-    pub allow_zoom: bool,
-    #[serde(default = "default_true")]
-    pub web_history_back: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub text_zoom: Option<i32>,
-    #[serde(default = "default_true")]
-    pub show_toolbar: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub keep_alive_grace_sec: Option<i32>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct PluginNetworkPrefs {
-    pub allowed_origins: Vec<String>,
-    pub allow_cleartext: bool,
-    pub spa_fallback: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum PluginSurfaceBackdrop {
-    #[default]
-    NativeGlass,
-    Transparent,
-    Opaque,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum PluginPresentationMode {
-    #[default]
-    Drawer,
-    Peek,
-    Pinned,
-    Wide,
-    NativeHud,
-}
-
+/// Normalized foreground trigger rules derived from [`PluginManifest`].
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct PluginTriggers {
@@ -129,86 +46,130 @@ pub struct PluginTriggers {
     pub priority: i32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct PluginSurfacePrefs {
-    pub backdrop: PluginSurfaceBackdrop,
-    pub presentation: PluginPresentationMode,
-    pub cross_origin_isolated: bool,
-    pub keep_alive: bool,
-    pub width_dp: Option<i32>,
-    pub height_percent: Option<i32>,
+impl PluginDaemonSpec {
+    /// Returns the effective restart policy, defaulting to [`PluginDaemonRestartPolicy::OnFailure`].
+    #[must_use]
+    pub fn effective_restart_policy(&self) -> PluginDaemonRestartPolicy {
+        self.restart_policy
+            .unwrap_or(PluginDaemonRestartPolicy::OnFailure)
+    }
+
+    /// Returns the effective maximum restart count within the circuit-breaker window.
+    #[must_use]
+    pub fn effective_max_restarts(&self) -> u32 {
+        self.max_restarts.unwrap_or(5).clamp(1, 50)
+    }
+
+    /// Returns the effective initial backoff delay in milliseconds (`100..=60_000`).
+    #[must_use]
+    pub fn effective_backoff_ms(&self) -> u64 {
+        self.backoff_ms.unwrap_or(1_000).clamp(100, 60_000)
+    }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PluginManifest {
-    pub id: String,
-    pub name: String,
-    pub version: String,
-    #[serde(default)]
-    pub icon: Option<String>,
-    #[serde(default)]
-    pub triggers: PluginTriggers,
-    #[serde(default)]
-    pub entry: String,
-    #[serde(default)]
-    pub backend: PluginBackendKind,
-    #[serde(default)]
-    pub capabilities: Vec<PluginCapability>,
-    #[serde(default)]
-    pub surface: PluginSurfacePrefs,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub embed: Option<PluginEmbedPrefs>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub network: Option<PluginNetworkPrefs>,
+impl PluginManifest {
+    /// Returns the declared manifest schema version, defaulting to [`MANIFEST_SCHEMA_VERSION`].
+    #[must_use]
+    pub fn effective_schema_version(&self) -> u32 {
+        self.schema_version.unwrap_or(MANIFEST_SCHEMA_VERSION)
+    }
+
+    /// Returns the declared plugin API version, defaulting to [`PLUGIN_API_VERSION`].
+    #[must_use]
+    pub fn effective_api_version(&self) -> u32 {
+        self.api_version.unwrap_or(PLUGIN_API_VERSION)
+    }
+
+    /// Returns the declared default-enabled state (defaults to `true`).
+    #[must_use]
+    pub fn effective_default_enabled(&self) -> bool {
+        self.default_enabled.unwrap_or(true)
+    }
+
+    /// Returns the declared entry path (empty string when omitted, e.g., web-embed plugins).
+    #[must_use]
+    pub fn effective_entry(&self) -> &str {
+        self.entry.as_deref().unwrap_or("")
+    }
+
+    /// Returns the declared backend kind (defaults to [`PluginBackendKind::None`]).
+    #[must_use]
+    pub fn effective_backend(&self) -> PluginBackendKind {
+        self.backend.unwrap_or(PluginBackendKind::None)
+    }
+
+    /// Returns the declared capability slice.
+    #[must_use]
+    pub fn effective_capabilities(&self) -> &[PluginCapability] {
+        self.capabilities.as_deref().unwrap_or(&[])
+    }
+
+    /// Returns the explicit Android package allowlist for `uds-app` backends.
+    #[must_use]
+    pub fn effective_backend_packages(&self) -> &[String] {
+        self.backend_packages.as_deref().unwrap_or(&[])
+    }
+
+    /// Normalizes optional manifest trigger fields into [`PluginTriggers`].
+    #[must_use]
+    pub fn effective_triggers(&self) -> PluginTriggers {
+        match &self.triggers {
+            Some(t) => PluginTriggers {
+                packages: t.packages.clone().unwrap_or_default(),
+                activities: t.activities.clone().unwrap_or_default(),
+                global: t.global.unwrap_or(false),
+                priority: t.priority.unwrap_or(0).clamp(-1000, 1000),
+            },
+            None => PluginTriggers::default(),
+        }
+    }
+
+    /// Normalizes optional manifest surface preferences into [`PluginSurfacePrefs`].
+    #[must_use]
+    pub fn effective_surface(&self) -> PluginSurfacePrefs {
+        match &self.surface {
+            Some(s) => PluginSurfacePrefs {
+                backdrop: s.backdrop.unwrap_or(PluginSurfaceBackdrop::NativeGlass),
+                presentation: s.presentation.unwrap_or(PluginPresentationMode::Drawer),
+                cross_origin_isolated: s.cross_origin_isolated.unwrap_or(false),
+                keep_alive: s.keep_alive.unwrap_or(false),
+                width_dp: s.width_dp,
+                height_percent: s.height_percent,
+            },
+            None => PluginSurfacePrefs::default(),
+        }
+    }
+
+    /// Normalizes optional manifest embed preferences into [`PluginEmbedPrefs`].
+    #[must_use]
+    pub fn effective_embed(&self) -> Option<PluginEmbedPrefs> {
+        self.embed.as_ref().map(|e| PluginEmbedPrefs {
+            url: e.url.clone(),
+            remote_url: e.remote_url.clone(),
+            lan_ssids: e.lan_ssids.clone().unwrap_or_default(),
+            allowed_origins: e.allowed_origins.clone().unwrap_or_default(),
+            allow_cleartext: e.allow_cleartext.unwrap_or(false),
+            wide_viewport: e.wide_viewport.unwrap_or(true),
+            allow_zoom: e.allow_zoom.unwrap_or(false),
+            web_history_back: e.web_history_back.unwrap_or(true),
+            text_zoom: e.text_zoom,
+            show_toolbar: e.show_toolbar.unwrap_or(true),
+            keep_alive_grace_sec: e.keep_alive_grace_sec,
+        })
+    }
+
+    /// Normalizes optional manifest network preferences into [`PluginNetworkPrefs`].
+    #[must_use]
+    pub fn effective_network(&self) -> Option<PluginNetworkPrefs> {
+        self.network.as_ref().map(|n| PluginNetworkPrefs {
+            allowed_origins: n.allowed_origins.clone().unwrap_or_default(),
+            allow_cleartext: n.allow_cleartext.unwrap_or(false),
+            spa_fallback: n.spa_fallback.unwrap_or(false),
+        })
+    }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PluginSummary {
-    pub id: String,
-    pub name: String,
-    pub version: String,
-    pub enabled: bool,
-    pub backend: PluginBackendKind,
-    pub backend_state: PluginBackendState,
-    pub triggers: PluginTriggers,
-}
-
-/// Full runtime descriptor for a registered plugin (built-in or external).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PluginDescriptor {
-    pub id: String,
-    pub name: String,
-    pub version: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub icon: Option<String>,
-    pub entry: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub asset_revision: Option<String>,
-    pub builtin: bool,
-    pub enabled: bool,
-    pub priority: i32,
-    pub packages: Vec<String>,
-    #[serde(default)]
-    pub activities: Vec<String>,
-    pub global: bool,
-    pub has_scope_override: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dev_server_url: Option<String>,
-    pub backend: PluginBackendKind,
-    pub backend_state: PluginBackendState,
-    pub capabilities: Vec<PluginCapability>,
-    pub surface: PluginSurfacePrefs,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub embed: Option<PluginEmbedPrefs>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub network: Option<PluginNetworkPrefs>,
-}
-
-/// Persisted user override for a single plugin under `/data/system/sideveil/plugins.json`.
+/// Persisted user override and capability approval entry under `/data/system/sideveil/plugins.json`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct PluginOverrideEntry {
@@ -250,6 +211,18 @@ pub struct PluginOverrideEntry {
     pub width_dp: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub height_percent: Option<i32>,
+    /// Explicitly approved medium/high-risk capabilities persisted by admin/user grant.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub granted_capabilities: Vec<PluginCapability>,
+    /// Capabilities previously reviewed by the admin (used to detect upgrade capability diffs).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reviewed_capabilities: Vec<PluginCapability>,
+    /// Whether this plugin's supervised `uds-native` daemon binary is explicitly approved to run.
+    #[serde(default)]
+    pub daemon_approved: bool,
+    /// Content fingerprint of the approved daemon binary so upgrades reset approval when changed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub daemon_binary_fingerprint: Option<String>,
 }
 
 /// Persisted plugin override and per-app MRU selection state.

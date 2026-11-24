@@ -25,12 +25,22 @@ impl PluginRegistry {
                     params.plugin_id.clone(),
                 ));
             };
+            if loaded.manifest.embed.is_none() {
+                return Err(PluginRegistryError::InstallConstraint(format!(
+                    "plugin '{}' is not a web-embed plugin",
+                    params.plugin_id
+                )));
+            }
             let manifest_cleartext = loaded
                 .manifest
-                .embed
-                .as_ref()
+                .effective_embed()
                 .map(|e| e.allow_cleartext)
-                .or_else(|| loaded.manifest.network.as_ref().map(|n| n.allow_cleartext))
+                .or_else(|| {
+                    loaded
+                        .manifest
+                        .effective_network()
+                        .map(|n| n.allow_cleartext)
+                })
                 .unwrap_or(false);
             let existing_ov = guard.overrides.overrides.get(&params.plugin_id);
             let effective_cleartext = if params.clear {

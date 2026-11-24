@@ -2,7 +2,9 @@
 
 use std::sync::PoisonError;
 
+use sideveil_protocol::PROTOCOL_VERSION;
 use sideveil_protocol::config::{EdgePatchParams, PanelState};
+use sideveil_protocol::plugin::PluginCapability;
 use sideveil_protocol::rpc::{
     EdgeRepositionPayload, EdgeRepositionPhase, GestureDragEndPayload, GestureDragMovePayload,
     GestureDragStartPayload, GestureFullscreenHintPayload, PanelCommand, ScopeChangedPayload,
@@ -16,6 +18,7 @@ impl HubState {
     pub fn on_sensor_message(&self, msg: SensorToHub) {
         match msg {
             SensorToHub::Hello {
+                protocol_version,
                 pid,
                 version,
                 display,
@@ -25,6 +28,11 @@ impl HubState {
                 foreground_package,
                 foreground_activity,
             } => {
+                if protocol_version != PROTOCOL_VERSION {
+                    self.logs().warn(format!(
+                        "Sensor hello protocolVersion={protocol_version} differs from hub protocolVersion={PROTOCOL_VERSION}"
+                    ));
+                }
                 {
                     let mut rt = self.runtime.write().unwrap_or_else(PoisonError::into_inner);
                     rt.sensor_pid = Some(pid);
@@ -38,7 +46,7 @@ impl HubState {
                     }
                 }
                 self.logs().info(format!(
-                    "Sensor hello pid={pid} version={version} display={}x{}@{} overlay={overlay_permission_granted} gesture={gesture_monitor_active} taskListener={task_listener_active}",
+                    "Sensor hello pid={pid} version={version} protocolVersion={protocol_version} display={}x{}@{} overlay={overlay_permission_granted} gesture={gesture_monitor_active} taskListener={task_listener_active}",
                     display.width_px, display.height_px, display.density
                 ));
                 self.sync_sensor_state();
@@ -200,8 +208,14 @@ impl HubState {
                 }
                 self.emit_host_event_critical(events::NETWORK_CONTEXT_CHANGED, &context);
                 if let Ok(val) = serde_json::to_value(&context) {
-                    self.plugin_backends()
-                        .broadcast_system_event(events::NETWORK_CONTEXT_CHANGED, val);
+                    self.plugin_backends().broadcast_system_event_filtered(
+                        events::NETWORK_CONTEXT_CHANGED,
+                        val,
+                        |plugin_id| {
+                            self.plugin_registry()
+                                .has_capability(plugin_id, PluginCapability::NetworkContext)
+                        },
+                    );
                 }
             }
             SensorToHub::GestureStatsUpdated { stats } => {

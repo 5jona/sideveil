@@ -1,22 +1,23 @@
 //! Capability-gated per-plugin storage (`fs.read` / `fs.writeAtomic`) and `system.exec`.
 
+mod exec;
+
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
-use std::process::Stdio;
-use std::time::Duration;
 
 use serde_json::{Value, json};
 use sideveil_protocol::plugin::PluginCapability;
 use sideveil_protocol::rpc::error_codes;
-use tokio::process::Command;
 
+pub use self::exec::{ExecOutcome, MAX_EXEC_STREAM_BYTES, handle_system_exec};
 use crate::fs_util::write_file_atomic;
 use crate::plugin_registry::PluginRegistry;
 
-const MAX_READ_BYTES: usize = 2 * 1024 * 1024;
-const DEFAULT_EXEC_TIMEOUT_MS: u64 = 8_000;
-const MAX_EXEC_TIMEOUT_MS: u64 = 30_000;
+/// Maximum single file size permitted in per-plugin storage (1 MiB).
+pub const MAX_PLUGIN_FILE_BYTES: usize = 1024 * 1024;
+/// Maximum total directory storage quota per plugin (16 MiB).
+pub const MAX_PLUGIN_QUOTA_BYTES: u64 = 16 * 1024 * 1024;
 
 /// Handles `fs.read` scoped strictly to `<data_dir>/<plugin_id>/<relative_path>`.
 pub fn handle_fs_read(
@@ -27,35 +28,43 @@ pub fn handle_fs_read(
 ) -> Result<Value, (i32, String)> {
     ensure_capability(registry, plugin_id, PluginCapability::Storage)?;
     let rel = extract_str_param(params.as_ref(), "path")?;
-    let target = resolve_jailed_path(data_dir, plugin_id, &rel)?;
+    let safe_rel = sanitize_relative_path(&rel)?;
+    let plugin_root = ensure_clean_plugin_root(data_dir, plugin_id)?;
+    verify_no_symlinks_along(&plugin_root, &safe_rel)?;
 
+    let target = plugin_root.join(&safe_rel);
     if !target.exists() {
         return Ok(json!({ "content": Value::Null }));
     }
-    let canonical_root = canonicalize_plugin_data_root(data_dir, plugin_id)?;
     let canonical_target = fs::canonicalize(&target).map_err(|e| {
         (
             error_codes::INTERNAL_ERROR,
             format!("Failed resolving path: {e}"),
         )
     })?;
-    if !canonical_target.starts_with(&canonical_root) {
+    if !canonical_target.starts_with(&plugin_root) {
         return Err((
             error_codes::PERMISSION_DENIED,
             "Symlink escape outside plugin data directory denied".to_owned(),
         ));
     }
 
-    let meta = fs::metadata(&canonical_target).map_err(|e| {
+    let meta = fs::symlink_metadata(&canonical_target).map_err(|e| {
         (
             error_codes::INTERNAL_ERROR,
             format!("Failed inspecting plugin file: {e}"),
         )
     })?;
-    if meta.len() > MAX_READ_BYTES as u64 {
+    if !meta.file_type().is_file() {
         return Err((
-            error_codes::INVALID_PARAMS,
-            "File exceeds 2 MiB plugin storage limit".to_owned(),
+            error_codes::PERMISSION_DENIED,
+            "Plugin storage path must reference a regular file".to_owned(),
+        ));
+    }
+    if meta.len() > MAX_PLUGIN_FILE_BYTES as u64 {
+        return Err((
+            error_codes::QUOTA_EXCEEDED,
+            "File exceeds 1 MiB per-file plugin storage limit".to_owned(),
         ));
     }
     let file = File::open(&canonical_target).map_err(|e| {
@@ -64,8 +73,8 @@ pub fn handle_fs_read(
             format!("Failed opening plugin file: {e}"),
         )
     })?;
-    let mut bytes = Vec::with_capacity((meta.len() as usize).min(MAX_READ_BYTES));
-    file.take((MAX_READ_BYTES + 1) as u64)
+    let mut bytes = Vec::with_capacity((meta.len() as usize).min(MAX_PLUGIN_FILE_BYTES));
+    file.take((MAX_PLUGIN_FILE_BYTES + 1) as u64)
         .read_to_end(&mut bytes)
         .map_err(|e| {
             (
@@ -73,10 +82,10 @@ pub fn handle_fs_read(
                 format!("Failed reading plugin file: {e}"),
             )
         })?;
-    if bytes.len() > MAX_READ_BYTES {
+    if bytes.len() > MAX_PLUGIN_FILE_BYTES {
         return Err((
-            error_codes::INVALID_PARAMS,
-            "File exceeds 2 MiB plugin storage limit".to_owned(),
+            error_codes::QUOTA_EXCEEDED,
+            "File exceeds 1 MiB per-file plugin storage limit".to_owned(),
         ));
     }
     let content = String::from_utf8(bytes).map_err(|e| {
@@ -98,15 +107,36 @@ pub fn handle_fs_write_atomic(
     ensure_capability(registry, plugin_id, PluginCapability::Storage)?;
     let rel = extract_str_param(params.as_ref(), "path")?;
     let content = extract_str_param(params.as_ref(), "content")?;
-    if content.len() > MAX_READ_BYTES {
+    if content.len() > MAX_PLUGIN_FILE_BYTES {
         return Err((
-            error_codes::INVALID_PARAMS,
-            "Content exceeds 2 MiB plugin storage limit".to_owned(),
+            error_codes::QUOTA_EXCEEDED,
+            "Content exceeds 1 MiB per-file plugin storage limit".to_owned(),
         ));
     }
 
-    let target = resolve_jailed_path(data_dir, plugin_id, &rel)?;
-    let canonical_root = canonicalize_plugin_data_root(data_dir, plugin_id)?;
+    let safe_rel = sanitize_relative_path(&rel)?;
+    let plugin_root = ensure_clean_plugin_root(data_dir, plugin_id)?;
+    verify_no_symlinks_along(&plugin_root, &safe_rel)?;
+
+    let target = plugin_root.join(&safe_rel);
+    let existing_len = fs::symlink_metadata(&target)
+        .ok()
+        .filter(|m| m.file_type().is_file())
+        .map_or(0, |m| m.len());
+    let current_usage = directory_bytes_used(&plugin_root)?;
+    let projected = current_usage
+        .saturating_sub(existing_len)
+        .saturating_add(content.len() as u64);
+    if projected > MAX_PLUGIN_QUOTA_BYTES {
+        return Err((
+            error_codes::QUOTA_EXCEEDED,
+            format!(
+                "Write exceeds {} MiB total plugin storage quota",
+                MAX_PLUGIN_QUOTA_BYTES / (1024 * 1024)
+            ),
+        ));
+    }
+
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent).map_err(|e| {
             (
@@ -120,7 +150,7 @@ pub fn handle_fs_write_atomic(
                 format!("Failed resolving parent directory: {e}"),
             )
         })?;
-        if !canonical_parent.starts_with(&canonical_root) {
+        if !canonical_parent.starts_with(&plugin_root) {
             return Err((
                 error_codes::PERMISSION_DENIED,
                 "Path escapes plugin data directory".to_owned(),
@@ -138,61 +168,7 @@ pub fn handle_fs_write_atomic(
     Ok(json!({ "errno": 0, "stdout": "OK", "stderr": "" }))
 }
 
-/// Handles `system.exec` gated strictly by `PluginCapability::SystemExec`.
-pub async fn handle_system_exec(
-    registry: &PluginRegistry,
-    plugin_id: &str,
-    params: Option<Value>,
-) -> Result<Value, (i32, String)> {
-    ensure_capability(registry, plugin_id, PluginCapability::SystemExec)?;
-    let cmd = extract_str_param(params.as_ref(), "cmd")?;
-    let timeout_ms = params
-        .as_ref()
-        .and_then(|v| v.get("options"))
-        .and_then(|o| o.get("timeoutMs"))
-        .and_then(Value::as_u64)
-        .unwrap_or(DEFAULT_EXEC_TIMEOUT_MS)
-        .clamp(200, MAX_EXEC_TIMEOUT_MS);
-
-    let shell = if Path::new("/system/bin/sh").is_file() {
-        "/system/bin/sh"
-    } else {
-        "/bin/sh"
-    };
-
-    let child = Command::new(shell)
-        .args(["-c", &cmd])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .map_err(|err| {
-            (
-                error_codes::INTERNAL_ERROR,
-                format!("Failed executing command: {err}"),
-            )
-        })?;
-
-    match tokio::time::timeout(Duration::from_millis(timeout_ms), child.wait_with_output()).await {
-        Ok(Ok(out)) => Ok(json!({
-            "errno": out.status.code().unwrap_or(-1),
-            "stdout": String::from_utf8_lossy(&out.stdout),
-            "stderr": String::from_utf8_lossy(&out.stderr),
-        })),
-        Ok(Err(err)) => Err((
-            error_codes::INTERNAL_ERROR,
-            format!("Failed executing command: {err}"),
-        )),
-        Err(_) => Ok(json!({
-            "errno": 124,
-            "stdout": "",
-            "stderr": format!("Command timed out after {timeout_ms}ms"),
-        })),
-    }
-}
-
-fn ensure_capability(
+pub(super) fn ensure_capability(
     registry: &PluginRegistry,
     plugin_id: &str,
     capability: PluginCapability,
@@ -202,12 +178,15 @@ fn ensure_capability(
     } else {
         Err((
             error_codes::PERMISSION_DENIED,
-            format!("Plugin '{plugin_id}' lacks required capability {capability:?}"),
+            format!("Plugin '{plugin_id}' lacks granted capability {capability:?}"),
         ))
     }
 }
 
-fn extract_str_param(params: Option<&Value>, key: &str) -> Result<String, (i32, String)> {
+pub(super) fn extract_str_param(
+    params: Option<&Value>,
+    key: &str,
+) -> Result<String, (i32, String)> {
     params
         .and_then(|v| v.get(key))
         .and_then(Value::as_str)
@@ -220,30 +199,88 @@ fn extract_str_param(params: Option<&Value>, key: &str) -> Result<String, (i32, 
         })
 }
 
-fn canonicalize_plugin_data_root(
-    data_dir: &Path,
-    plugin_id: &str,
-) -> Result<PathBuf, (i32, String)> {
-    let root = data_dir.join(plugin_id);
+fn ensure_clean_plugin_root(data_dir: &Path, plugin_id: &str) -> Result<PathBuf, (i32, String)> {
+    fs::create_dir_all(data_dir).map_err(|e| {
+        (
+            error_codes::INTERNAL_ERROR,
+            format!("Failed creating data dir: {e}"),
+        )
+    })?;
+    let canonical_base = fs::canonicalize(data_dir).map_err(|e| {
+        (
+            error_codes::INTERNAL_ERROR,
+            format!("Failed canonicalizing data dir: {e}"),
+        )
+    })?;
+    let root = canonical_base.join(plugin_id);
+    if let Ok(meta) = fs::symlink_metadata(&root)
+        && meta.file_type().is_symlink()
+    {
+        return Err((
+            error_codes::PERMISSION_DENIED,
+            "Plugin data root must not be a symlink".to_owned(),
+        ));
+    }
     fs::create_dir_all(&root).map_err(|e| {
         (
             error_codes::INTERNAL_ERROR,
             format!("Failed creating plugin data dir: {e}"),
         )
     })?;
-    fs::canonicalize(&root).map_err(|e| {
+    let canonical_root = fs::canonicalize(&root).map_err(|e| {
         (
             error_codes::INTERNAL_ERROR,
             format!("Failed canonicalizing plugin data dir: {e}"),
         )
-    })
+    })?;
+    if !canonical_root.starts_with(&canonical_base) {
+        return Err((
+            error_codes::PERMISSION_DENIED,
+            "Plugin data root escapes base data directory".to_owned(),
+        ));
+    }
+    Ok(canonical_root)
 }
 
-fn resolve_jailed_path(
-    data_dir: &Path,
-    plugin_id: &str,
-    relative: &str,
-) -> Result<PathBuf, (i32, String)> {
+fn verify_no_symlinks_along(root: &Path, rel: &Path) -> Result<(), (i32, String)> {
+    let mut cur = root.to_path_buf();
+    for comp in rel.components() {
+        cur.push(comp);
+        if let Ok(meta) = fs::symlink_metadata(&cur)
+            && meta.file_type().is_symlink()
+        {
+            return Err((
+                error_codes::PERMISSION_DENIED,
+                "Symlink component inside plugin storage directory denied".to_owned(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn directory_bytes_used(dir: &Path) -> Result<u64, (i32, String)> {
+    let mut total = 0_u64;
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Ok(0);
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(meta) = fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if meta.file_type().is_symlink() {
+            continue;
+        }
+        if meta.file_type().is_dir() {
+            total = total.saturating_add(directory_bytes_used(&path)?);
+        } else if meta.file_type().is_file() {
+            total = total.saturating_add(meta.len());
+        }
+    }
+    Ok(total)
+}
+
+fn sanitize_relative_path(relative: &str) -> Result<PathBuf, (i32, String)> {
     let trimmed = relative.trim();
     if trimmed.is_empty() || trimmed.starts_with('/') || trimmed.contains('\\') {
         return Err((
@@ -251,9 +288,8 @@ fn resolve_jailed_path(
             "Plugin storage path must be relative without leading '/'".to_owned(),
         ));
     }
-    let rel = Path::new(trimmed);
     let mut safe_rel = PathBuf::new();
-    for comp in rel.components() {
+    for comp in Path::new(trimmed).components() {
         match comp {
             Component::Normal(part) => safe_rel.push(part),
             _ => {
@@ -270,5 +306,5 @@ fn resolve_jailed_path(
             "Plugin storage path must reference a file".to_owned(),
         ));
     }
-    Ok(data_dir.join(plugin_id).join(safe_rel))
+    Ok(safe_rel)
 }

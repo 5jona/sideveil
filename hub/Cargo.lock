@@ -664,6 +664,9 @@ dependencies = [
 name = "sideveil-protocol"
 version = "0.1.0"
 dependencies = [
+ "crc32fast",
+ "data-encoding",
+ "flate2",
  "serde",
  "serde_json",
  "thiserror",

@@ -14,6 +14,7 @@ pub mod pidfd;
 pub mod plugin_acl;
 pub mod plugin_backends;
 pub mod plugin_registry;
+pub mod rate_limiter;
 pub mod rpc;
 pub mod singleton;
 pub mod state;

@@ -4,6 +4,7 @@ mod debug_cmd;
 mod hud_cmd;
 mod logs_cmd;
 mod plugins_cmd;
+mod plugins_dx_cmd;
 mod plugins_embed_cmd;
 
 use std::path::PathBuf;
@@ -12,6 +13,8 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use sideveil_protocol::paths;
 use sideveil_protocol::rpc::methods;
+
+use crate::dx::PluginTemplate;
 
 const DEFAULT_IO_TIMEOUT: Duration = Duration::from_secs(4);
 const DEFAULT_RAW_RPC_TIMEOUT_MS: u64 = 8_000;
@@ -26,7 +29,6 @@ pub(crate) fn clamp_rpc_timeout_ms(ms: u64) -> u64 {
 pub(crate) enum OutputMode {
     UnwrapResult,
     FullEnvelope,
-    RuntimeMode,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -35,6 +37,22 @@ pub(crate) enum CliAction {
         method: String,
         params: Option<Value>,
         output_mode: OutputMode,
+    },
+    RpcFromStdin {
+        method: String,
+        output_mode: OutputMode,
+    },
+    ValidatePlugin {
+        target: PathBuf,
+    },
+    PackPlugin {
+        source_dir: PathBuf,
+        output_path: Option<PathBuf>,
+    },
+    InitPlugin {
+        plugin_id: String,
+        template: PluginTemplate,
+        output_dir: Option<PathBuf>,
     },
 }
 
@@ -80,11 +98,7 @@ pub(crate) fn parse_args(
             if let Some(custom_timeout) = parsed.io_timeout {
                 io_timeout = custom_timeout;
             }
-            CliAction::Rpc {
-                method: parsed.method,
-                params: parsed.params,
-                output_mode: parsed.output_mode,
-            }
+            parsed.action
         }
         "hud" => {
             let (method, params, output_mode) = hud_cmd::parse_hud_subcommand(&positional[1..])?;
@@ -102,13 +116,9 @@ pub(crate) fn parse_args(
             parsed.action
         }
         "rpc" => {
-            let (method, params, custom_timeout) = parse_raw_rpc(&positional[1..])?;
+            let (action, custom_timeout) = parse_raw_rpc(&positional[1..])?;
             io_timeout = custom_timeout;
-            CliAction::Rpc {
-                method,
-                params,
-                output_mode: OutputMode::FullEnvelope,
-            }
+            action
         }
         other => return Err((2, format!("Unknown command: {other}"))),
     };
@@ -150,14 +160,15 @@ fn parse_open_subcommand(args: &[String]) -> Result<CliAction, (u8, String)> {
     }
 }
 
-fn parse_raw_rpc(args: &[String]) -> Result<(String, Option<Value>, Duration), (u8, String)> {
+fn parse_raw_rpc(args: &[String]) -> Result<(CliAction, Duration), (u8, String)> {
     let Some(method_name) = args.first() else {
         return Err((
             2,
-            "Usage: sideveil-ctl rpc <method> [json-params] [--timeout-ms <ms>]".to_owned(),
+            "Usage: sideveil-ctl rpc <method> [json-params|-] [--timeout-ms <ms>]".to_owned(),
         ));
     };
     let mut parsed_params: Option<Value> = None;
+    let mut from_stdin = false;
     let mut timeout_ms = DEFAULT_RAW_RPC_TIMEOUT_MS;
     let mut idx = 1;
     while idx < args.len() {
@@ -170,22 +181,36 @@ fn parse_raw_rpc(args: &[String]) -> Result<(String, Option<Value>, Duration), (
                 .map_err(|_| (2, format!("Invalid integer for --timeout-ms: {raw_ms}")))?;
             timeout_ms = clamp_rpc_timeout_ms(parsed);
             idx += 2;
-        } else if parsed_params.is_none() {
-            parsed_params = Some(
-                serde_json::from_str::<Value>(&args[idx])
-                    .map_err(|e| (2, format!("Invalid JSON params: {e}")))?,
-            );
+        } else if parsed_params.is_none() && !from_stdin {
+            if args[idx] == "-" {
+                from_stdin = true;
+            } else {
+                parsed_params = Some(
+                    serde_json::from_str::<Value>(&args[idx])
+                        .map_err(|e| (2, format!("Invalid JSON params: {e}")))?,
+                );
+            }
             idx += 1;
         } else {
             return Err((2, format!("Unexpected extra argument: {}", args[idx])));
         }
     }
-    Ok((
-        method_name.clone(),
-        parsed_params,
-        Duration::from_millis(timeout_ms),
-    ))
+    let action = if from_stdin {
+        CliAction::RpcFromStdin {
+            method: method_name.clone(),
+            output_mode: OutputMode::FullEnvelope,
+        }
+    } else {
+        CliAction::Rpc {
+            method: method_name.clone(),
+            params: parsed_params,
+            output_mode: OutputMode::FullEnvelope,
+        }
+    };
+    Ok((action, Duration::from_millis(timeout_ms)))
 }
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_dx;

@@ -87,6 +87,7 @@ async fn status_bar_pull_down_closes_panel_only_when_open() {
 async fn sensor_hello_updates_runtime_flags_and_logs_gesture_and_task_listener() {
     let (dir, state) = make_test_state("sensor-hello");
     state.on_sensor_message(SensorToHub::Hello {
+        protocol_version: 1,
         pid: 4242,
         version: "0.1.0".to_owned(),
         display: sideveil_protocol::sensor::DisplayGeometry {

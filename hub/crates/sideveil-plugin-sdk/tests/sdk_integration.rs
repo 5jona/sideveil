@@ -92,6 +92,7 @@ async fn accept_and_handshake(
         UdsClientHello::PluginBackend {
             plugin_id: expected_plugin_id.to_owned(),
             package_name: None,
+            protocol_version: 1,
         }
     );
     send_json_frame(

@@ -145,6 +145,7 @@ pub fn authorize_peer(
             UdsClientHello::PluginBackend {
                 plugin_id,
                 package_name,
+                ..
             } => {
                 sideveil_protocol::plugin::validate_plugin_id(plugin_id)?;
                 let Some(pkg) = package_name
@@ -158,7 +159,7 @@ pub fn authorize_peer(
                     return Ok(());
                 }
                 let app_id = cred.uid % PER_USER_RANGE;
-                if app_id < FIRST_APP_UID {
+                if !(FIRST_APP_UID..90_000).contains(&app_id) {
                     return Err(PeerAuthError::NonAppUid {
                         uid: cred.uid,
                         app_id,
@@ -198,14 +199,22 @@ pub fn lookup_package_uid(packages_list: &Path, package_name: &str) -> Option<u3
 }
 
 /// Parses an Android `packages.list` snapshot and returns the numeric UID for `package_name`.
+/// Safely skips blank lines, comments, and malformed rows.
 #[must_use]
 pub fn parse_package_uid(content: &str, package_name: &str) -> Option<u32> {
     for line in content.lines() {
-        let mut parts = line.split_whitespace();
-        let pkg = parts.next()?;
-        let uid_str = parts.next()?;
-        if pkg == package_name {
-            return uid_str.parse::<u32>().ok();
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let mut parts = trimmed.split_whitespace();
+        let (Some(pkg), Some(uid_str)) = (parts.next(), parts.next()) else {
+            continue;
+        };
+        if pkg == package_name
+            && let Ok(uid) = uid_str.parse::<u32>()
+        {
+            return Some(uid);
         }
     }
     None

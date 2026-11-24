@@ -4,6 +4,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::rpc::RpcRequest;
+use crate::{PLUGIN_API_VERSION, PROTOCOL_VERSION};
+
+fn default_protocol_version() -> u32 {
+    PROTOCOL_VERSION
+}
 
 /// First newline-delimited JSON frame sent by any UDS client after connecting.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -18,6 +23,9 @@ pub enum UdsClientHello {
         pid: u32,
         /// Semantic version string reported by `:sensor`.
         version: String,
+        /// Wire protocol version spoken by `:sensor` (defaults to 1 when omitted).
+        #[serde(default = "default_protocol_version")]
+        protocol_version: u32,
     },
     /// External plugin backend (KernelSU Native Daemon on `hub.sock`, or LSPosed app on `app.sock`).
     #[serde(rename_all = "camelCase")]
@@ -27,6 +35,9 @@ pub enum UdsClientHello {
         /// Optional Android package name (required on `app.sock` for `uds-app` backends).
         #[serde(default)]
         package_name: Option<String>,
+        /// Wire protocol version spoken by the plugin backend (defaults to 1 when omitted).
+        #[serde(default = "default_protocol_version")]
+        protocol_version: u32,
     },
 }
 
@@ -39,6 +50,12 @@ pub struct UdsHandshakeAck {
     /// Human-readable rejection reason when `ok` is `false`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Negotiated Hub wire protocol version.
+    #[serde(default = "default_protocol_version")]
+    pub protocol_version: u32,
+    /// Negotiated SideVeil plugin API version.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_version: Option<u32>,
 }
 
 impl UdsHandshakeAck {
@@ -48,6 +65,8 @@ impl UdsHandshakeAck {
         Self {
             ok: true,
             error: None,
+            protocol_version: PROTOCOL_VERSION,
+            api_version: Some(PLUGIN_API_VERSION),
         }
     }
 
@@ -57,6 +76,8 @@ impl UdsHandshakeAck {
         Self {
             ok: false,
             error: Some(reason.into()),
+            protocol_version: PROTOCOL_VERSION,
+            api_version: Some(PLUGIN_API_VERSION),
         }
     }
 }

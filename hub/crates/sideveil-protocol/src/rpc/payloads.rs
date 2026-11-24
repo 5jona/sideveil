@@ -2,10 +2,11 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::PROTOCOL_VERSION;
 use crate::config::{EdgeSide, SideVeilConfig};
 pub use crate::generated::protocol_wire::{
-    DaemonHealth, DaemonStatus, PanelStateChangedPayload, PanelVisibilityPayload, PingResult,
-    ScopeChangedPayload,
+    DaemonHealth, DaemonStatus, HostLocalAuditPayload, HostReadyPayload, PanelStateChangedPayload,
+    PanelVisibilityPayload, PingResult, ScopeChangedPayload,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -20,6 +21,8 @@ pub enum PanelCommand {
     Open,
     Close,
     Toggle,
+    #[serde(rename = "reloadPlugin")]
+    ReloadPlugin,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -112,10 +115,36 @@ pub struct EdgeStatusPayload {
     pub clear: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PanelCommandPayload {
     pub command: PanelCommand,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin_id: Option<String>,
+}
+
+impl PanelCommandPayload {
+    /// Creates a standard `panel.command` payload for open/close/toggle.
+    #[must_use]
+    pub fn simple(command: PanelCommand) -> Self {
+        Self {
+            command,
+            action: None,
+            plugin_id: None,
+        }
+    }
+
+    /// Creates a targeted `reloadPlugin` command payload for `plugins.reloadWebView`.
+    #[must_use]
+    pub fn reload_plugin(plugin_id: impl Into<String>) -> Self {
+        Self {
+            command: PanelCommand::ReloadPlugin,
+            action: Some("reloadPlugin".to_owned()),
+            plugin_id: Some(plugin_id.into()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -131,4 +160,10 @@ pub struct HostHelloPayload {
     pub pid: u32,
     pub version: String,
     pub cross_window_blur_supported: bool,
+    #[serde(default = "default_protocol_version")]
+    pub protocol_version: u32,
+}
+
+fn default_protocol_version() -> u32 {
+    PROTOCOL_VERSION
 }

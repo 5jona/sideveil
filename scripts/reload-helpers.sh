@@ -198,11 +198,12 @@ cp ${STAGE_DIR}/service.sh ${REMOTE_MOD_DIR}/service.sh
 cp ${STAGE_DIR}/post-fs-data.sh ${REMOTE_MOD_DIR}/post-fs-data.sh
 cp ${STAGE_DIR}/customize.sh ${REMOTE_MOD_DIR}/customize.sh
 cp ${STAGE_DIR}/uninstall.sh ${REMOTE_MOD_DIR}/uninstall.sh
-for b in sideveild sideveil-ctl sideveil-example-perf-hud; do
+for b in sideveild sideveil-ctl; do
     cp ${STAGE_DIR}/\$b ${REMOTE_MOD_DIR}/bin/\$b.new
     chmod 0755 ${REMOTE_MOD_DIR}/bin/\$b.new
     mv -f ${REMOTE_MOD_DIR}/bin/\$b.new ${REMOTE_MOD_DIR}/bin/\$b
 done
+rm -f ${REMOTE_MOD_DIR}/bin/sideveil-example-perf-hud
 cp ${STAGE_DIR}/sideveil-sensor.dex ${REMOTE_MOD_DIR}/bin/sideveil-sensor.dex.new
 mv -f ${REMOTE_MOD_DIR}/bin/sideveil-sensor.dex.new ${REMOTE_MOD_DIR}/bin/sideveil-sensor.dex
 rm -f ${REMOTE_MOD_DIR}/bin/sideveil-common.sh ${REMOTE_MOD_DIR}/bin/sideveil-daemon.dex ${REMOTE_STATE_DIR}/sideveil-daemon.dex
@@ -212,25 +213,23 @@ cp ${STAGE_DIR}/sysconfig.xml ${REMOTE_MOD_DIR}/system/etc/sysconfig/sideveil-al
 rm -rf ${REMOTE_MOD_DIR}/webroot
 cp -r ${STAGE_DIR}/webroot ${REMOTE_MOD_DIR}/webroot
 rm -rf ${REMOTE_MOD_DIR}/plugins
-cp -r ${STAGE_DIR}/plugins ${REMOTE_MOD_DIR}/plugins
-for pdir in ${STAGE_DIR}/plugins/*; do
-    [ -d "\$pdir" ] || continue
-    pname="\${pdir##*/}"
-    rm -rf ${REMOTE_STATE_DIR}/plugins/"\$pname"
-    cp -r "\$pdir" ${REMOTE_STATE_DIR}/plugins/"\$pname"
-    chown -R 0:1000 ${REMOTE_STATE_DIR}/plugins/"\$pname"
-    find ${REMOTE_STATE_DIR}/plugins/"\$pname" -type d -exec chmod 0755 {} +
-    find ${REMOTE_STATE_DIR}/plugins/"\$pname" -type f -exec chmod 0644 {} +
-done
+if [ -d ${STAGE_DIR}/plugins ]; then
+    cp -r ${STAGE_DIR}/plugins ${REMOTE_MOD_DIR}/plugins
+fi
 if [ "${RESET_CONFIG}" -eq 1 ] || [ ! -f ${REMOTE_STATE_DIR}/config.json ]; then
     cp ${STAGE_DIR}/config.json ${REMOTE_STATE_DIR}/config.json
     chown 0:1000 ${REMOTE_STATE_DIR}/config.json
     chmod 0644 ${REMOTE_STATE_DIR}/config.json
 fi
-chmod 0755 ${REMOTE_MOD_DIR}/service.sh ${REMOTE_MOD_DIR}/post-fs-data.sh ${REMOTE_MOD_DIR}/customize.sh ${REMOTE_MOD_DIR}/uninstall.sh ${REMOTE_MOD_DIR}/bin/sideveild ${REMOTE_MOD_DIR}/bin/sideveil-ctl ${REMOTE_MOD_DIR}/bin/sideveil-example-perf-hud
+chmod 0755 ${REMOTE_MOD_DIR}/service.sh ${REMOTE_MOD_DIR}/post-fs-data.sh ${REMOTE_MOD_DIR}/customize.sh ${REMOTE_MOD_DIR}/uninstall.sh ${REMOTE_MOD_DIR}/bin/sideveild ${REMOTE_MOD_DIR}/bin/sideveil-ctl
 chmod 0644 ${REMOTE_MOD_DIR}/module.prop ${REMOTE_MOD_DIR}/config.json ${REMOTE_MOD_DIR}/bin/sideveil-sensor.dex ${REMOTE_MOD_DIR}/system/priv-app/SideVeilHost/SideVeilHost.apk ${REMOTE_MOD_DIR}/system/etc/permissions/privapp-permissions-pochita-sideveil.xml ${REMOTE_MOD_DIR}/system/etc/sysconfig/sideveil-allowlist.xml
-find ${REMOTE_MOD_DIR}/webroot ${REMOTE_MOD_DIR}/plugins -type d -exec chmod 0755 {} +
-find ${REMOTE_MOD_DIR}/webroot ${REMOTE_MOD_DIR}/plugins -type f -exec chmod 0644 {} +
+find ${REMOTE_MOD_DIR}/webroot -type d -exec chmod 0755 {} +
+find ${REMOTE_MOD_DIR}/webroot -type f -exec chmod 0644 {} +
+if [ -d ${REMOTE_MOD_DIR}/plugins ]; then
+    find ${REMOTE_MOD_DIR}/plugins -type d -exec chmod 0755 {} +
+    find ${REMOTE_MOD_DIR}/plugins -type f -exec chmod 0644 {} +
+    find ${REMOTE_MOD_DIR}/plugins -path "*/bin/*" -type f -exec chmod 0755 {} +
+fi
 rm -rf ${STAGE_DIR}
 EOF
 }

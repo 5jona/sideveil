@@ -1,18 +1,31 @@
-//! Read-only query, capability checks, backend authorization, and snapshot building for `PluginRegistry`.
+//! Read-only query, effective capability checks, backend authorization, and snapshot building.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::PoisonError;
 
-use sideveil_protocol::config::{RuntimeMode, SideVeilConfig};
+use sideveil_protocol::config::SideVeilConfig;
 use sideveil_protocol::plugin::{
-    PluginBackendKind, PluginCapability, PluginDescriptor, PluginsSnapshotPayload,
-    is_builtin_test_plugin,
+    PluginBackendKind, PluginCapability, PluginDaemonSpec, PluginDescriptor, PluginOrigin,
+    PluginsSnapshotPayload,
 };
 
 use super::PluginRegistry;
 use super::error::PluginRegistryError;
+use super::grants::compute_effective_grants;
 use super::store::{build_descriptor, matches_activity};
+use crate::supervisor::DaemonRuntimeInfo;
+
+/// Desired supervision specification for one `uds-native` plugin daemon.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginDaemonCandidate {
+    pub plugin_id: String,
+    pub root_dir: PathBuf,
+    pub spec: PluginDaemonSpec,
+    pub enabled: bool,
+    pub daemon_approved: bool,
+    pub binary_fingerprint: Option<String>,
+}
 
 impl PluginRegistry {
     #[must_use]
@@ -34,12 +47,18 @@ impl PluginRegistry {
     }
 
     #[must_use]
+    pub fn plugin_origin(&self, plugin_id: &str) -> Option<PluginOrigin> {
+        let guard = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+        guard.plugins.get(plugin_id).map(|p| p.origin)
+    }
+
+    #[must_use]
     pub fn plugin_cross_origin_isolated(&self, plugin_id: &str) -> bool {
         let guard = self.inner.read().unwrap_or_else(PoisonError::into_inner);
         guard
             .plugins
             .get(plugin_id)
-            .is_some_and(|p| p.manifest.surface.cross_origin_isolated)
+            .is_some_and(|p| p.manifest.effective_surface().cross_origin_isolated)
     }
 
     /// Returns the relative entry HTML path when a plugin enables `network.spaFallback`.
@@ -47,14 +66,14 @@ impl PluginRegistry {
     pub fn plugin_spa_entry(&self, plugin_id: &str) -> Option<String> {
         let guard = self.inner.read().unwrap_or_else(PoisonError::into_inner);
         let plugin = guard.plugins.get(plugin_id)?;
+        let entry = plugin.manifest.effective_entry();
         if plugin
             .manifest
-            .network
-            .as_ref()
+            .effective_network()
             .is_some_and(|n| n.spa_fallback)
-            && !plugin.manifest.entry.trim().is_empty()
+            && !entry.trim().is_empty()
         {
-            Some(plugin.manifest.entry.clone())
+            Some(entry.to_owned())
         } else {
             None
         }
@@ -64,6 +83,17 @@ impl PluginRegistry {
     pub fn contains_plugin(&self, plugin_id: &str) -> bool {
         let guard = self.inner.read().unwrap_or_else(PoisonError::into_inner);
         guard.plugins.contains_key(plugin_id)
+    }
+
+    #[must_use]
+    pub fn has_dev_url(&self, plugin_id: &str) -> bool {
+        let guard = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+        guard
+            .overrides
+            .overrides
+            .get(plugin_id)
+            .and_then(|ov| ov.dev_server_url.as_deref())
+            .is_some_and(|url| !url.trim().is_empty())
     }
 
     #[must_use]
@@ -80,12 +110,66 @@ impl PluginRegistry {
     }
 
     #[must_use]
+    pub fn is_plugin_enabled(&self, plugin_id: &str) -> bool {
+        let guard = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+        let Some(plugin) = guard.plugins.get(plugin_id) else {
+            return false;
+        };
+        guard
+            .overrides
+            .overrides
+            .get(plugin_id)
+            .and_then(|o| o.enabled)
+            .unwrap_or_else(|| plugin.manifest.effective_default_enabled())
+    }
+
+    /// Returns whether `plugin_id` is enabled AND effectively granted `capability`.
+    #[must_use]
     pub fn has_capability(&self, plugin_id: &str, capability: PluginCapability) -> bool {
+        let guard = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+        let Some(plugin) = guard.plugins.get(plugin_id) else {
+            return false;
+        };
+        let ov = guard.overrides.overrides.get(plugin_id);
+        let enabled = ov
+            .and_then(|o| o.enabled)
+            .unwrap_or_else(|| plugin.manifest.effective_default_enabled());
+        if !enabled {
+            return false;
+        }
+        compute_effective_grants(plugin, ov)
+            .granted
+            .contains(&capability)
+    }
+
+    /// Returns supervision descriptors for all plugins declaring a `uds-native` daemon spec.
+    #[must_use]
+    pub fn daemon_candidates(&self) -> Vec<PluginDaemonCandidate> {
         let guard = self.inner.read().unwrap_or_else(PoisonError::into_inner);
         guard
             .plugins
-            .get(plugin_id)
-            .is_some_and(|p| p.manifest.capabilities.contains(&capability))
+            .values()
+            .filter_map(|p| {
+                if p.manifest.effective_backend() != PluginBackendKind::UdsNative {
+                    return None;
+                }
+                let spec = p.manifest.daemon.clone()?;
+                let root_dir = p.root_dir.clone()?;
+                let ov = guard.overrides.overrides.get(&p.manifest.id);
+                let enabled = ov
+                    .and_then(|o| o.enabled)
+                    .unwrap_or_else(|| p.manifest.effective_default_enabled());
+                let grants = compute_effective_grants(p, ov);
+                Some(PluginDaemonCandidate {
+                    plugin_id: p.manifest.id.clone(),
+                    root_dir,
+                    spec,
+                    enabled,
+                    daemon_approved: grants.daemon_approved,
+                    binary_fingerprint: p.daemon_binary_fingerprint.clone(),
+                })
+            })
+            .collect()
     }
 
     /// Validates whether a backend connection may register for `plugin_id`.
@@ -101,13 +185,23 @@ impl PluginRegistry {
                 "plugin '{plugin_id}' is not registered"
             )));
         };
-        if plugin.builtin {
+        if plugin.origin == PluginOrigin::Builtin {
             return Err(PluginRegistryError::BackendUnauthorized(
                 "built-in plugin does not accept external backend".to_owned(),
             ));
         }
+        let ov = guard.overrides.overrides.get(plugin_id);
+        let enabled = ov
+            .and_then(|o| o.enabled)
+            .unwrap_or_else(|| plugin.manifest.effective_default_enabled());
+        if !enabled {
+            return Err(PluginRegistryError::BackendUnauthorized(format!(
+                "plugin '{plugin_id}' is disabled"
+            )));
+        }
+        let backend = plugin.manifest.effective_backend();
         if from_app_sock {
-            if plugin.manifest.backend != PluginBackendKind::UdsApp {
+            if backend != PluginBackendKind::UdsApp {
                 return Err(PluginRegistryError::BackendUnauthorized(format!(
                     "plugin '{plugin_id}' does not declare uds-app backend"
                 )));
@@ -117,27 +211,30 @@ impl PluginRegistry {
                     "missing packageName for uds-app backend".to_owned(),
                 ));
             };
-            let ov = guard.overrides.overrides.get(plugin_id);
-            let global = ov
-                .and_then(|o| o.global_override)
-                .unwrap_or(plugin.manifest.triggers.global);
-            let packages = ov
-                .and_then(|o| o.packages_override.as_ref())
-                .unwrap_or(&plugin.manifest.triggers.packages);
-            if !global && !packages.iter().any(|p| p == pkg) {
+            // Strict explicit package allowlist: never treat `triggers.global` as a wildcard.
+            let allowed_pkgs = plugin.manifest.effective_backend_packages();
+            if !allowed_pkgs.iter().any(|p| p == pkg) {
                 return Err(PluginRegistryError::BackendUnauthorized(format!(
-                    "package '{pkg}' is not authorized by plugin '{plugin_id}' triggers"
+                    "package '{pkg}' is not in plugin '{plugin_id}' backendPackages allowlist"
                 )));
             }
-        } else if plugin.manifest.backend == PluginBackendKind::None {
-            return Err(PluginRegistryError::BackendUnauthorized(format!(
-                "plugin '{plugin_id}' declares backend=none and cannot attach a backend"
-            )));
+        } else {
+            if backend != PluginBackendKind::UdsNative {
+                return Err(PluginRegistryError::BackendUnauthorized(format!(
+                    "plugin '{plugin_id}' must declare backend=uds-native to attach over hub.sock"
+                )));
+            }
+            let grants = compute_effective_grants(plugin, ov);
+            if grants.has_daemon && !grants.daemon_approved {
+                return Err(PluginRegistryError::BackendUnauthorized(format!(
+                    "plugin '{plugin_id}' native daemon has not been approved"
+                )));
+            }
         }
         Ok(())
     }
 
-    /// Computes full sorted descriptors, matched plugin IDs for `(foreground_package, foreground_activity)`, and MRU active ID.
+    /// Computes full sorted descriptors without live daemon runtime state (convenience for tests).
     #[must_use]
     pub fn snapshot(
         &self,
@@ -145,6 +242,26 @@ impl PluginRegistry {
         foreground_activity: &str,
         config: &SideVeilConfig,
         online_backends: &HashSet<String>,
+    ) -> PluginsSnapshotPayload {
+        self.snapshot_with_daemons(
+            foreground_package,
+            foreground_activity,
+            config,
+            online_backends,
+            &HashMap::new(),
+        )
+    }
+
+    /// Computes full sorted descriptors, matched plugin IDs for `(foreground_package, foreground_activity)`,
+    /// live daemon statuses, and MRU active ID.
+    #[must_use]
+    pub fn snapshot_with_daemons(
+        &self,
+        foreground_package: &str,
+        foreground_activity: &str,
+        config: &SideVeilConfig,
+        online_backends: &HashSet<String>,
+        daemon_states: &HashMap<String, DaemonRuntimeInfo>,
     ) -> PluginsSnapshotPayload {
         let guard = self.inner.read().unwrap_or_else(PoisonError::into_inner);
         let fg = foreground_package.trim();
@@ -161,13 +278,13 @@ impl PluginRegistry {
                     guard.overrides.overrides.get(&p.manifest.id),
                     config,
                     online_backends.contains(&p.manifest.id),
+                    daemon_states.get(&p.manifest.id),
                 )
             })
             .collect();
 
         descriptors.sort_by(|a, b| b.priority.cmp(&a.priority).then_with(|| a.id.cmp(&b.id)));
 
-        let hide_builtin_tests = config.debug.runtime_mode == RuntimeMode::Release;
         let matched_plugin_ids: Vec<String> = if !config.enabled || fg.is_empty() || denied {
             Vec::new()
         } else {
@@ -175,7 +292,6 @@ impl PluginRegistry {
                 .iter()
                 .filter(|d| {
                     d.enabled
-                        && !(hide_builtin_tests && is_builtin_test_plugin(&d.id))
                         && (d.global || d.packages.iter().any(|p| p == fg))
                         && matches_activity(&d.activities, fg_act)
                 })

@@ -55,6 +55,7 @@ pub(super) async fn run_sensor_supervisor(
                     let _ = child.wait().await;
                     continue;
                 };
+                state.set_supervised_sensor_pid(Some(pid));
                 state.logs().info(format!(
                     "Spawned UID {SENSOR_UID} {SENSOR_PROC_NAME} (pid={pid})"
                 ));
@@ -64,11 +65,13 @@ pub(super) async fn run_sensor_supervisor(
                 tokio::select! {
                     () = wait_pid_or_child(pidfd.as_ref(), &mut child) => {
                         let status = child.wait().await.ok();
+                        state.set_supervised_sensor_pid(None);
                         state.logs().warn(format!(
                             "{SENSOR_PROC_NAME} (pid={pid}) exited: {status:?}"
                         ));
                     }
                     _ = shutdown_rx.changed() => {
+                        state.set_supervised_sensor_pid(None);
                         terminate_child(pid, &mut child).await;
                         break;
                     }

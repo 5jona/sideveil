@@ -6,12 +6,22 @@ pub mod hud;
 pub mod plugin;
 pub mod rpc;
 pub mod sensor;
+pub mod svp;
 pub mod telemetry;
 pub mod theme;
 pub mod uds;
 
-/// Current SideVeil protocol schema version.
-pub const PROTOCOL_VERSION: u32 = 1;
+/// Current SideVeil wire protocol version.
+pub const PROTOCOL_VERSION: u32 =
+    generated::protocol_constants::protocol_versions::PROTOCOL_VERSION;
+
+/// Current SideVeil plugin API version.
+pub const PLUGIN_API_VERSION: u32 =
+    generated::protocol_constants::protocol_versions::PLUGIN_API_VERSION;
+
+/// Current SideVeil plugin `manifest.json` schema version.
+pub const MANIFEST_SCHEMA_VERSION: u32 =
+    generated::protocol_constants::protocol_versions::MANIFEST_SCHEMA_VERSION;
 
 /// Canonical Android package name for the headless render host `priv-app`.
 pub const DEFAULT_HOST_PACKAGE: &str = "pochita.sideveil.host";

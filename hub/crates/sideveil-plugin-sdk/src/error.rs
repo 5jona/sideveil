@@ -64,6 +64,10 @@ pub enum SdkError {
     #[error("plugin backend runner channel closed")]
     ChannelClosed,
 
+    /// Non-blocking reliable event queue is full; frame was not enqueued.
+    #[error("reliable event queue full; frame dropped")]
+    ReliableQueueFull,
+
     /// Non-blocking ephemeral event queue is full; frame was dropped to preserve backpressure isolation.
     #[error("ephemeral event queue full; frame dropped")]
     EphemeralQueueFull,
@@ -124,9 +128,9 @@ impl PluginRpcError {
         Self::new(error_codes::INTERNAL_ERROR, message)
     }
 
-    /// Converts this error into a wire [`RpcResponse`] correlated with `id`.
+    /// Converts this error into a wire [`RpcResponse`] correlated with `id`, preserving `data`.
     #[must_use]
     pub fn into_rpc_response(self, id: impl Into<String>) -> RpcResponse {
-        RpcResponse::err(id, self.code, self.message)
+        RpcResponse::err_with_data(id, self.code, self.message, self.data)
     }
 }

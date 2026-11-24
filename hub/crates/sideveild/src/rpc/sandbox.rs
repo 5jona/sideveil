@@ -1,4 +1,4 @@
-//! Plugin-scoped sandboxed RPC handlers (`plugin.invoke`, `fs.*`, `system.exec`).
+//! Plugin-scoped sandboxed RPC handlers (`plugin.invoke`, `fs.*`, `system.exec`, `hud.*`).
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -12,6 +12,7 @@ use sideveil_protocol::rpc::error_codes;
 
 use super::{decode_params, require_plugin_id, serialize_result};
 use crate::plugin_acl;
+use crate::rate_limiter::RateLimitBucket;
 use crate::state::HubState;
 use crate::telemetry;
 
@@ -61,7 +62,8 @@ pub(super) fn handle_fs_read(
 ) -> Result<Value, (i32, String)> {
     let pid = require_plugin_id(caller_plugin_id)?;
     let res = plugin_acl::handle_fs_read(state.plugin_registry(), state.data_dir(), pid, params);
-    state.audit().record(pid, "fs.read", res.is_ok(), "");
+    let detail = res.as_ref().err().map_or("", |(_, msg)| msg.as_str());
+    state.audit().record(pid, "fs.read", res.is_ok(), detail);
     res
 }
 
@@ -73,7 +75,10 @@ pub(super) fn handle_fs_write_atomic(
     let pid = require_plugin_id(caller_plugin_id)?;
     let res =
         plugin_acl::handle_fs_write_atomic(state.plugin_registry(), state.data_dir(), pid, params);
-    state.audit().record(pid, "fs.writeAtomic", res.is_ok(), "");
+    let detail = res.as_ref().err().map_or("", |(_, msg)| msg.as_str());
+    state
+        .audit()
+        .record(pid, "fs.writeAtomic", res.is_ok(), detail);
     res
 }
 
@@ -83,9 +88,30 @@ pub(super) async fn handle_system_exec(
     params: Option<Value>,
 ) -> Result<Value, (i32, String)> {
     let pid = require_plugin_id(caller_plugin_id)?;
-    let res = plugin_acl::handle_system_exec(state.plugin_registry(), pid, params).await;
-    state.audit().record(pid, "system.exec", res.is_ok(), "");
-    res
+    if !state
+        .rate_limiter()
+        .check_and_record(pid, RateLimitBucket::SystemExec)
+    {
+        state
+            .audit()
+            .record(pid, "system.exec", false, "rate limited");
+        return Err((
+            error_codes::RATE_LIMITED,
+            format!("Plugin '{pid}' exceeded system.exec rate limit"),
+        ));
+    }
+    match plugin_acl::handle_system_exec(state.plugin_registry(), pid, params).await {
+        Ok(outcome) => {
+            state
+                .audit()
+                .record(pid, "system.exec", true, outcome.audit_detail);
+            Ok(outcome.response)
+        }
+        Err((code, msg)) => {
+            state.audit().record(pid, "system.exec", false, msg.clone());
+            Err((code, msg))
+        }
+    }
 }
 
 pub(super) fn handle_bus_publish(
@@ -107,6 +133,18 @@ pub(super) fn handle_bus_publish(
         return Err((
             error_codes::PERMISSION_DENIED,
             format!("Plugin '{pid}' lacks 'inter-plugin-bus' capability"),
+        ));
+    }
+    if !state
+        .rate_limiter()
+        .check_and_record(pid, RateLimitBucket::BusPublish)
+    {
+        state
+            .audit()
+            .record(pid, "plugin.busPublish", false, "rate limited");
+        return Err((
+            error_codes::RATE_LIMITED,
+            format!("Plugin '{pid}' exceeded plugin.busPublish rate limit"),
         ));
     }
     let parsed: PluginBusPublishParams = decode_params(params)?;
@@ -194,6 +232,15 @@ pub(super) fn handle_hud_update(
                 format!("Plugin '{pid}' lacks 'native-hud' capability"),
             ));
         }
+        if !state
+            .rate_limiter()
+            .check_and_record(pid, RateLimitBucket::HudUpdate)
+        {
+            return Err((
+                error_codes::RATE_LIMITED,
+                format!("Plugin '{pid}' exceeded hud.updateScene rate limit"),
+            ));
+        }
         scene.plugin_id = pid.to_owned();
     } else if scene.plugin_id.trim().is_empty() {
         scene.plugin_id = caller_plugin_id.unwrap_or("sideveil.host").to_owned();
@@ -213,7 +260,17 @@ pub(super) fn handle_hud_dismiss(
             .and_then(|v| serde_json::from_value::<HudDismissPayload>(v).ok())
             .and_then(|p| p.plugin_id)
     } else {
-        Some(require_plugin_id(caller_plugin_id)?.to_owned())
+        let pid = require_plugin_id(caller_plugin_id)?;
+        if !state
+            .plugin_registry()
+            .has_capability(pid, PluginCapability::NativeHud)
+        {
+            return Err((
+                error_codes::PERMISSION_DENIED,
+                format!("Plugin '{pid}' lacks 'native-hud' capability"),
+            ));
+        }
+        Some(pid.to_owned())
     };
     state.dismiss_hud(target);
     Ok(json!({ "ok": true }))

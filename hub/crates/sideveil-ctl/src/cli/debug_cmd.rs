@@ -1,4 +1,4 @@
-//! `sideveil-ctl debug ...` subcommand parser (`inspect-ui`, `cdp <on|off|status>`, `reset-frames`, `mode [release|debug]`).
+//! `sideveil-ctl debug ...` subcommand parser (`inspect-ui`, `cdp <on|off|status>`, `reset-frames`).
 
 use std::time::Duration;
 
@@ -20,11 +20,10 @@ pub(super) fn parse_debug_subcommand(args: &[String]) -> Result<ParsedDebugCmd, 
         "inspect-ui" => parse_inspect_ui(&args[1..]),
         "cdp" => parse_cdp(&args[1..]),
         "reset-frames" => parse_reset_frames(&args[1..]),
-        "mode" => parse_mode(&args[1..]),
         other => Err((
             2,
             format!(
-                "Unknown debug subcommand '{other}'. Usage: sideveil-ctl debug <inspect-ui [--timeout-ms <ms>]|cdp <on|off|status>|reset-frames|mode [release|debug]>"
+                "Unknown debug subcommand '{other}'. Usage: sideveil-ctl debug <inspect-ui [--timeout-ms <ms>]|cdp <on|off|status>|reset-frames>"
             ),
         )),
     }
@@ -115,30 +114,4 @@ fn parse_reset_frames(args: &[String]) -> Result<ParsedDebugCmd, (u8, String)> {
         },
         io_timeout: Some(Duration::from_secs(7)),
     })
-}
-
-fn parse_mode(args: &[String]) -> Result<ParsedDebugCmd, (u8, String)> {
-    match args {
-        [] => Ok(ParsedDebugCmd {
-            action: CliAction::Rpc {
-                method: methods::CONFIG_GET.to_owned(),
-                params: None,
-                output_mode: OutputMode::RuntimeMode,
-            },
-            io_timeout: None,
-        }),
-        [mode] if mode == "release" || mode == "debug" => Ok(ParsedDebugCmd {
-            action: CliAction::Rpc {
-                method: methods::DEBUG_SET_RUNTIME_MODE.to_owned(),
-                params: Some(json!({ "runtimeMode": mode })),
-                output_mode: OutputMode::FullEnvelope,
-            },
-            io_timeout: None,
-        }),
-        _ => Err((
-            2,
-            "Invalid arguments for debug mode. Usage: sideveil-ctl debug mode [release|debug]"
-                .to_owned(),
-        )),
-    }
 }

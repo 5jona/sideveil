@@ -1,4 +1,4 @@
-//! Atomic `web-embed` plugin creation and external plugin directory removal.
+//! Atomic `web-embed` plugin creation and external plugin directory & data cleanup.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
@@ -7,25 +7,25 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use sideveil_protocol::plugin::{
-    BUILTIN_DIAG_PLUGIN_ID, PluginBackendKind, PluginCreateWebEmbedParams, PluginEmbedPrefs,
-    PluginManifest, PluginSurfacePrefs, PluginTriggers, validate_plugin_id,
+    PluginBackendKind, PluginCreateWebEmbedParams, PluginManifest, PluginManifestEmbedPrefs,
+    PluginManifestSurfacePrefs, PluginManifestTriggers, validate_plugin_id,
 };
+use sideveil_protocol::{MANIFEST_SCHEMA_VERSION, PLUGIN_API_VERSION};
 
 use super::error::PluginRegistryError;
-use super::installer::try_chown_root_system;
+use super::installer::{is_reserved_plugin_id, try_chown_root_system};
 
 static EMBED_SEQ: AtomicU64 = AtomicU64::new(1);
 
 /// Creates a zero-privilege `web-embed` plugin by atomically writing `<plugins_dir>/<id>/manifest.json`.
 pub(super) fn create_web_embed_plugin(
     plugins_dir: &Path,
+    bundled_dir: Option<&Path>,
     params: &PluginCreateWebEmbedParams,
 ) -> Result<PluginManifest, PluginRegistryError> {
     let id = params.id.trim().to_owned();
-    if id == BUILTIN_DIAG_PLUGIN_ID {
-        return Err(PluginRegistryError::BuiltinProtected(
-            BUILTIN_DIAG_PLUGIN_ID.to_owned(),
-        ));
+    if is_reserved_plugin_id(&id) || bundled_dir.is_some_and(|d| d.join(&id).is_dir()) {
+        return Err(PluginRegistryError::BuiltinProtected(id));
     }
 
     if let Some(w) = params.width_dp
@@ -53,51 +53,68 @@ pub(super) fn create_web_embed_plugin(
         .map(str::to_owned);
 
     let manifest = PluginManifest {
+        schema_version: Some(MANIFEST_SCHEMA_VERSION),
+        api_version: Some(PLUGIN_API_VERSION),
+        min_host_version: None,
         id: id.clone(),
         name: params.name.trim().to_owned(),
         version: "1.0.0".to_owned(),
+        description: None,
+        author: None,
+        homepage: None,
         icon: None,
-        triggers: PluginTriggers {
-            packages: params
-                .packages
-                .iter()
-                .map(|p| p.trim().to_owned())
-                .filter(|p| !p.is_empty())
-                .collect(),
-            activities: Vec::new(),
-            global: params.global,
-            priority: params.priority.unwrap_or(10).clamp(-1000, 1000),
-        },
-        entry: String::new(),
-        backend: PluginBackendKind::None,
-        capabilities: Vec::new(),
-        surface: PluginSurfacePrefs {
-            keep_alive: params.keep_alive,
+        default_enabled: Some(true),
+        triggers: Some(PluginManifestTriggers {
+            packages: Some(
+                params
+                    .packages
+                    .iter()
+                    .map(|p| p.trim().to_owned())
+                    .filter(|p| !p.is_empty())
+                    .collect(),
+            ),
+            activities: Some(Vec::new()),
+            global: Some(params.global),
+            priority: Some(params.priority.unwrap_or(10).clamp(-1000, 1000)),
+        }),
+        entry: Some(String::new()),
+        backend: Some(PluginBackendKind::None),
+        backend_packages: None,
+        daemon: None,
+        capabilities: Some(Vec::new()),
+        surface: Some(PluginManifestSurfacePrefs {
+            backdrop: None,
+            presentation: None,
+            cross_origin_isolated: None,
+            keep_alive: Some(params.keep_alive),
             width_dp: params.width_dp,
             height_percent: params.height_percent,
-            ..PluginSurfacePrefs::default()
-        },
-        embed: Some(PluginEmbedPrefs {
+        }),
+        embed: Some(PluginManifestEmbedPrefs {
             url: params.url.trim().to_owned(),
             remote_url,
-            lan_ssids: params
-                .lan_ssids
-                .iter()
-                .map(|s| s.trim().to_owned())
-                .filter(|s| !s.is_empty())
-                .collect(),
-            allowed_origins: params
-                .allowed_origins
-                .iter()
-                .map(|o| o.trim().to_owned())
-                .filter(|o| !o.is_empty())
-                .collect(),
-            allow_cleartext: params.allow_cleartext,
-            wide_viewport: params.wide_viewport.unwrap_or(true),
-            allow_zoom: params.allow_zoom.unwrap_or(false),
-            web_history_back: params.web_history_back.unwrap_or(true),
+            lan_ssids: Some(
+                params
+                    .lan_ssids
+                    .iter()
+                    .map(|s| s.trim().to_owned())
+                    .filter(|s| !s.is_empty())
+                    .collect(),
+            ),
+            allowed_origins: Some(
+                params
+                    .allowed_origins
+                    .iter()
+                    .map(|o| o.trim().to_owned())
+                    .filter(|o| !o.is_empty())
+                    .collect(),
+            ),
+            allow_cleartext: Some(params.allow_cleartext),
+            wide_viewport: Some(params.wide_viewport.unwrap_or(true)),
+            allow_zoom: Some(params.allow_zoom.unwrap_or(false)),
+            web_history_back: Some(params.web_history_back.unwrap_or(true)),
             text_zoom: params.text_zoom,
-            show_toolbar: params.show_toolbar.unwrap_or(true),
+            show_toolbar: Some(params.show_toolbar.unwrap_or(true)),
             keep_alive_grace_sec: params.keep_alive_grace_sec,
         }),
         network: None,
@@ -110,6 +127,11 @@ pub(super) fn create_web_embed_plugin(
     })?;
 
     let plugin_dir = plugins_dir.join(&id);
+    if plugin_dir.exists() {
+        return Err(PluginRegistryError::InstallConstraint(format!(
+            "plugin '{id}' already exists; uninstall it before creating a web-embed with the same ID"
+        )));
+    }
     fs::create_dir_all(&plugin_dir).map_err(|source| PluginRegistryError::Io {
         context: format!("failed to create plugin dir '{}'", plugin_dir.display()),
         source,
@@ -162,10 +184,8 @@ pub(super) fn uninstall_plugin_dir(
 ) -> Result<(), PluginRegistryError> {
     let id = plugin_id.trim();
     validate_plugin_id(id)?;
-    if id == BUILTIN_DIAG_PLUGIN_ID {
-        return Err(PluginRegistryError::BuiltinProtected(
-            BUILTIN_DIAG_PLUGIN_ID.to_owned(),
-        ));
+    if is_reserved_plugin_id(id) {
+        return Err(PluginRegistryError::BuiltinProtected(id.to_owned()));
     }
 
     let plugins_canon =
@@ -190,4 +210,24 @@ pub(super) fn uninstall_plugin_dir(
         context: format!("failed to remove plugin directory '{id}'"),
         source,
     })
+}
+
+/// Safely removes `/data/system/sideveil/data/<plugin_id>/` when uninstalling a plugin.
+pub(super) fn remove_plugin_data_dir(data_dir: &Path, plugin_id: &str) {
+    let Ok(base_canon) = fs::canonicalize(data_dir) else {
+        return;
+    };
+    let candidate = base_canon.join(plugin_id);
+    let Ok(meta) = fs::symlink_metadata(&candidate) else {
+        return;
+    };
+    if meta.file_type().is_symlink() || !meta.file_type().is_dir() {
+        return;
+    }
+    if let Ok(target_canon) = fs::canonicalize(&candidate)
+        && target_canon.starts_with(&base_canon)
+        && target_canon != base_canon
+    {
+        let _ = fs::remove_dir_all(target_canon);
+    }
 }

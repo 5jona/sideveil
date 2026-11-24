@@ -10,9 +10,10 @@ use tokio::net::UnixListener;
 
 use crate::fs_util::chown_path;
 
-const MAX_LINE_BYTES: usize = 256 * 1024;
+pub(super) const DEFAULT_MAX_LINE_BYTES: usize = 1024 * 1024;
+pub(super) const CTL_MAX_LINE_BYTES: usize = 24 * 1024 * 1024;
 
-/// Reads a single newline-delimited UTF-8 frame up to `MAX_LINE_BYTES` into the caller-owned
+/// Reads a single newline-delimited UTF-8 frame up to `max_line_bytes` into the caller-owned
 /// `buf`, preserving partial bytes across `tokio::select!` cancellations.
 ///
 /// Because `buf` lives across polls in the caller, dropping this future between `fill_buf()`
@@ -21,6 +22,7 @@ const MAX_LINE_BYTES: usize = 256 * 1024;
 pub(super) async fn read_bounded_line<R: AsyncRead + Unpin>(
     reader: &mut BufReader<R>,
     buf: &mut Vec<u8>,
+    max_line_bytes: usize,
 ) -> io::Result<Option<String>> {
     loop {
         let available = reader.fill_buf().await?;
@@ -31,7 +33,7 @@ pub(super) async fn read_bounded_line<R: AsyncRead + Unpin>(
             break;
         }
         if let Some(pos) = available.iter().position(|&b| b == b'\n') {
-            if buf.len() + pos > MAX_LINE_BYTES {
+            if buf.len() + pos > max_line_bytes {
                 buf.clear();
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -42,7 +44,7 @@ pub(super) async fn read_bounded_line<R: AsyncRead + Unpin>(
             reader.consume(pos + 1);
             break;
         }
-        if buf.len() + available.len() > MAX_LINE_BYTES {
+        if buf.len() + available.len() > max_line_bytes {
             buf.clear();
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -109,7 +111,7 @@ mod tests {
             .expect("write first chunk");
 
         let cancelled = tokio::select! {
-            _ = read_bounded_line(&mut reader, &mut line_buf) => false,
+            _ = read_bounded_line(&mut reader, &mut line_buf, DEFAULT_MAX_LINE_BYTES) => false,
             () = tokio::time::sleep(Duration::from_millis(20)) => true,
         };
         assert!(cancelled, "select branch should cancel mid-frame");
@@ -121,20 +123,20 @@ mod tests {
             .expect("write remaining chunks");
         drop(writer);
 
-        let first = read_bounded_line(&mut reader, &mut line_buf)
+        let first = read_bounded_line(&mut reader, &mut line_buf, DEFAULT_MAX_LINE_BYTES)
             .await
             .expect("resume line")
             .expect("first line");
         assert_eq!(first, r#"{"jsonrpc":"2.0","method":"ping"}"#);
 
-        let second = read_bounded_line(&mut reader, &mut line_buf)
+        let second = read_bounded_line(&mut reader, &mut line_buf, DEFAULT_MAX_LINE_BYTES)
             .await
             .expect("second line")
             .expect("second line");
         assert_eq!(second, r#"{"next":true}"#);
 
         assert_eq!(
-            read_bounded_line(&mut reader, &mut line_buf)
+            read_bounded_line(&mut reader, &mut line_buf, DEFAULT_MAX_LINE_BYTES)
                 .await
                 .expect("eof"),
             None
@@ -143,21 +145,45 @@ mod tests {
 
     #[tokio::test]
     async fn read_bounded_line_rejects_oversized_frame() {
-        let (mut writer, reader_half) = duplex(MAX_LINE_BYTES + 1024);
+        let (mut writer, reader_half) = duplex(DEFAULT_MAX_LINE_BYTES + 1024);
         let mut reader = BufReader::new(reader_half);
         let mut line_buf = Vec::new();
 
-        let oversized = vec![b'a'; MAX_LINE_BYTES + 16];
+        let oversized = vec![b'a'; DEFAULT_MAX_LINE_BYTES + 16];
         let write_task = tokio::spawn(async move {
             let _ = writer.write_all(&oversized).await;
             let _ = writer.write_all(b"\n").await;
         });
 
-        let err = read_bounded_line(&mut reader, &mut line_buf)
+        let err = read_bounded_line(&mut reader, &mut line_buf, DEFAULT_MAX_LINE_BYTES)
             .await
             .expect_err("oversized frame should fail");
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
         assert!(line_buf.is_empty());
+        let _ = write_task.await;
+    }
+
+    #[tokio::test]
+    async fn read_bounded_line_allows_large_ctl_payloads_under_ctl_limit() {
+        let payload_len = DEFAULT_MAX_LINE_BYTES + 4096;
+        let (mut writer, reader_half) = duplex(64 * 1024);
+        let mut reader = BufReader::new(reader_half);
+        let mut line_buf = Vec::new();
+        let write_task = tokio::spawn(async move {
+            let chunk = vec![b'x'; 32 * 1024];
+            let mut rem = payload_len;
+            while rem > 0 {
+                let n = rem.min(chunk.len());
+                writer.write_all(&chunk[..n]).await.expect("write chunk");
+                rem -= n;
+            }
+            writer.write_all(b"\n").await.expect("write nl");
+        });
+        let line = read_bounded_line(&mut reader, &mut line_buf, CTL_MAX_LINE_BYTES)
+            .await
+            .expect("ctl large line")
+            .expect("some line");
+        assert_eq!(line.len(), payload_len);
         let _ = write_task.await;
     }
 }

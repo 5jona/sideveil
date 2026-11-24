@@ -6,6 +6,7 @@ use futures_util::StreamExt;
 use sideveil_protocol::plugin::PluginBackendEvent;
 use sideveil_protocol::rpc::RpcResponse;
 use sideveil_protocol::uds::{BackendOutboundFrame, UdsClientHello, UdsHandshakeAck};
+use sideveil_protocol::{PLUGIN_API_VERSION, PROTOCOL_VERSION};
 use tokio::net::UnixStream;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::codec::{Framed, LinesCodec};
@@ -26,10 +27,16 @@ pub(crate) struct OutboundReceivers {
     pub(crate) ephemeral_rx: mpsc::Receiver<PluginBackendEvent>,
 }
 
+pub(crate) struct HandshakeSession {
+    pub(crate) framed: Framed<UnixStream, LinesCodec>,
+    pub(crate) protocol_version: u32,
+    pub(crate) api_version: u32,
+}
+
 pub(crate) async fn connect_and_handshake(
     config: &PluginBackendConfig,
     cancel: &CancellationToken,
-) -> Result<Framed<UnixStream, LinesCodec>, SdkError> {
+) -> Result<HandshakeSession, SdkError> {
     let stream = tokio::select! {
         biased;
         () = cancel.cancelled() => return Err(SdkError::Cancelled),
@@ -51,6 +58,7 @@ pub(crate) async fn connect_and_handshake(
     let hello = UdsClientHello::PluginBackend {
         plugin_id: config.plugin_id.clone(),
         package_name: config.package_name.clone(),
+        protocol_version: PROTOCOL_VERSION,
     };
 
     let handshake = async {
@@ -63,7 +71,11 @@ pub(crate) async fn connect_and_handshake(
                 ack.error.unwrap_or_else(|| "handshake rejected".to_owned()),
             ));
         }
-        Ok(framed)
+        Ok(HandshakeSession {
+            framed,
+            protocol_version: ack.protocol_version,
+            api_version: ack.api_version.unwrap_or(PLUGIN_API_VERSION),
+        })
     };
 
     tokio::select! {
@@ -85,13 +97,13 @@ pub(crate) async fn run_active_session<H: PluginRpcHandler>(
     plugin_id: &Arc<str>,
     handle: &PluginBackendHandle,
     cancel: &CancellationToken,
-    framed: Framed<UnixStream, LinesCodec>,
+    session: HandshakeSession,
     receivers: OutboundReceivers,
     handler: &Arc<H>,
 ) -> Option<OutboundReceivers> {
     let session_cancel = cancel.child_token();
     let tracker = TaskTracker::new();
-    let (mut sink, mut stream) = framed.split();
+    let (mut sink, mut stream) = session.framed.split();
     let (rpc_reply_tx, mut rpc_reply_rx) =
         mpsc::channel::<RpcResponse>(config.reliable_queue_capacity);
 
@@ -103,6 +115,9 @@ pub(crate) async fn run_active_session<H: PluginRpcHandler>(
         Arc::clone(plugin_id),
         handle.clone(),
         session_cancel.clone(),
+        config.data_dir.clone(),
+        session.protocol_version,
+        session.api_version,
     );
 
     let on_conn_handler = Arc::clone(handler);

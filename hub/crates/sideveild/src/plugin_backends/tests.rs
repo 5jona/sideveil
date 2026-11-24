@@ -11,7 +11,9 @@ use super::*;
 #[tokio::test]
 async fn invoke_honors_custom_timeout_and_resolves_responses() {
     let backends = Arc::new(PluginBackends::new());
-    let (session_id, mut rx) = backends.register("demo.backend", true);
+    let (session_id, mut rx, _disc) = backends
+        .register("demo.backend", true, 0)
+        .expect("register");
 
     let b_clone = Arc::clone(&backends);
     let responder = tokio::spawn(async move {
@@ -57,8 +59,9 @@ async fn invoke_honors_custom_timeout_and_resolves_responses() {
 #[tokio::test]
 async fn broadcast_system_event_reaches_native_only_and_never_blocks() {
     let backends = Arc::new(PluginBackends::new());
-    let (_native_id, mut native_rx) = backends.register("native.plugin", true);
-    let (_app_id, mut app_rx) = backends.register("app.plugin", false);
+    let (_native_id, mut native_rx, _d1) =
+        backends.register("native.plugin", true, 0).expect("native");
+    let (_app_id, mut app_rx, _d2) = backends.register("app.plugin", false, 10200).expect("app");
 
     backends.broadcast_system_event("network.contextChanged", json!({ "transport": "wifi" }));
 
@@ -83,8 +86,9 @@ async fn broadcast_system_event_reaches_native_only_and_never_blocks() {
 #[tokio::test]
 async fn send_system_event_targets_only_matching_native_session() {
     let backends = Arc::new(PluginBackends::new());
-    let (native_id, mut native_rx) = backends.register("native.plugin", true);
-    let (app_id, mut app_rx) = backends.register("app.plugin", false);
+    let (native_id, mut native_rx, _d1) =
+        backends.register("native.plugin", true, 0).expect("native");
+    let (app_id, mut app_rx, _d2) = backends.register("app.plugin", false, 10200).expect("app");
 
     backends.send_system_event(
         "native.plugin",

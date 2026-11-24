@@ -1,10 +1,12 @@
-//! Cloneable plugin backend handle exposing dual-priority event emission and connection state.
+//! Cloneable plugin backend handle exposing dual-priority event emission, HUD helpers, and connection state.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde_json::Value;
+use sideveil_protocol::hud::NativeHudScene;
 use sideveil_protocol::plugin::PluginBackendEvent;
+use sideveil_protocol::rpc::methods;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio_util::sync::CancellationToken;
@@ -65,6 +67,18 @@ impl PluginBackendHandle {
         self.cancel.cancel();
     }
 
+    /// Pushes a typed [`NativeHudScene`] frame over the non-blocking ephemeral queue.
+    pub async fn push_hud(&self, scene: &NativeHudScene) -> Result<(), SdkError> {
+        let payload = serde_json::to_value(scene)?;
+        self.emit_event(methods::HUD_UPDATE_SCENE, Some(payload), true)
+            .await
+    }
+
+    /// Dismisses this plugin's active native HUD overlay reliably.
+    pub async fn dismiss_hud(&self) -> Result<(), SdkError> {
+        self.emit_event(methods::HUD_DISMISS, None, false).await
+    }
+
     /// Emits a plugin event toward `sideveild`.
     ///
     /// When `ephemeral` is `true`, uses a non-blocking send on the bounded ephemeral queue so
@@ -83,7 +97,7 @@ impl PluginBackendHandle {
             ephemeral,
         };
         if ephemeral {
-            return map_try_send(self.ephemeral_tx.try_send(frame));
+            return map_try_send_ephemeral(self.ephemeral_tx.try_send(frame));
         }
         tokio::select! {
             biased;
@@ -105,10 +119,10 @@ impl PluginBackendHandle {
             ephemeral,
         };
         if ephemeral {
-            map_try_send(self.ephemeral_tx.try_send(frame))
+            map_try_send_ephemeral(self.ephemeral_tx.try_send(frame))
         } else {
             self.reliable_tx.try_send(frame).map_err(|err| match err {
-                TrySendError::Full(_) => SdkError::EphemeralQueueFull,
+                TrySendError::Full(_) => SdkError::ReliableQueueFull,
                 TrySendError::Closed(_) => SdkError::ChannelClosed,
             })
         }
@@ -119,7 +133,7 @@ impl PluginBackendHandle {
     }
 }
 
-fn map_try_send<T>(res: Result<(), TrySendError<T>>) -> Result<(), SdkError> {
+fn map_try_send_ephemeral<T>(res: Result<(), TrySendError<T>>) -> Result<(), SdkError> {
     res.map_err(|err| match err {
         TrySendError::Full(_) => SdkError::EphemeralQueueFull,
         TrySendError::Closed(_) => SdkError::ChannelClosed,

@@ -6,9 +6,7 @@ mod sections;
 use serde::{Deserialize, Serialize};
 
 pub use self::patches::{AppearancePatchParams, EdgePatchParams};
-pub use self::sections::{
-    DebugConfig, EdgeConfig, EdgeSide, PanelConfig, RuntimeMode, ScopeConfig, ScopeMode,
-};
+pub use self::sections::{DebugConfig, EdgeConfig, EdgeSide, PanelConfig, ScopeConfig, ScopeMode};
 use crate::generated::config_bounds::{bounds, defaults};
 pub use crate::generated::protocol_constants::themes::{
     COLOROS_GLASS as THEME_COLOROS_GLASS, MODERN_SAAS_DARK as THEME_MODERN_SAAS_DARK,

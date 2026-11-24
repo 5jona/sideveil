@@ -28,5 +28,6 @@ install -m 0644 "${SRC_DIR}/sideveilConstants.ts" "${BRIDGE_DST}/sideveilConstan
 install -m 0644 "${SRC_DIR}/sideveilConfig.ts" "${BRIDGE_DST}/sideveilConfig.ts"
 install -m 0644 "${SRC_DIR}/sideveilWire.ts" "${SDK_DST}/sideveilWire.ts"
 install -m 0644 "${SRC_DIR}/sideveilThemeHud.ts" "${SDK_DST}/sideveilThemeHud.ts"
+install -m 0644 "${SRC_DIR}/sideveilPlugin.ts" "${SDK_DST}/sideveilPlugin.ts"
 
-echo "[+] Synced 4 generated TypeScript contract files to ${KIT_ROOT}"
+echo "[+] Synced 5 generated TypeScript contract files to ${KIT_ROOT}"

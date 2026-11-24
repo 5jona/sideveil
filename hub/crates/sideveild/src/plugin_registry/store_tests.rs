@@ -74,11 +74,12 @@ fn builtin_diag_manifest_declares_storage_and_toast() {
     assert_eq!(m.id, BUILTIN_DIAG_PLUGIN_ID);
     assert_eq!(m.name, "内置诊断");
     assert_eq!(m.version, "0.1.0");
-    assert!(!m.triggers.global);
-    assert_eq!(m.triggers.priority, 20);
+    let triggers = m.effective_triggers();
+    assert!(!triggers.global);
+    assert_eq!(triggers.priority, 20);
     assert_eq!(
-        m.capabilities,
-        vec![PluginCapability::Storage, PluginCapability::Toast]
+        m.effective_capabilities(),
+        &[PluginCapability::Storage, PluginCapability::Toast]
     );
 }
 

@@ -83,12 +83,16 @@ pub(super) async fn parse_http_headers<R: AsyncRead + Unpin>(
         .to_owned();
 
     let mut authorization = None;
-    let mut origin = None;
-    for _ in 0..MAX_HEADER_LINES {
+    let mut origin: Option<String> = None;
+    let mut origin_count = 0usize;
+    let mut saw_terminator = false;
+    for _ in 0..=MAX_HEADER_LINES {
         let Some(line) = read_bounded_http_line(reader, MAX_HEADER_LINE_BYTES).await? else {
+            saw_terminator = true;
             break;
         };
         if line.is_empty() {
+            saw_terminator = true;
             break;
         }
         total_bytes = total_bytes.saturating_add(line.len());
@@ -104,9 +108,23 @@ pub(super) async fn parse_http_headers<R: AsyncRead + Unpin>(
             if lower == "authorization" {
                 authorization = Some(val);
             } else if lower == "origin" {
-                origin = Some(val);
+                origin_count += 1;
+                if origin.is_none() || !val.is_empty() {
+                    origin = Some(val);
+                }
             }
         }
+    }
+
+    if !saw_terminator {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "too many HTTP headers",
+        ));
+    }
+
+    if origin_count > 1 {
+        origin = Some("duplicate-origin".to_owned());
     }
 
     Ok(ParsedHttpRequest {
@@ -180,7 +198,7 @@ pub(crate) fn cache_headers_for(raw_rel: &str, path: &Path, meta: &Metadata) -> 
 pub(super) async fn write_no_content(
     writer: &mut tokio::net::tcp::OwnedWriteHalf,
 ) -> io::Result<()> {
-    let resp = "HTTP/1.1 204 No Content\r\nCache-Control: private, max-age=300\r\nConnection: close\r\n\r\n";
+    let resp = "HTTP/1.1 204 No Content\r\nCache-Control: private, max-age=300\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n";
     writer.write_all(resp.as_bytes()).await?;
     writer.flush().await
 }
@@ -191,7 +209,7 @@ pub(super) async fn write_error(
     reason: &str,
 ) -> io::Result<()> {
     let resp = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reason}",
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n{reason}",
         reason.len()
     );
     writer.write_all(resp.as_bytes()).await?;
@@ -240,5 +258,20 @@ mod tests {
         assert_eq!(parsed.target, "/plugins/demo/web/index.html");
         assert_eq!(parsed.authorization.as_deref(), Some("Bearer secret"));
         assert_eq!(parsed.origin.as_deref(), Some("https://example.test"));
+    }
+
+    #[tokio::test]
+    async fn rejects_requests_exceeding_max_header_lines() {
+        let mut raw = String::from("GET /plugins/demo/web/index.html HTTP/1.1\r\n");
+        for i in 0..=MAX_HEADER_LINES {
+            raw.push_str(&format!("X-Pad-{i}: v\r\n"));
+        }
+        raw.push_str("Origin: https://evil.test\r\n\r\n");
+        let mut reader = BufReader::new(raw.as_bytes());
+        let err = parse_http_headers(&mut reader)
+            .await
+            .err()
+            .expect("65+ headers must fail");
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
     }
 }

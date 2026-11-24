@@ -8,9 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, PoisonError, RwLock};
 use std::time::Duration;
 
-use sideveil_protocol::config::{
-    AppearancePatchParams, EdgePatchParams, RuntimeMode, SideVeilConfig,
-};
+use sideveil_protocol::config::{AppearancePatchParams, EdgePatchParams, SideVeilConfig};
 use tokio::sync::broadcast;
 
 use crate::fs_util::write_file_atomic;
@@ -118,23 +116,6 @@ impl ConfigStore {
             let prev = guard.debug.webview_debugging_enabled;
             let mut updated = guard.clone();
             updated.debug.webview_debugging_enabled = enabled;
-            let updated = updated.sanitized();
-            self.persist_config(&updated)?;
-            *guard = updated.clone();
-            (prev, updated)
-        };
-        let _ = self.updates_tx.send(next.clone());
-        Ok((prev, next))
-    }
-
-    /// Updates `debug.runtime_mode`, atomically persists it, and notifies subscribers.
-    /// Returns `(previous_mode, updated_config)`.
-    pub fn set_runtime_mode(&self, mode: RuntimeMode) -> io::Result<(RuntimeMode, SideVeilConfig)> {
-        let (prev, next) = {
-            let mut guard = self.current.write().unwrap_or_else(PoisonError::into_inner);
-            let prev = guard.debug.runtime_mode;
-            let mut updated = guard.clone();
-            updated.debug.runtime_mode = mode;
             let updated = updated.sanitized();
             self.persist_config(&updated)?;
             *guard = updated.clone();

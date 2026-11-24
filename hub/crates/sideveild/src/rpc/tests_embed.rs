@@ -332,7 +332,10 @@ async fn network_context_acl_gate_and_sensor_broadcast() {
     state.plugin_registry().rescan();
 
     // Connect a uds-native backend to verify system notification forwarding.
-    let (_sid, mut backend_rx) = state.plugin_backends().register("com.net.reader", true);
+    let (_sid, mut backend_rx, _disc) = state
+        .plugin_backends()
+        .register("com.net.reader", true, 0)
+        .expect("register backend");
 
     let ctx = NetworkContextSnapshot {
         transport: NetworkTransportKind::Wifi,
@@ -344,9 +347,18 @@ async fn network_context_acl_gate_and_sensor_broadcast() {
         gateway: Some("192.168.10.1".to_owned()),
         local_ipv4: Some("192.168.10.25".to_owned()),
     };
+    state.on_sensor_message(SensorToHub::NetworkContextChanged {
+        context: ctx.clone(),
+    });
+    assert!(backend_rx.try_recv().is_err());
+    let grant = call_ctl(
+        &state,
+        methods::PLUGINS_GRANT_CAPABILITIES,
+        Some(json!({ "pluginId": "com.net.reader", "grantAllPending": true })),
+    )
+    .await;
+    assert!(grant.error.is_none());
     state.on_sensor_message(SensorToHub::NetworkContextChanged { context: ctx });
-
-    // Connected native backend received network.contextChanged notification.
     let frame = backend_rx.try_recv().expect("backend system event");
     let frame_json = serde_json::to_value(&frame).expect("encode frame");
     assert_eq!(frame_json["event"], "network.contextChanged");

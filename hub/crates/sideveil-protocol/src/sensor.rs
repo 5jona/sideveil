@@ -2,8 +2,13 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::PROTOCOL_VERSION;
 use crate::config::{EdgeSide, PanelState, SideVeilConfig};
 pub use crate::generated::protocol_wire::DebugGestureStats;
+
+fn default_protocol_version() -> u32 {
+    PROTOCOL_VERSION
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -66,6 +71,8 @@ pub enum SensorToHub {
         foreground_package: String,
         #[serde(default)]
         foreground_activity: String,
+        #[serde(default = "default_protocol_version")]
+        protocol_version: u32,
     },
     #[serde(rename_all = "camelCase")]
     ForegroundChanged {

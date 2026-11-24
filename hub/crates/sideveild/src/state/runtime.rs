@@ -50,6 +50,7 @@ pub(crate) struct RuntimeSnapshot {
     pub(crate) host_pid: Option<u32>,
     pub(crate) cross_window_blur_supported: Option<bool>,
     pub(crate) sensor_pid: Option<u32>,
+    pub(crate) supervised_sensor_pid: Option<u32>,
     pub(crate) network_context: NetworkContextSnapshot,
     pub(crate) gesture_stats: Option<DebugGestureStats>,
 }
@@ -71,6 +72,7 @@ impl Default for RuntimeSnapshot {
             host_pid: None,
             cross_window_blur_supported: None,
             sensor_pid: None,
+            supervised_sensor_pid: None,
             network_context: NetworkContextSnapshot::default(),
             gesture_stats: None,
         }

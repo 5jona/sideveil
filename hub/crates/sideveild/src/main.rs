@@ -121,7 +121,13 @@ async fn run(args: DaemonArgs) -> io::Result<()> {
     ));
 
     let config_store = ConfigStore::open(args.config_path.clone(), Arc::clone(&logs));
-    let plugin_registry = PluginRegistry::open(plugins_dir, overrides_path, Arc::clone(&logs));
+    let bundled_plugins_dir = args.module_dir.join("plugins");
+    let plugin_registry = PluginRegistry::open_with_bundled(
+        plugins_dir,
+        Some(bundled_plugins_dir),
+        overrides_path,
+        Arc::clone(&logs),
+    );
     let (wake_tx, wake_rx) = mpsc::unbounded_channel();
     let state = HubState::new(
         args.host_package.clone(),
@@ -183,6 +189,16 @@ async fn run(args: DaemonArgs) -> io::Result<()> {
         }
     });
 
+    let mut daemon_status_rx = state.daemon_manager().subscribe_status();
+    let daemon_status_state = Arc::clone(&state);
+    let daemon_status_task = tokio::spawn(async move {
+        while let Ok(()) | Err(broadcast::error::RecvError::Lagged(_)) =
+            daemon_status_rx.recv().await
+        {
+            daemon_status_state.push_plugins_snapshot_to_host();
+        }
+    });
+
     let ws_server = HostWsServer::bind().await?;
     state.set_ws_port(ws_server.port());
     let ws_state = Arc::clone(&state);
@@ -236,6 +252,7 @@ async fn run(args: DaemonArgs) -> io::Result<()> {
     }
     cfg_forward_task.abort();
     plugin_forward_task.abort();
+    daemon_status_task.abort();
     ws_task.abort();
     uds_task.abort();
 

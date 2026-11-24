@@ -60,6 +60,16 @@ def verify_examples_and_invoke(dev: DeviceRunner) -> None:
     scope_id = "example.vello-scope"
     hud_id = "example.native-perf-hud"
 
+    snap_before = dev.ctl_json(["plugins", "list"])["result"]
+    prev_scope_enabled = next(
+        (bool(p.get("enabled")) for p in snap_before["plugins"] if p["id"] == scope_id),
+        False,
+    )
+    prev_hud_desc = next((p for p in snap_before["plugins"] if p["id"] == hud_id), None)
+    prev_hud_enabled = bool(prev_hud_desc.get("enabled")) if prev_hud_desc else False
+    prev_hud_approved = bool(prev_hud_desc.get("daemonApproved")) if prev_hud_desc else False
+    prev_hud_granted = list(prev_hud_desc.get("grantedCapabilities", [])) if prev_hud_desc else []
+
     try:
         tele = dev.ctl_json(["rpc", "telemetry.snapshot"])["result"]
         assert "cpuPercent" in tele and tele.get("memTotalMb", 0) > 0, f"Bad telemetry: {tele}"
@@ -68,10 +78,22 @@ def verify_examples_and_invoke(dev: DeviceRunner) -> None:
             f"mem={tele['memUsedMb']}/{tele['memTotalMb']}MB temp={tele.get('socTempC')}C"
         )
 
-        snap = dev.ctl_json(["plugins", "list"])["result"]
-        scope_desc = next((p for p in snap["plugins"] if p["id"] == scope_id), None)
-        hud_desc = next((p for p in snap["plugins"] if p["id"] == hud_id), None)
-        assert scope_desc is not None, f"Missing bundled {scope_id}: {snap}"
+        # Enable & approve bundled examples explicitly (bundled examples ship disabled by default).
+        dev.ctl_json(["plugins", "enable", scope_id])
+        dev.ctl_json(["plugins", "enable", hud_id])
+        dev.ctl_json(["plugins", "grant", hud_id, "--all-pending", "--approve-daemon"])
+
+        hud_desc = None
+        scope_desc = None
+        for _ in range(15):
+            snap = dev.ctl_json(["plugins", "list"])["result"]
+            scope_desc = next((p for p in snap["plugins"] if p["id"] == scope_id), None)
+            hud_desc = next((p for p in snap["plugins"] if p["id"] == hud_id), None)
+            if hud_desc and hud_desc.get("backendState") == "online":
+                break
+            time.sleep(0.3)
+
+        assert scope_desc is not None, f"Missing bundled {scope_id}"
         assert hud_desc is not None and hud_desc["backendState"] == "online", f"HUD offline: {hud_desc}"
 
         # Privileged CLI backend invocation with explicit --timeout-ms
@@ -105,6 +127,27 @@ def verify_examples_and_invoke(dev: DeviceRunner) -> None:
             f"[OK] example.vello-scope isolated + mounted (warm={audit_scope['diagnostics']['warmPluginIds']})"
         )
     finally:
+        if not prev_scope_enabled:
+            dev.ctl_json(["plugins", "disable", scope_id], check=False)
+        if not prev_hud_enabled:
+            dev.ctl_json(["plugins", "disable", hud_id], check=False)
+        if not prev_hud_approved:
+            dev.ctl_json(["plugins", "grant", hud_id, "--revoke-all"], check=False)
+        else:
+            dev.ctl_json(
+                [
+                    "rpc",
+                    "plugins.grantCapabilities",
+                    json.dumps(
+                        {
+                            "pluginId": hud_id,
+                            "capabilities": prev_hud_granted,
+                            "approveDaemon": True,
+                        }
+                    ),
+                ],
+                check=False,
+            )
         dev.su_sh(
             f"{CTL} plugins select sideveil.diagnostic >/dev/null 2>&1 || true; "
             f"{CTL} hud dismiss >/dev/null 2>&1 || true; "

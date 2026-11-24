@@ -14,6 +14,7 @@ from typing import Any, Callable
 
 from verify_live import (
     DeviceRunner,
+    verify_daemon_lifecycle,
     verify_debug_cdp,
     verify_debug_inspect_ui,
     verify_examples_and_invoke,
@@ -21,6 +22,7 @@ from verify_live import (
     verify_live_appearance,
     verify_native_hud,
     verify_plugins_e2e,
+    verify_svp_and_grants,
     verify_webview_console_zero_errors,
 )
 
@@ -63,19 +65,6 @@ def capture_log_baseline_seq(dev: DeviceRunner) -> int | None:
         return int(next_seq) if isinstance(next_seq, int) else None
     except Exception:  # noqa: BLE001
         return None
-
-
-def read_runtime_mode(dev: DeviceRunner) -> str:
-    try:
-        resp = dev.ctl_json(["rpc", "config.get"], check=False)
-        cfg = resp.get("result", resp) if isinstance(resp, dict) else {}
-        debug = cfg.get("debug") if isinstance(cfg, dict) else None
-        mode = debug.get("runtimeMode") if isinstance(debug, dict) else None
-        if mode in {"release", "debug"}:
-            return mode
-    except Exception:  # noqa: BLE001
-        pass
-    return "release"
 
 
 def main() -> int:
@@ -128,6 +117,8 @@ def main() -> int:
         ("health", lambda: verify_health(dev)),
         ("native_hud", lambda: verify_native_hud(dev)),
         ("plugins_e2e", lambda: verify_plugins_e2e(dev)),
+        ("svp_and_grants", lambda: verify_svp_and_grants(dev)),
+        ("daemon_lifecycle", lambda: verify_daemon_lifecycle(dev)),
         ("examples_and_invoke", lambda: verify_examples_and_invoke(dev)),
         ("live_appearance", lambda: verify_live_appearance(dev)),
         ("debug_inspect_ui", lambda: verify_debug_inspect_ui(dev)),
@@ -162,24 +153,11 @@ def main() -> int:
 
     results: list[dict[str, Any]] = []
     all_ok = True
-    orig_runtime_mode = read_runtime_mode(dev)
-    switched_runtime_mode = False
-    try:
-        if orig_runtime_mode != "debug":
-            dev.ctl_json(["debug", "mode", "debug"])
-            switched_runtime_mode = True
-            print(f"[INFO] Switched runtimeMode {orig_runtime_mode} -> debug for live verification")
-            time.sleep(0.3)
-
-        for name, fn in checks:
-            if not run_check(results, name, fn):
-                all_ok = False
-                if not args.continue_on_error:
-                    break
-    finally:
-        if switched_runtime_mode:
-            dev.ctl_json(["debug", "mode", orig_runtime_mode], check=False)
-            print(f"[INFO] Restored runtimeMode -> {orig_runtime_mode}")
+    for name, fn in checks:
+        if not run_check(results, name, fn):
+            all_ok = False
+            if not args.continue_on_error:
+                break
 
     if args.report_json:
         report = {

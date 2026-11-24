@@ -34,7 +34,8 @@ fn enforces_uid_boundaries_on_hub_and_app_sockets() {
             system,
             &UdsClientHello::Sensor {
                 pid: 11,
-                version: "0.1.0".to_owned()
+                version: "0.1.0".to_owned(),
+                protocol_version: 1,
             },
             &auth
         )
@@ -46,7 +47,8 @@ fn enforces_uid_boundaries_on_hub_and_app_sockets() {
             app,
             &UdsClientHello::Sensor {
                 pid: 12,
-                version: "0.1.0".to_owned()
+                version: "0.1.0".to_owned(),
+                protocol_version: 1,
             },
             &auth
         ),
@@ -60,8 +62,11 @@ fn enforces_uid_boundaries_on_hub_and_app_sockets() {
 
 #[test]
 fn parses_packages_list_and_verifies_primary_and_multiuser_app_uids() {
-    let sample = "\
+    let sample = "\n\
+# comment line\n\
+malformed_only_one_col\n\
 me.weishu.kernelsu 10112 0 /data/user/0/me.weishu.kernelsu default:targetSdkVersion=35 none 0 1\n\
+\n\
 com.example.target 10234 0 /data/user/0/com.example.target default:targetSdkVersion=36 none 0 1\n";
     assert_eq!(parse_package_uid(sample, "com.example.target"), Some(10234));
     assert_eq!(parse_package_uid(sample, "com.missing.app"), None);
@@ -78,6 +83,7 @@ com.example.target 10234 0 /data/user/0/com.example.target default:targetSdkVers
     let hello = UdsClientHello::PluginBackend {
         plugin_id: "com.example.plugin".to_owned(),
         package_name: Some("com.example.target".to_owned()),
+        protocol_version: 1,
     };
 
     let primary = PeerCred {

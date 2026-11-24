@@ -1,8 +1,10 @@
-//! Open plugin registry with `inotify` discovery, atomic overrides/MRU persistence, and scope routing.
+//! Open plugin registry with `inotify` discovery, tiered capability grants, atomic persistence, and scope routing.
 
+mod archive;
 mod dev_url;
 mod embed_override;
 mod error;
+mod grants;
 mod installer;
 mod overrides;
 mod query;
@@ -18,11 +20,18 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, PoisonError, RwLock};
 use std::time::Duration;
 
-use sideveil_protocol::plugin::{PluginCreateWebEmbedParams, PluginManifest, PluginOverridesFile};
+use sideveil_protocol::plugin::{
+    PluginCreateWebEmbedParams, PluginInstallParams, PluginManifest, PluginOrigin,
+    PluginOverridesFile,
+};
+use sideveil_protocol::svp::{
+    decode_archive_base64, inspect_svp_bytes, is_archive_path, read_svp_file,
+};
 use tokio::sync::broadcast;
 
 pub use self::error::PluginRegistryError;
-use self::store::{load_overrides, scan_plugins_dir};
+pub use self::query::PluginDaemonCandidate;
+use self::store::{load_overrides, scan_plugins_dirs};
 use crate::inotify::{DIR_CHANGE_MASK, InotifyDirWatcher};
 use crate::log_ring::LogRing;
 
@@ -31,7 +40,8 @@ pub(super) struct LoadedPlugin {
     pub(super) manifest: PluginManifest,
     pub(super) root_dir: Option<PathBuf>,
     pub(super) asset_revision: Option<String>,
-    pub(super) builtin: bool,
+    pub(super) origin: PluginOrigin,
+    pub(super) daemon_binary_fingerprint: Option<String>,
 }
 
 #[derive(Debug)]
@@ -40,10 +50,11 @@ pub(super) struct RegistryInner {
     pub(super) overrides: PluginOverridesFile,
 }
 
-/// Authoritative in-memory and on-disk registry of built-in and installed SideVeil plugins.
+/// Authoritative in-memory and on-disk registry of built-in, bundled, and installed SideVeil plugins.
 #[derive(Debug)]
 pub struct PluginRegistry {
     plugins_dir: PathBuf,
+    bundled_dir: Option<PathBuf>,
     pub(super) overrides_path: PathBuf,
     pub(super) inner: RwLock<RegistryInner>,
     pub(super) updates_tx: broadcast::Sender<()>,
@@ -51,13 +62,25 @@ pub struct PluginRegistry {
 }
 
 impl PluginRegistry {
-    /// Opens the plugin registry, loads persisted overrides, and performs an initial scan.
+    /// Opens the plugin registry without a separate bundled plugins directory.
     pub fn open(plugins_dir: PathBuf, overrides_path: PathBuf, logs: Arc<LogRing>) -> Arc<Self> {
+        Self::open_with_bundled(plugins_dir, None, overrides_path, logs)
+    }
+
+    /// Opens the plugin registry with optional read-only bundled plugins directory (`<module_dir>/plugins`),
+    /// loads persisted overrides, and performs an initial scan.
+    pub fn open_with_bundled(
+        plugins_dir: PathBuf,
+        bundled_dir: Option<PathBuf>,
+        overrides_path: PathBuf,
+        logs: Arc<LogRing>,
+    ) -> Arc<Self> {
         let _ = fs::create_dir_all(&plugins_dir);
         let overrides = load_overrides(&overrides_path, &logs);
         let (updates_tx, _) = broadcast::channel(16);
         let registry = Arc::new(Self {
             plugins_dir,
+            bundled_dir,
             overrides_path,
             inner: RwLock::new(RegistryInner {
                 plugins: BTreeMap::new(),
@@ -76,21 +99,38 @@ impl PluginRegistry {
         self.updates_tx.subscribe()
     }
 
-    /// Rescans `/data/system/sideveil/plugins/<plugin_id>/manifest.json` and refreshes registry.
+    /// Rescans bundled and installed plugin directories and refreshes the in-memory registry.
     pub fn rescan(&self) -> usize {
-        let discovered = scan_plugins_dir(&self.plugins_dir, &self.logs);
+        let discovered =
+            scan_plugins_dirs(&self.plugins_dir, self.bundled_dir.as_deref(), &self.logs);
 
         let count = discovered.len();
         let changed = {
             let mut guard = self.inner.write().unwrap_or_else(PoisonError::into_inner);
-            let old_state: Vec<(&String, &PluginManifest, &Option<String>)> = guard
+            let old_state: Vec<_> = guard
                 .plugins
                 .iter()
-                .map(|(k, v)| (k, &v.manifest, &v.asset_revision))
+                .map(|(k, v)| {
+                    (
+                        k,
+                        &v.manifest,
+                        &v.asset_revision,
+                        v.origin,
+                        &v.daemon_binary_fingerprint,
+                    )
+                })
                 .collect();
-            let new_state: Vec<(&String, &PluginManifest, &Option<String>)> = discovered
+            let new_state: Vec<_> = discovered
                 .iter()
-                .map(|(k, v)| (k, &v.manifest, &v.asset_revision))
+                .map(|(k, v)| {
+                    (
+                        k,
+                        &v.manifest,
+                        &v.asset_revision,
+                        v.origin,
+                        &v.daemon_binary_fingerprint,
+                    )
+                })
                 .collect();
             let diff = old_state != new_state;
             guard.plugins = discovered;
@@ -105,13 +145,70 @@ impl PluginRegistry {
         count
     }
 
-    /// Validates and atomically installs a plugin package directory, then rescans immediately.
+    /// Validates and atomically installs a plugin package directory, reconciles grants, and rescans.
     pub fn install_from_dir(
         &self,
         source_dir: &Path,
     ) -> Result<PluginManifest, PluginRegistryError> {
-        let manifest = installer::install_plugin_dir(&self.plugins_dir, source_dir)?;
+        let (manifest, fingerprint) = installer::install_plugin_dir(
+            &self.plugins_dir,
+            self.bundled_dir.as_deref(),
+            source_dir,
+        )?;
+        self.reconcile_install_grants(&manifest.id, &manifest, fingerprint, None, false)?;
         let _ = self.rescan();
+        let _ = self.updates_tx.send(());
+        Ok(manifest)
+    }
+
+    /// Installs a plugin from a local directory, `.svp` archive path, or base64-encoded `.svp` payload.
+    pub fn install_from_params(
+        &self,
+        params: &PluginInstallParams,
+    ) -> Result<PluginManifest, PluginRegistryError> {
+        let bundled = self.bundled_dir.as_deref();
+        let (manifest, fingerprint) = if let Some(b64) = params
+            .archive_base64
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            let bytes = decode_archive_base64(b64)
+                .map_err(|err| PluginRegistryError::InstallConstraint(err.to_string()))?;
+            let archive = inspect_svp_bytes(&bytes)
+                .map_err(|err| PluginRegistryError::InstallConstraint(err.to_string()))?;
+            installer::install_plugin_archive(&self.plugins_dir, bundled, &archive)?
+        } else {
+            let raw_path = params
+                .source_path
+                .as_deref()
+                .or(params.source_dir.as_deref())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| {
+                    PluginRegistryError::InstallConstraint(
+                        "specify 'sourcePath', 'sourceDir', or 'archiveBase64'".to_owned(),
+                    )
+                })?;
+            let path = Path::new(raw_path);
+            if is_archive_path(path) {
+                let archive = read_svp_file(path)
+                    .map_err(|err| PluginRegistryError::InstallConstraint(err.to_string()))?;
+                installer::install_plugin_archive(&self.plugins_dir, bundled, &archive)?
+            } else {
+                installer::install_plugin_dir(&self.plugins_dir, bundled, path)?
+            }
+        };
+
+        self.reconcile_install_grants(
+            &manifest.id,
+            &manifest,
+            fingerprint,
+            params.granted_capabilities.as_deref(),
+            params.approve_daemon,
+        )?;
+        let _ = self.rescan();
+        let _ = self.updates_tx.send(());
         Ok(manifest)
     }
 
@@ -120,26 +217,34 @@ impl PluginRegistry {
         &self,
         params: &PluginCreateWebEmbedParams,
     ) -> Result<PluginManifest, PluginRegistryError> {
-        let manifest = web_embed::create_web_embed_plugin(&self.plugins_dir, params)?;
+        let manifest = web_embed::create_web_embed_plugin(
+            &self.plugins_dir,
+            self.bundled_dir.as_deref(),
+            params,
+        )?;
         let _ = self.rescan();
         Ok(manifest)
     }
 
-    /// Removes an external plugin directory, clears its persisted overrides/MRU and icon cache,
-    /// and rescans the registry immediately.
+    /// Removes an installed plugin directory, clears its data directory, persisted overrides/MRU,
+    /// and icon cache, then rescans the registry immediately.
     pub fn uninstall_plugin(
         &self,
         plugin_id: &str,
         cache_dir: &Path,
+        data_dir: Option<&Path>,
     ) -> Result<(), PluginRegistryError> {
         web_embed::uninstall_plugin_dir(&self.plugins_dir, plugin_id)?;
+        if let Some(dir) = data_dir {
+            web_embed::remove_plugin_data_dir(dir, plugin_id);
+        }
         self.purge_plugin_overrides(plugin_id);
         prune_plugin_icon_cache(cache_dir, plugin_id);
         let _ = self.rescan();
         Ok(())
     }
 
-    /// Spawns a zero-polling Linux `inotify` watcher monitoring the plugins directory tree.
+    /// Spawns a zero-polling Linux `inotify` watcher monitoring the installed plugins directory tree.
     pub fn spawn_watcher(self: &Arc<Self>) -> io::Result<tokio::task::JoinHandle<()>> {
         fs::create_dir_all(&self.plugins_dir)?;
         let watcher = InotifyDirWatcher::new(&self.plugins_dir, DIR_CHANGE_MASK)?;

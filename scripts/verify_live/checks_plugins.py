@@ -157,9 +157,7 @@ def verify_plugins_e2e(dev: DeviceRunner) -> None:
         assert entry["hasScopeOverride"] is False and entry["global"] is False
     finally:
         dev.su_sh(
-            f"{CTL} plugins priority {shlex.quote(test_id)} 5 >/dev/null 2>&1 || true; "
-            f"{CTL} plugins scope {shlex.quote(test_id)} --clear >/dev/null 2>&1 || true; "
-            f"{CTL} plugins dev {shlex.quote(test_id)} --clear >/dev/null 2>&1 || true; "
+            f"{CTL} plugins uninstall {shlex.quote(test_id)} >/dev/null 2>&1 || true; "
             f"rm -rf {shlex.quote(plugin_root)} {shlex.quote(stage_root)} "
             f"/data/system/sideveil/cache/icons/{test_id}_*; "
             f"{CTL} close >/dev/null 2>&1 || true",

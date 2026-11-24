@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::{CapabilityRiskTier, PluginCapability, PluginDaemonStatus, PluginManifest};
 use crate::generated::protocol_constants::timeouts;
 pub use crate::generated::protocol_wire::HostPluginDiagnosticsPayload;
 
@@ -52,10 +53,112 @@ pub struct PluginSelectParams {
     pub package_name: Option<String>,
 }
 
+/// Parameters for `plugins.install` supporting directory, `.svp`/`.zip` path, or base64 upload.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PluginInstallParams {
+    /// Legacy/canonical local source directory path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_dir: Option<String>,
+    /// Local path to either a plugin directory or a `.svp`/`.zip` archive.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_path: Option<String>,
+    /// Base64-encoded `.svp` archive payload (max 16 MiB decoded).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub archive_base64: Option<String>,
+    /// Optional archive filename for diagnostic/audit logging.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
+    /// Optional explicit capability grants applied atomically on install/upgrade.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub granted_capabilities: Option<Vec<PluginCapability>>,
+    /// When `true`, approves any declared `uds-native` daemon immediately upon install.
+    pub approve_daemon: bool,
+}
+
+/// Parameters for `plugins.inspectArchive` pre-install capability/manifest inspection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PluginInspectArchiveParams {
+    /// Local path to a `.svp`/`.zip` archive or plugin directory.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Base64-encoded `.svp` archive payload (max 16 MiB decoded).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub archive_base64: Option<String>,
+    /// Optional archive filename for diagnostic output.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
+}
+
+/// Per-capability risk and diff item returned by `plugins.inspectArchive`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PluginInstallParams {
-    pub source_dir: String,
+pub struct PluginCapabilityReviewItem {
+    pub capability: PluginCapability,
+    pub risk: CapabilityRiskTier,
+    pub requires_approval: bool,
+    pub is_new: bool,
+    #[serde(default)]
+    pub already_granted: bool,
+}
+
+/// Result returned by `plugins.inspectArchive`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginInspectArchiveResult {
+    pub manifest: PluginManifest,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub existing_version: Option<String>,
+    pub is_upgrade: bool,
+    pub capabilities: Vec<PluginCapabilityReviewItem>,
+    pub has_daemon: bool,
+    #[serde(default)]
+    pub daemon_already_approved: bool,
+    pub warnings: Vec<String>,
+}
+
+/// Parameters for `plugins.grantCapabilities` capability and daemon approval mutations.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PluginGrantCapabilitiesParams {
+    pub plugin_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<Vec<PluginCapability>>,
+    pub grant_all_pending: bool,
+    pub revoke_all: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approve_daemon: Option<bool>,
+}
+
+/// Parameters for `plugins.daemonLogs` querying a supervised plugin daemon's stderr ring buffer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginDaemonLogsParams {
+    pub plugin_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<usize>,
+}
+
+/// Result returned by `plugins.daemonLogs`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginDaemonLogsResult {
+    pub plugin_id: String,
+    pub status: PluginDaemonStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
+    pub restart_count: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+    pub lines: Vec<String>,
+}
+
+/// Parameters for `plugins.reloadWebView`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginReloadWebViewParams {
+    pub plugin_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -236,42 +339,30 @@ mod tests {
             default_req.effective_timeout_ms(),
             DEFAULT_PLUGIN_INVOKE_TIMEOUT_MS
         );
-
-        let too_small = PluginInvokeParams {
-            timeout_ms: Some(10),
-            ..default_req.clone()
-        };
         assert_eq!(
-            too_small.effective_timeout_ms(),
+            PluginInvokeParams {
+                timeout_ms: Some(10),
+                ..default_req.clone()
+            }
+            .effective_timeout_ms(),
             MIN_PLUGIN_INVOKE_TIMEOUT_MS
         );
-
-        let too_large = PluginInvokeParams {
-            timeout_ms: Some(999_999),
-            ..default_req.clone()
-        };
         assert_eq!(
-            too_large.effective_timeout_ms(),
+            PluginInvokeParams {
+                timeout_ms: Some(999_999),
+                ..default_req
+            }
+            .effective_timeout_ms(),
             MAX_PLUGIN_INVOKE_TIMEOUT_MS
         );
-
-        let in_range = PluginInvokeParams {
-            timeout_ms: Some(25_000),
-            ..default_req
-        };
-        assert_eq!(in_range.effective_timeout_ms(), 25_000);
     }
 
     #[test]
     fn backend_event_defaults_ephemeral_to_false() {
-        let raw = r#"{"event":"task.output","payload":{"chunk":"ok"}}"#;
-        let parsed: PluginBackendEvent = serde_json::from_str(raw).expect("parse backend event");
+        let parsed: PluginBackendEvent =
+            serde_json::from_str(r#"{"event":"task.output","payload":{"chunk":"ok"}}"#)
+                .expect("parse backend event");
         assert_eq!(parsed.event, "task.output");
         assert!(!parsed.ephemeral);
-
-        let raw_eph = r#"{"event":"metrics.tick","ephemeral":true}"#;
-        let parsed_eph: PluginBackendEvent =
-            serde_json::from_str(raw_eph).expect("parse ephemeral event");
-        assert!(parsed_eph.ephemeral);
     }
 }

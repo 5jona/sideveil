@@ -114,10 +114,10 @@ if [ "$SKIP_BUILD" -eq 0 ]; then
             echo "[*] Incremental build: Rust hub + example HUD binaries..."
             (cd "${SCRIPT_DIR}/hub" && run_in_env cargo build --release --target aarch64-linux-android -p sideveild -p sideveil-ctl)
             (cd "${SCRIPT_DIR}/examples/native-perf-hud" && run_in_env cargo build --release --target aarch64-linux-android)
+            mkdir -p "${SCRIPT_DIR}/bin"
             cp "${SCRIPT_DIR}/hub/target/aarch64-linux-android/release/sideveild" "${SCRIPT_DIR}/bin/sideveild"
             cp "${SCRIPT_DIR}/hub/target/aarch64-linux-android/release/sideveil-ctl" "${SCRIPT_DIR}/bin/sideveil-ctl"
-            cp "${SCRIPT_DIR}/examples/native-perf-hud/target/aarch64-linux-android/release/sideveil-example-perf-hud" "${SCRIPT_DIR}/bin/sideveil-example-perf-hud"
-            chmod 0755 "${SCRIPT_DIR}/bin/sideveild" "${SCRIPT_DIR}/bin/sideveil-ctl" "${SCRIPT_DIR}/bin/sideveil-example-perf-hud"
+            chmod 0755 "${SCRIPT_DIR}/bin/sideveild" "${SCRIPT_DIR}/bin/sideveil-ctl"
             ;;
         host)
             echo "[*] Incremental build: panel WebUI + sideveil-hud-jni + SideVeilHost APK..."
@@ -165,11 +165,12 @@ TMP_STAGE="$(mktemp -d)"
 
 case "$DEPLOY_MODE" in
     full)
+        PERF_HUD_BIN="${SCRIPT_DIR}/examples/native-perf-hud/target/aarch64-linux-android/release/sideveil-example-perf-hud"
         cp "${SCRIPT_DIR}/module.prop" "${SCRIPT_DIR}/config.json" \
            "${SCRIPT_DIR}/service.sh" "${SCRIPT_DIR}/post-fs-data.sh" \
            "${SCRIPT_DIR}/customize.sh" "${SCRIPT_DIR}/uninstall.sh" "${TMP_STAGE}/"
         cp "${SCRIPT_DIR}/bin/sideveild" "${SCRIPT_DIR}/bin/sideveil-ctl" \
-           "${SCRIPT_DIR}/bin/sideveil-example-perf-hud" "${SCRIPT_DIR}/bin/sideveil-sensor.dex" "${TMP_STAGE}/"
+           "${SCRIPT_DIR}/bin/sideveil-sensor.dex" "${TMP_STAGE}/"
         cp "${SCRIPT_DIR}/system/priv-app/SideVeilHost/SideVeilHost.apk" "${TMP_STAGE}/SideVeilHost.apk"
         cp "${SCRIPT_DIR}/system/etc/permissions/privapp-permissions-pochita-sideveil.xml" "${TMP_STAGE}/privapp.xml"
         cp "${SCRIPT_DIR}/system/etc/sysconfig/sideveil-allowlist.xml" "${TMP_STAGE}/sysconfig.xml"
@@ -182,6 +183,11 @@ case "$DEPLOY_MODE" in
             if [ -d "${SCRIPT_DIR}/${src_rel}/web" ]; then
                 cp -r "${SCRIPT_DIR}/${src_rel}/web" "${TMP_STAGE}/plugins/${plugin_id}/web"
             fi
+            if [ "${plugin_id}" = "example.native-perf-hud" ] && [ -f "${PERF_HUD_BIN}" ]; then
+                mkdir -p "${TMP_STAGE}/plugins/${plugin_id}/bin"
+                cp "${PERF_HUD_BIN}" "${TMP_STAGE}/plugins/${plugin_id}/bin/sideveil-example-perf-hud"
+                chmod 0755 "${TMP_STAGE}/plugins/${plugin_id}/bin/sideveil-example-perf-hud"
+            fi
         done
 
         stop_and_prepare_script | run_remote_sh
@@ -191,17 +197,27 @@ case "$DEPLOY_MODE" in
         wait_for_ready 12000
         ;;
     hub)
-        cp "${SCRIPT_DIR}/bin/sideveild" "${SCRIPT_DIR}/bin/sideveil-ctl" \
-           "${SCRIPT_DIR}/bin/sideveil-example-perf-hud" "${TMP_STAGE}/"
+        PERF_HUD_BIN="${SCRIPT_DIR}/examples/native-perf-hud/target/aarch64-linux-android/release/sideveil-example-perf-hud"
+        cp "${SCRIPT_DIR}/bin/sideveild" "${SCRIPT_DIR}/bin/sideveil-ctl" "${TMP_STAGE}/"
+        if [ -f "${PERF_HUD_BIN}" ]; then
+            cp "${PERF_HUD_BIN}" "${TMP_STAGE}/sideveil-example-perf-hud"
+        fi
         push_stage_dir "${TMP_STAGE}"
         run_remote_sh <<EOF
 set -e
 $(stop_hub_processes_script)
-for b in sideveild sideveil-ctl sideveil-example-perf-hud; do
+for b in sideveild sideveil-ctl; do
     cp ${STAGE_DIR}/\$b ${REMOTE_MOD_DIR}/bin/\$b.new
     chmod 0755 ${REMOTE_MOD_DIR}/bin/\$b.new
     mv -f ${REMOTE_MOD_DIR}/bin/\$b.new ${REMOTE_MOD_DIR}/bin/\$b
 done
+rm -f ${REMOTE_MOD_DIR}/bin/sideveil-example-perf-hud
+if [ -f ${STAGE_DIR}/sideveil-example-perf-hud ] && [ -d ${REMOTE_MOD_DIR}/plugins/example.native-perf-hud ]; then
+    mkdir -p ${REMOTE_MOD_DIR}/plugins/example.native-perf-hud/bin
+    cp ${STAGE_DIR}/sideveil-example-perf-hud ${REMOTE_MOD_DIR}/plugins/example.native-perf-hud/bin/sideveil-example-perf-hud.new
+    chmod 0755 ${REMOTE_MOD_DIR}/plugins/example.native-perf-hud/bin/sideveil-example-perf-hud.new
+    mv -f ${REMOTE_MOD_DIR}/plugins/example.native-perf-hud/bin/sideveil-example-perf-hud.new ${REMOTE_MOD_DIR}/plugins/example.native-perf-hud/bin/sideveil-example-perf-hud
+fi
 rm -f ${REMOTE_STATE_DIR}/run/hub.sock ${REMOTE_STATE_DIR}/run/app.sock ${REMOTE_STATE_DIR}/run/daemon.env
 rm -rf ${STAGE_DIR}
 EOF
@@ -258,19 +274,35 @@ EOF
         if [ -d "${SRC_PLUGIN_DIR}/web" ]; then
             cp -r "${SRC_PLUGIN_DIR}/web" "${TMP_STAGE}/${PLUGIN_ID}/web"
         fi
+        if [ -d "${SRC_PLUGIN_DIR}/bin" ]; then
+            cp -r "${SRC_PLUGIN_DIR}/bin" "${TMP_STAGE}/${PLUGIN_ID}/bin"
+        fi
+        PERF_HUD_BIN="${SCRIPT_DIR}/examples/native-perf-hud/target/aarch64-linux-android/release/sideveil-example-perf-hud"
+        if [ "${PLUGIN_ID}" = "example.native-perf-hud" ] && [ -f "${PERF_HUD_BIN}" ]; then
+            mkdir -p "${TMP_STAGE}/${PLUGIN_ID}/bin"
+            cp "${PERF_HUD_BIN}" "${TMP_STAGE}/${PLUGIN_ID}/bin/sideveil-example-perf-hud"
+        fi
         push_stage_dir "${TMP_STAGE}"
+        if [[ "${SRC_PLUGIN_DIR}" == "${SCRIPT_DIR}/examples/"* ]]; then
+            TARGET_DIR="${REMOTE_MOD_DIR}/plugins/${PLUGIN_ID}"
+        else
+            TARGET_DIR="${REMOTE_STATE_DIR}/plugins/${PLUGIN_ID}"
+        fi
         run_remote_sh <<EOF
 set -e
-rm -rf ${REMOTE_STATE_DIR}/plugins/${PLUGIN_ID} ${REMOTE_MOD_DIR}/plugins/${PLUGIN_ID}
-cp -r ${STAGE_DIR}/${PLUGIN_ID} ${REMOTE_STATE_DIR}/plugins/${PLUGIN_ID}
-cp -r ${STAGE_DIR}/${PLUGIN_ID} ${REMOTE_MOD_DIR}/plugins/${PLUGIN_ID}
-chown -R 0:1000 ${REMOTE_STATE_DIR}/plugins/${PLUGIN_ID}
-find ${REMOTE_STATE_DIR}/plugins/${PLUGIN_ID} ${REMOTE_MOD_DIR}/plugins/${PLUGIN_ID} -type d -exec chmod 0755 {} +
-find ${REMOTE_STATE_DIR}/plugins/${PLUGIN_ID} ${REMOTE_MOD_DIR}/plugins/${PLUGIN_ID} -type f -exec chmod 0644 {} +
+mkdir -p "$(dirname "${TARGET_DIR}")"
+rm -rf "${TARGET_DIR}"
+cp -r "${STAGE_DIR}/${PLUGIN_ID}" "${TARGET_DIR}"
+chown -R 0:1000 "${TARGET_DIR}"
+find "${TARGET_DIR}" -type d -exec chmod 0755 {} +
+find "${TARGET_DIR}" -type f -exec chmod 0644 {} +
+if [ -d "${TARGET_DIR}/bin" ]; then
+    find "${TARGET_DIR}/bin" -type f -exec chmod 0755 {} +
+fi
 rm -rf ${STAGE_DIR}
 EOF
         run_remote_ctl plugins reload >/dev/null 2>&1 || true
-        echo "[+] Plugin '${PLUGIN_ID}' synced and reloaded."
+        echo "[+] Plugin '${PLUGIN_ID}' synced to ${TARGET_DIR} and reloaded."
         ;;
 esac
 
