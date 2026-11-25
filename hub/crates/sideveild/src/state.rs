@@ -2,6 +2,9 @@
 
 mod runtime;
 mod sessions;
+mod status;
+#[cfg(test)]
+mod tests;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

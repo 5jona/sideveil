@@ -48,6 +48,7 @@ object EmbedUrlRouter {
         if (currentUrl.isNullOrBlank()) return targetBaseUrl
         val currentParts = parseUrlParts(currentUrl) ?: return targetBaseUrl
         if (currentParts.origin == targetParts.origin) return null
+        if (isAuthOrOAuthRoute(currentParts)) return targetBaseUrl
         val hasCustomPath = currentParts.path.isNotEmpty() && currentParts.path != "/"
         if (!hasCustomPath && currentParts.queryAndFragment.isEmpty()) {
             return targetBaseUrl
@@ -75,6 +76,15 @@ object EmbedUrlRouter {
             remoteOrigin -> embed.url
             else -> remoteUrl
         }
+    }
+
+    private fun isAuthOrOAuthRoute(parts: UrlParts): Boolean {
+        val lowerPath = parts.path.lowercase(Locale.ROOT)
+        if (lowerPath.startsWith("/auth/") || lowerPath == "/auth") return true
+        val lowerQuery = parts.queryAndFragment.lowercase(Locale.ROOT)
+        return lowerQuery.contains("redirect_uri=") ||
+            lowerQuery.contains("auth_callback=") ||
+            lowerQuery.contains("client_id=")
     }
 
     private fun normalizeSsid(raw: String?): String? {

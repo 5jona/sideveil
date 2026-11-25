@@ -235,6 +235,11 @@ impl HubState {
         );
     }
 
+    pub fn push_network_context_to_host(&self) {
+        let context = self.network_context();
+        self.emit_host_event_critical(events::NETWORK_CONTEXT_CHANGED, &context);
+    }
+
     pub fn emit_host_event_critical<T: Serialize>(&self, event: &str, payload: &T) {
         let Some(wire) = encode_event(event, payload) else {
             return;

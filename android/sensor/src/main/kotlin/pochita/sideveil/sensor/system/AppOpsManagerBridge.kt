@@ -3,7 +3,9 @@ package pochita.sideveil.sensor.system
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.IBinder
+import android.os.Process
 import android.os.ServiceManager
+import android.os.UserHandle
 import pochita.sideveil.sensor.SensorLog
 import java.lang.reflect.Method
 
@@ -83,11 +85,12 @@ class AppOpsManagerBridge(
         }
     }
 
-    /** Inspects the Render Host package UID and grants overlay + Doze allowlist permissions. */
+    /** Inspects the Render Host package UID and grants overlay, Doze, and LAN permissions. */
     fun inspectAndEnsure(): HostAppPermissionsStatus {
         val uid = resolvePackageUid() ?: return HostAppPermissionsStatus(false, null, false)
         val granted = ensureOverlayPermission(uid)
         ensurePowerSaveWhitelist()
+        ensureLocalNetworkPermission()
         return HostAppPermissionsStatus(installed = true, uid = uid, overlayGranted = granted)
     }
 
@@ -130,8 +133,35 @@ class AppOpsManagerBridge(
         }
     }
 
+    private fun ensureLocalNetworkPermission() {
+        val pm = systemContext.packageManager
+        val permissionDefined =
+            runCatching {
+                pm.getPermissionInfo(PERM_ACCESS_LOCAL_NETWORK, 0)
+                true
+            }.getOrDefault(false)
+        if (!permissionDefined) return
+        if (pm.checkPermission(PERM_ACCESS_LOCAL_NETWORK, hostPackage) == PackageManager.PERMISSION_GRANTED) {
+            return
+        }
+        runCatching {
+            val grantMethod =
+                pm.javaClass.getMethod(
+                    "grantRuntimePermission",
+                    String::class.java,
+                    String::class.java,
+                    UserHandle::class.java,
+                )
+            grantMethod.invoke(pm, hostPackage, PERM_ACCESS_LOCAL_NETWORK, Process.myUserHandle())
+            SensorLog.info("Granted $PERM_ACCESS_LOCAL_NETWORK to $hostPackage")
+        }.onFailure {
+            SensorLog.warn("Failed to grant $PERM_ACCESS_LOCAL_NETWORK to $hostPackage", it)
+        }
+    }
+
     companion object {
         private const val OP_SYSTEM_ALERT_WINDOW = 24
         private const val MODE_ALLOWED = 0
+        private const val PERM_ACCESS_LOCAL_NETWORK = "android.permission.ACCESS_LOCAL_NETWORK"
     }
 }

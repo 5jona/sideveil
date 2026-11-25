@@ -8,90 +8,21 @@ import android.webkit.WebView
 import androidx.core.net.toUri
 import pochita.sideveil.protocol.PluginDescriptor
 import pochita.sideveil.protocol.PluginEmbedPrefs
-import java.util.Locale
 
 /**
- * Pure-Kotlin sticky fallback state machine for untrusted web-embeds.
- *
- * Remembers an unreachable origin for the active normalized `(transport, wifiSsid)` network key so
- * repeated `network.contextChanged` ticks on the same Wi-Fi SSID do not bounce back to a dead
- * `.local` mDNS URL until the network transport/SSID actually changes or the user reloads/homes.
+ * Minimal WebView + main-thread port used by [EmbedSessionController] so routing and reload
+ * behavior can be verified in pure-Kotlin JVM unit tests without Robolectric.
  */
-internal class EmbedStickyFallbackState(
-    initialNetworkRoute: NetworkRouteContext = NetworkRouteContext(),
-) {
-    internal data class NetworkKey(
-        val transport: String?,
-        val wifiSsid: String?,
-    )
+internal interface EmbedWebViewPort {
+    val currentUrl: String?
 
-    @Volatile
-    var latestNetworkRoute: NetworkRouteContext = initialNetworkRoute
-        private set
+    fun loadUrl(url: String)
 
-    @Volatile
-    private var fallbackAttemptedForUrl: String? = null
+    fun reload()
 
-    @Volatile
-    private var stickyFailedOrigin: Pair<NetworkKey, ParsedOrigin>? = null
+    fun evaluateJavascript(script: String)
 
-    fun reset() {
-        fallbackAttemptedForUrl = null
-        stickyFailedOrigin = null
-    }
-
-    fun resolveNetworkRouteSwitch(
-        embed: PluginEmbedPrefs,
-        network: NetworkRouteContext,
-        currentUrl: String?,
-    ): String? {
-        val prevKey = normalizeNetworkKey(latestNetworkRoute)
-        val nextKey = normalizeNetworkKey(network)
-        latestNetworkRoute = network
-        if (nextKey != prevKey) {
-            stickyFailedOrigin = null
-        }
-        val preferred = EmbedUrlRouter.preferredBaseUrl(embed, network)
-        val preferredOrigin = NetworkOriginParser.parseOrigin(preferred)
-        if (preferredOrigin != null && stickyFailedOrigin == (nextKey to preferredOrigin)) {
-            return null
-        }
-        val switchUrl = EmbedUrlRouter.resolveSwitchUrl(currentUrl, preferred) ?: return null
-        fallbackAttemptedForUrl = null
-        return switchUrl
-    }
-
-    fun resolveFallbackAfterMainFrameError(
-        embed: PluginEmbedPrefs,
-        failedUrl: String?,
-    ): String? {
-        val fallback = EmbedUrlRouter.fallbackBaseUrl(embed, failedUrl) ?: return null
-        if (fallbackAttemptedForUrl == failedUrl) return null
-        val switchUrl = EmbedUrlRouter.resolveSwitchUrl(failedUrl, fallback) ?: fallback
-        fallbackAttemptedForUrl = failedUrl
-        val failedOrigin = failedUrl?.let(NetworkOriginParser::parseOrigin)
-        if (failedOrigin != null) {
-            stickyFailedOrigin = normalizeNetworkKey(latestNetworkRoute) to failedOrigin
-        }
-        return switchUrl
-    }
-
-    companion object {
-        internal fun normalizeNetworkKey(network: NetworkRouteContext): NetworkKey {
-            val transport =
-                network.transport
-                    ?.trim()
-                    ?.lowercase(Locale.ROOT)
-                    ?.takeIf { it.isNotEmpty() }
-            val ssid =
-                network.wifiSsid
-                    ?.trim()
-                    ?.removeSurrounding("\"")
-                    ?.trim()
-                    ?.takeIf { it.isNotEmpty() }
-            return NetworkKey(transport = transport, wifiSsid = ssid)
-        }
-    }
+    fun postToMain(action: () -> Unit)
 }
 
 /**
@@ -99,10 +30,34 @@ internal class EmbedStickyFallbackState(
  * recovery, quick-bar actions, and status notifications on behalf of [PluginWebViewInstance].
  */
 internal class EmbedSessionController(
-    private val webView: WebView,
-    private val mainHandler: Handler,
+    private val webViewPort: EmbedWebViewPort,
     initialNetworkRoute: NetworkRouteContext = NetworkRouteContext(),
 ) {
+    constructor(
+        webView: WebView,
+        mainHandler: Handler,
+        initialNetworkRoute: NetworkRouteContext = NetworkRouteContext(),
+    ) : this(
+        webViewPort =
+            object : EmbedWebViewPort {
+                override val currentUrl: String?
+                    get() = webView.url
+
+                override fun loadUrl(url: String) = webView.loadUrl(url)
+
+                override fun reload() = webView.reload()
+
+                override fun evaluateJavascript(script: String) {
+                    webView.evaluateJavascript(script, null)
+                }
+
+                override fun postToMain(action: () -> Unit) {
+                    mainHandler.post(action)
+                }
+            },
+        initialNetworkRoute = initialNetworkRoute,
+    )
+
     private val routingState = EmbedStickyFallbackState(initialNetworkRoute)
 
     @Volatile
@@ -143,15 +98,16 @@ internal class EmbedSessionController(
         routingState.reset()
         notifyStatus(null, isError = false)
         val preferred = EmbedUrlRouter.preferredBaseUrl(embed, routingState.latestNetworkRoute)
-        val targetUrl =
+        val alignedRestore =
             restoreUrl
                 ?.takeIf { PluginNetworkPolicy.shouldAllowNativeNetwork(descriptor, it, isMainFrame = true) }
-                ?: preferred
+                ?.let { allowed -> EmbedUrlRouter.resolveSwitchUrl(allowed, preferred) ?: allowed }
+        val targetUrl = alignedRestore ?: preferred
         if (PluginNetworkPolicy.shouldAllowNativeNetwork(descriptor, targetUrl, isMainFrame = true)) {
-            webView.loadUrl(targetUrl)
+            webViewPort.loadUrl(targetUrl)
         } else {
             Log.w(TAG, "Blocked disallowed embed entry URL for plugin=${descriptor.id}: $targetUrl")
-            webView.loadUrl("about:blank")
+            webViewPort.loadUrl("about:blank")
         }
     }
 
@@ -160,10 +116,10 @@ internal class EmbedSessionController(
         network: NetworkRouteContext,
     ) {
         val embed = descriptor.embed ?: return
-        val switchUrl = routingState.resolveNetworkRouteSwitch(embed, network, webView.url) ?: return
+        val switchUrl = routingState.resolveNetworkRouteSwitch(embed, network, webViewPort.currentUrl) ?: return
         if (!PluginNetworkPolicy.shouldAllowNativeNetwork(descriptor, switchUrl, isMainFrame = true)) return
         notifyStatus("网络切换，正在重连…", isError = false)
-        webView.loadUrl(switchUrl)
+        webViewPort.loadUrl(switchUrl)
     }
 
     fun handleMainFrameNetworkError(
@@ -173,9 +129,9 @@ internal class EmbedSessionController(
         val embed = descriptor.embed ?: return false
         val switchUrl = routingState.resolveFallbackAfterMainFrameError(embed, failedUrl)
         if (switchUrl != null && PluginNetworkPolicy.shouldAllowNativeNetwork(descriptor, switchUrl, isMainFrame = true)) {
-            mainHandler.post {
+            webViewPort.postToMain {
                 notifyStatus("主地址不可达，已切换备选地址", isError = false)
-                webView.loadUrl(switchUrl)
+                webViewPort.loadUrl(switchUrl)
             }
             return true
         }
@@ -185,6 +141,7 @@ internal class EmbedSessionController(
 
     fun handleMainPageFinished(url: String?) {
         if (!url.isNullOrBlank() && url != "about:blank") {
+            routingState.onPageLoadSucceeded()
             notifyStatus(null, isError = false)
         }
     }
@@ -192,11 +149,26 @@ internal class EmbedSessionController(
     fun reload(descriptor: PluginDescriptor) {
         routingState.reset()
         notifyStatus(null, isError = false)
-        val current = webView.url
+        val current = webViewPort.currentUrl
         if (current.isNullOrBlank() || current == "about:blank") {
             loadInitial(descriptor)
-        } else {
-            webView.reload()
+            return
+        }
+        val embed = descriptor.embed
+        if (embed == null) {
+            webViewPort.reload()
+            return
+        }
+        val preferred = EmbedUrlRouter.preferredBaseUrl(embed, routingState.latestNetworkRoute)
+        val currentOrigin = NetworkOriginParser.parseOrigin(current)
+        val preferredOrigin = NetworkOriginParser.parseOrigin(preferred)
+        if (currentOrigin != null && preferredOrigin != null && currentOrigin == preferredOrigin) {
+            webViewPort.reload()
+            return
+        }
+        val target = EmbedUrlRouter.resolveSwitchUrl(current, preferred) ?: preferred
+        if (PluginNetworkPolicy.shouldAllowNativeNetwork(descriptor, target, isMainFrame = true)) {
+            webViewPort.loadUrl(target)
         }
     }
 
@@ -206,19 +178,19 @@ internal class EmbedSessionController(
         notifyStatus(null, isError = false)
         val target = EmbedUrlRouter.preferredBaseUrl(embed, routingState.latestNetworkRoute)
         if (PluginNetworkPolicy.shouldAllowNativeNetwork(descriptor, target, isMainFrame = true)) {
-            webView.loadUrl(target)
+            webViewPort.loadUrl(target)
         }
     }
 
     fun currentExternalUrl(descriptor: PluginDescriptor): String? {
-        val live = webView.url?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+        val live = webViewPort.currentUrl?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
         return live ?: descriptor.embed?.let { EmbedUrlRouter.preferredBaseUrl(it, routingState.latestNetworkRoute) }
     }
 
     fun triggerOnlineReconnect() {
-        mainHandler.post {
+        webViewPort.postToMain {
             runCatching {
-                webView.evaluateJavascript("window.dispatchEvent(new Event('online'));", null)
+                webViewPort.evaluateJavascript("window.dispatchEvent(new Event('online'));")
             }
         }
     }
@@ -227,7 +199,7 @@ internal class EmbedSessionController(
         message: String?,
         isError: Boolean,
     ) {
-        mainHandler.post { statusListener?.invoke(message, isError) }
+        webViewPort.postToMain { statusListener?.invoke(message, isError) }
     }
 
     companion object {

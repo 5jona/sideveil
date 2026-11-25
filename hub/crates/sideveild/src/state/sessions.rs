@@ -1,4 +1,4 @@
-//! Session lifecycle, status/health reporting, and supervisor wake signals for `HubState`.
+//! Session lifecycle and supervisor wake signals for `HubState`.
 
 use std::sync::PoisonError;
 use std::sync::atomic::Ordering;
@@ -6,13 +6,12 @@ use std::time::Duration;
 
 use serde_json::Value;
 use sideveil_protocol::config::PanelState;
-use sideveil_protocol::rpc::{DaemonHealth, DaemonStatus, RpcRequest, RpcResponse, error_codes};
+use sideveil_protocol::rpc::{RpcRequest, RpcResponse, error_codes};
 use sideveil_protocol::sensor::HubToSensor;
-use sideveil_protocol::{PLUGIN_API_VERSION, PROTOCOL_VERSION};
 use tokio::sync::{mpsc, oneshot};
 
 use super::HubState;
-use super::runtime::{HostSessionHandle, HostWakeSignal, SensorSessionHandle, current_uid};
+use super::runtime::{HostSessionHandle, HostWakeSignal, SensorSessionHandle};
 use crate::outbound_queue::OutboundSender;
 
 struct PendingHostRpcGuard<'a> {
@@ -48,65 +47,6 @@ impl HubState {
             .is_some()
     }
 
-    #[must_use]
-    pub fn build_status(&self) -> DaemonStatus {
-        let cfg = self.config.current();
-        let snap = self
-            .runtime
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
-        let online = self.backends.online_ids();
-        let daemons = self.daemon_manager.snapshot_all();
-        let plugins_snap = self.plugins.snapshot_with_daemons(
-            &snap.foreground_package,
-            &snap.foreground_activity,
-            &cfg,
-            &online,
-            &daemons,
-        );
-        let scope_active = !plugins_snap.matched_plugin_ids.is_empty();
-        DaemonStatus {
-            pid: std::process::id(),
-            uid: current_uid(),
-            uptime_ms: self.uptime_ms(),
-            protocol_version: PROTOCOL_VERSION,
-            plugin_api_version: PLUGIN_API_VERSION,
-            config_version: cfg.version,
-            enabled: cfg.enabled,
-            scope_active,
-            foreground_package: snap.foreground_package,
-            host_package: self.host_package.clone(),
-            host_connected: self.is_host_connected(),
-            host_pid: snap.host_pid,
-            overlay_permission_granted: snap.overlay_permission_granted,
-            cross_window_blur_supported: snap.cross_window_blur_supported,
-            gesture_monitor_active: snap.gesture_monitor_active,
-            task_listener_active: snap.task_listener_active,
-            panel_state: snap.panel_state,
-            screen_width_px: snap.display.width_px,
-            screen_height_px: snap.display.height_px,
-            density: snap.display.density,
-            ws_port: self.ws_port(),
-            sensor_connected: self.is_sensor_connected(),
-            sensor_pid: snap.sensor_pid,
-            active_plugin_id: plugins_snap.active_plugin_id,
-            matched_plugins_count: plugins_snap.matched_plugin_ids.len(),
-            gesture_stats: snap.gesture_stats,
-        }
-    }
-
-    #[must_use]
-    pub fn build_health(&self) -> DaemonHealth {
-        DaemonHealth {
-            ok: true,
-            pid: std::process::id(),
-            uptime_ms: self.uptime_ms(),
-            sensor_connected: self.is_sensor_connected(),
-            host_connected: self.is_host_connected(),
-        }
-    }
-
     pub fn register_host_session(&self, sender: OutboundSender) -> u64 {
         let id = self.next_session_id.fetch_add(1, Ordering::Relaxed);
         let prev = {
@@ -123,6 +63,7 @@ impl HubState {
         self.logs
             .info(format!("Host WebSocket session #{id} connected"));
         self.push_config_snapshot_to_host();
+        self.push_network_context_to_host();
         self.push_plugins_snapshot_to_host();
         id
     }

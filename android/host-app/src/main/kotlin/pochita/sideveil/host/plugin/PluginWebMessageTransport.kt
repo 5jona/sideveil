@@ -1,5 +1,7 @@
 package pochita.sideveil.host.plugin
 
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.webkit.WebView
 import androidx.core.net.toUri
@@ -9,7 +11,56 @@ import androidx.webkit.WebMessageCompat
 import androidx.webkit.WebMessagePortCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import pochita.sideveil.host.service.DaemonClient
+import pochita.sideveil.protocol.RpcRequest
+import pochita.sideveil.protocol.RpcResponse
 import java.util.concurrent.atomic.AtomicBoolean
+
+internal class BridgeRuntimeHooks(
+    val postOnMain: (Runnable) -> Unit,
+    val clearMainCallbacks: () -> Unit,
+    val onWarnLog: (String) -> Unit,
+    val forwardDaemonRpc: suspend (RpcRequest) -> RpcResponse,
+) {
+    companion object {
+        fun forAndroid(
+            daemonClient: DaemonClient,
+            logTag: String,
+        ): BridgeRuntimeHooks {
+            val handler = Handler(Looper.getMainLooper())
+            return BridgeRuntimeHooks(
+                postOnMain = handler::post,
+                clearMainCallbacks = { handler.removeCallbacksAndMessages(null) },
+                onWarnLog = { msg -> Log.w(logTag, msg) },
+                forwardDaemonRpc = daemonClient::forwardRpc,
+            )
+        }
+    }
+}
+
+/**
+ * Abstraction over low-level WebView message delivery so [PluginWebMessageBridge] can be tested
+ * deterministically on the JVM without Android `WebView` or Robolectric dependencies.
+ */
+internal interface PluginMessageTransport {
+    fun installListener(onMessage: (data: String?, sourceOrigin: String, isMainFrame: Boolean, activateReplyProxy: () -> Unit) -> Unit)
+
+    fun clearReplyProxy()
+
+    fun installWebMessagePort(
+        onPortMessage: (String) -> Unit,
+        onReady: (BridgeDeliveryChannel) -> Unit,
+    )
+
+    fun deliver(
+        rawJson: String,
+        channel: BridgeDeliveryChannel,
+    )
+
+    fun closeActivePort()
+
+    fun destroy()
+}
 
 /**
  * Low-level Chromium `WebMessageListener`, document-start attach script, `WebMessagePort`,
@@ -21,7 +72,7 @@ internal class PluginWebMessageTransport(
     private val pluginIdProvider: () -> String,
     private val isDestroyed: AtomicBoolean,
     private val channelState: PluginBridgeChannelState,
-) {
+) : PluginMessageTransport {
     @Volatile
     private var activePort: WebMessagePortCompat? = null
 
@@ -34,7 +85,9 @@ internal class PluginWebMessageTransport(
     @Volatile
     private var listenerRegistered: Boolean = false
 
-    fun installListener(onMessage: (data: String?, sourceOrigin: String, isMainFrame: Boolean, replyProxy: JavaScriptReplyProxy) -> Unit) {
+    override fun installListener(
+        onMessage: (data: String?, sourceOrigin: String, isMainFrame: Boolean, activateReplyProxy: () -> Unit) -> Unit,
+    ) {
         if (isDestroyed.get() || listenerRegistered) return
         if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
             runCatching {
@@ -43,7 +96,9 @@ internal class PluginWebMessageTransport(
                     PluginBridgePolicy.HOST_OBJECT_NAME,
                     setOf(pluginOrigin),
                 ) { _, message, sourceOrigin, isMainFrame, replyProxy ->
-                    onMessage(message.data, sourceOrigin.toString(), isMainFrame, replyProxy)
+                    onMessage(message.data, sourceOrigin.toString(), isMainFrame) {
+                        activeReplyProxy = replyProxy
+                    }
                 }
                 listenerRegistered = true
             }.onFailure { err ->
@@ -64,11 +119,11 @@ internal class PluginWebMessageTransport(
         }
     }
 
-    fun setReplyProxy(proxy: JavaScriptReplyProxy?) {
-        activeReplyProxy = proxy
+    override fun clearReplyProxy() {
+        activeReplyProxy = null
     }
 
-    fun installWebMessagePort(
+    override fun installWebMessagePort(
         onPortMessage: (String) -> Unit,
         onReady: (BridgeDeliveryChannel) -> Unit,
     ) {
@@ -129,7 +184,7 @@ internal class PluginWebMessageTransport(
         }
     }
 
-    fun deliver(
+    override fun deliver(
         rawJson: String,
         channel: BridgeDeliveryChannel,
     ) {
@@ -168,7 +223,7 @@ internal class PluginWebMessageTransport(
         }
     }
 
-    fun closeActivePort() {
+    override fun closeActivePort() {
         val port = activePort ?: return
         activePort = null
         channelState.onWebMessagePortClosed()
@@ -177,7 +232,7 @@ internal class PluginWebMessageTransport(
         }
     }
 
-    fun destroy() {
+    override fun destroy() {
         activeReplyProxy = null
         closeActivePort()
         if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {

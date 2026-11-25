@@ -150,6 +150,46 @@ class EmbedUrlRouterTest {
                 targetBaseUrl = "https://ha.example.com:8123",
             ),
         )
+        assertEquals(
+            "https://ha.example.com:8123/author/profile?tab=1",
+            EmbedUrlRouter.resolveSwitchUrl(
+                currentUrl = "http://homeassistant.local:8123/author/profile?tab=1",
+                targetBaseUrl = "https://ha.example.com:8123",
+            ),
+        )
+    }
+
+    @Test
+    fun `resolveSwitchUrl drops OAuth and auth callback paths on cross-origin switch`() {
+        assertEquals(
+            "http://homeassistant.local:8123",
+            EmbedUrlRouter.resolveSwitchUrl(
+                currentUrl =
+                    "https://ha.example.com:8123/auth/authorize?response_type=code&client_id=https%3A%2F%2Fha.example.com%2F&redirect_uri=https%3A%2F%2Fha.example.com%2F%3Fauth_callback%3D1",
+                targetBaseUrl = "http://homeassistant.local:8123",
+            ),
+        )
+        assertEquals(
+            "https://ha.example.com:8123",
+            EmbedUrlRouter.resolveSwitchUrl(
+                currentUrl = "http://homeassistant.local:8123/AUTH/login_flow",
+                targetBaseUrl = "https://ha.example.com:8123",
+            ),
+        )
+        assertEquals(
+            "http://homeassistant.local:8123",
+            EmbedUrlRouter.resolveSwitchUrl(
+                currentUrl = "https://ha.example.com:8123/?auth_callback=1&code=abc123",
+                targetBaseUrl = "http://homeassistant.local:8123",
+            ),
+        )
+        assertEquals(
+            "http://homeassistant.local:8123",
+            EmbedUrlRouter.resolveSwitchUrl(
+                currentUrl = "https://ha.example.com:8123/callback?CLIENT_ID=app1",
+                targetBaseUrl = "http://homeassistant.local:8123",
+            ),
+        )
     }
 
     @Test

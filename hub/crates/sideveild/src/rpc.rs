@@ -287,4 +287,8 @@ mod tests;
 #[cfg(test)]
 mod tests_debug;
 #[cfg(test)]
+mod tests_debug_logs;
+#[cfg(test)]
 mod tests_embed;
+#[cfg(test)]
+mod tests_panel;

@@ -47,6 +47,18 @@ fn temp_test_dir(tag: &str) -> PathBuf {
     dir
 }
 
+async fn next_host_event<S>(host_ws: &mut S) -> HostEventEnvelope
+where
+    S: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+{
+    let frame = tokio::time::timeout(Duration::from_secs(2), host_ws.next())
+        .await
+        .expect("timeout")
+        .expect("frame")
+        .expect("ws ok");
+    serde_json::from_str(frame.to_text().expect("text")).expect("decode env")
+}
+
 #[tokio::test]
 async fn sensor_hub_host_and_ctl_pipeline_works_end_to_end() {
     let dir = temp_test_dir("pipeline");
@@ -112,24 +124,13 @@ async fn sensor_hub_host_and_ctl_pipeline_works_end_to_end() {
     );
     let (mut host_ws, _) = connect_async(ok_req).await.expect("connect valid host ws");
 
-    // Host receives initial config.updated + plugins.updated snapshots immediately.
-    let first_frame = tokio::time::timeout(Duration::from_secs(2), host_ws.next())
-        .await
-        .expect("timeout")
-        .expect("frame")
-        .expect("ws ok");
-    let first_env: HostEventEnvelope =
-        serde_json::from_str(first_frame.to_text().expect("text")).expect("decode env");
-    assert_eq!(first_env.event, "config.updated");
-
-    let second_frame = tokio::time::timeout(Duration::from_secs(2), host_ws.next())
-        .await
-        .expect("timeout")
-        .expect("frame")
-        .expect("ws ok");
-    let second_env: HostEventEnvelope =
-        serde_json::from_str(second_frame.to_text().expect("text")).expect("decode env");
-    assert_eq!(second_env.event, "plugins.updated");
+    // Host receives initial config.updated, network.contextChanged, and plugins.updated snapshots.
+    assert_eq!(next_host_event(&mut host_ws).await.event, "config.updated");
+    assert_eq!(
+        next_host_event(&mut host_ws).await.event,
+        "network.contextChanged"
+    );
+    assert_eq!(next_host_event(&mut host_ws).await.event, "plugins.updated");
 
     // Host sends host.hello -> Hub wakes supervisor with WatchHostPid.
     let hello_env = json!({
@@ -150,26 +151,15 @@ async fn sensor_hub_host_and_ctl_pipeline_works_end_to_end() {
     );
 
     // 3. Connect Sensor over hub.sock and report foreground + gesture burst.
-    let sensor_stream = UnixStream::connect(&hub_sock)
-        .await
-        .expect("connect sensor");
-    let (sr, mut sw) = sensor_stream.into_split();
-    let mut sensor_reader = BufReader::new(sr);
-    let sensor_hello = serde_json::to_string(&UdsClientHello::Sensor {
-        pid: 31337,
-        version: "0.1.0".to_owned(),
-        protocol_version: 1,
-    })
-    .unwrap();
-    sw.write_all(format!("{sensor_hello}\n").as_bytes())
-        .await
-        .expect("write sensor hello");
-    let mut ack_line = String::new();
-    sensor_reader
-        .read_line(&mut ack_line)
-        .await
-        .expect("read ack");
-    let ack: UdsHandshakeAck = serde_json::from_str(ack_line.trim()).expect("parse ack");
+    let (mut sensor_reader, mut sw, ack) = uds_handshake(
+        &hub_sock,
+        &UdsClientHello::Sensor {
+            pid: 31337,
+            version: "0.1.0".to_owned(),
+            protocol_version: 1,
+        },
+    )
+    .await;
     assert!(ack.ok);
 
     // Sensor receives initial SyncState from Hub.
@@ -221,14 +211,7 @@ async fn sensor_hub_host_and_ctl_pipeline_works_end_to_end() {
     // Drain Host events and verify critical events all arrive in order.
     let mut seen_events = Vec::new();
     while seen_events.len() < 6 {
-        let frame = tokio::time::timeout(Duration::from_secs(2), host_ws.next())
-            .await
-            .expect("host event timeout")
-            .expect("frame")
-            .expect("ws ok");
-        let env: HostEventEnvelope =
-            serde_json::from_str(frame.to_text().expect("text")).expect("decode env");
-        seen_events.push(env.event);
+        seen_events.push(next_host_event(&mut host_ws).await.event);
     }
     assert_eq!(
         seen_events,
@@ -243,19 +226,8 @@ async fn sensor_hub_host_and_ctl_pipeline_works_end_to_end() {
     );
 
     // 4. Query daemon.status via hub.sock Ctl role and verify sensor + host metadata.
-    let ctl_stream = UnixStream::connect(&hub_sock).await.expect("connect ctl");
-    let (cr, mut cw) = ctl_stream.into_split();
-    let mut ctl_reader = BufReader::new(cr);
-    cw.write_all(format!("{}\n", serde_json::to_string(&UdsClientHello::Ctl).unwrap()).as_bytes())
-        .await
-        .expect("write ctl hello");
-    let mut ctl_ack = String::new();
-    ctl_reader.read_line(&mut ctl_ack).await.expect("ctl ack");
-    assert!(
-        serde_json::from_str::<UdsHandshakeAck>(ctl_ack.trim())
-            .unwrap()
-            .ok
-    );
+    let (mut ctl_reader, mut cw, ctl_ack) = uds_handshake(&hub_sock, &UdsClientHello::Ctl).await;
+    assert!(ctl_ack.ok);
 
     let req = RpcRequest::new("it-1", methods::DAEMON_STATUS, None);
     cw.write_all(format!("{}\n", serde_json::to_string(&req).unwrap()).as_bytes())
@@ -277,20 +249,7 @@ async fn sensor_hub_host_and_ctl_pipeline_works_end_to_end() {
     assert!(status.scope_active);
 
     // 5. Verify app.sock rejects Ctl role and accepts valid PluginBackend.
-    let app_ctl = UnixStream::connect(&app_sock)
-        .await
-        .expect("connect app.sock");
-    let (ar, mut aw) = app_ctl.into_split();
-    let mut app_reader = BufReader::new(ar);
-    aw.write_all(format!("{}\n", serde_json::to_string(&UdsClientHello::Ctl).unwrap()).as_bytes())
-        .await
-        .expect("write app ctl");
-    let mut app_ack_line = String::new();
-    app_reader
-        .read_line(&mut app_ack_line)
-        .await
-        .expect("read app ack");
-    let app_ack: UdsHandshakeAck = serde_json::from_str(app_ack_line.trim()).expect("parse ack");
+    let (_app_reader, _aw, app_ack) = uds_handshake(&app_sock, &UdsClientHello::Ctl).await;
     assert!(!app_ack.ok);
 
     // 6. Verify Host WS can execute JSON-RPC (daemon.ping) and receive response.
@@ -299,16 +258,42 @@ async fn sensor_hub_host_and_ctl_pipeline_works_end_to_end() {
         .send(Message::Text(ping_req.to_string().into()))
         .await
         .expect("send ws ping");
-    let ping_frame = tokio::time::timeout(Duration::from_secs(2), host_ws.next())
-        .await
-        .expect("ping timeout")
-        .expect("frame")
-        .expect("ws ok");
-    let ping_val: Value = serde_json::from_str(ping_frame.to_text().unwrap()).unwrap();
+    let ping_val: Value = serde_json::from_str(next_ws_text(&mut host_ws).await.as_str()).unwrap();
     assert_eq!(ping_val["id"], "ws-ping");
     assert_eq!(ping_val["result"]["pong"], true);
 
     ws_task.abort();
     uds_task.abort();
     let _ = fs::remove_dir_all(&dir);
+}
+
+async fn uds_handshake(
+    sock: &std::path::Path,
+    hello: &UdsClientHello,
+) -> (
+    BufReader<tokio::net::unix::OwnedReadHalf>,
+    tokio::net::unix::OwnedWriteHalf,
+    UdsHandshakeAck,
+) {
+    let stream = UnixStream::connect(sock).await.expect("connect uds");
+    let (r, mut w) = stream.into_split();
+    let mut reader = BufReader::new(r);
+    let line = format!("{}\n", serde_json::to_string(hello).unwrap());
+    w.write_all(line.as_bytes()).await.expect("write hello");
+    let mut ack_line = String::new();
+    reader.read_line(&mut ack_line).await.expect("read ack");
+    let ack: UdsHandshakeAck = serde_json::from_str(ack_line.trim()).expect("parse ack");
+    (reader, w, ack)
+}
+
+async fn next_ws_text<S>(ws: &mut S) -> String
+where
+    S: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+{
+    let frame = tokio::time::timeout(Duration::from_secs(2), ws.next())
+        .await
+        .expect("timeout")
+        .expect("frame")
+        .expect("ws ok");
+    frame.to_text().expect("text").to_owned()
 }

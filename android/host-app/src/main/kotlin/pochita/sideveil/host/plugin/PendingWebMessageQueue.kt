@@ -26,9 +26,15 @@ class PendingWebMessageQueue(
     }
 
     /** Drains all buffered responses first, followed by buffered events in FIFO order. */
-    fun drainAll(deliver: (String) -> Unit) {
-        while (pendingResponses.isNotEmpty()) deliver(pendingResponses.removeFirst())
-        while (pendingEvents.isNotEmpty()) deliver(pendingEvents.removeFirst())
+    fun drainAll(deliver: (String) -> Unit) = drainAllTyped { raw, _ -> deliver(raw) }
+
+    /**
+     * Drains all buffered responses first, followed by buffered events in FIFO order, reporting
+     * whether each frame was queued as an RPC response (`true`) or host event (`false`).
+     */
+    fun drainAllTyped(deliver: (rawJson: String, isRpcResponse: Boolean) -> Unit) {
+        while (pendingResponses.isNotEmpty()) deliver(pendingResponses.removeFirst(), true)
+        while (pendingEvents.isNotEmpty()) deliver(pendingEvents.removeFirst(), false)
     }
 
     /** Clears all queued responses and events. */
