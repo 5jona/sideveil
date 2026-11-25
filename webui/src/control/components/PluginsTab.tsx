@@ -30,6 +30,10 @@ export interface PluginsTabProps {
   loadError: string | null;
   busyAction: string | null;
   foregroundPackage: string;
+  currentWifiSsid?: string | null;
+  networkLoaded?: boolean;
+  networkLoading?: boolean;
+  onDetectWifiSsid?: () => Promise<string | null>;
   onReload: () => Promise<void>;
   onSetEnabled: (pluginId: string, enabled: boolean) => Promise<void>;
   onSetPriority: (pluginId: string, priority: number) => Promise<void>;
@@ -51,6 +55,10 @@ export function PluginsTab({
   loadError,
   busyAction,
   foregroundPackage,
+  currentWifiSsid,
+  networkLoaded = false,
+  networkLoading = false,
+  onDetectWifiSsid,
   onReload,
   onSetEnabled,
   onSetPriority,
@@ -104,6 +112,17 @@ export function PluginsTab({
     },
   ];
 
+  const ensureNetworkLoaded = () => {
+    if (!networkLoaded && !networkLoading && onDetectWifiSsid) {
+      void onDetectWifiSsid();
+    }
+  };
+
+  const openCreateEmbed = () => {
+    setShowCreateEmbed(true);
+    ensureNetworkLoaded();
+  };
+
   const renderCard = (plugin: PluginRuntimeDescriptor) => (
     <PluginCard
       key={plugin.id}
@@ -112,7 +131,12 @@ export function PluginsTab({
       isMatched={matchedIds.includes(plugin.id)}
       isBusy={busyAction === `plugin-${plugin.id}`}
       onSetEnabled={onSetEnabled}
-      onOpenDetail={(pluginId, initialTab) => setDetailState({ pluginId, initialTab })}
+      onOpenDetail={(pluginId, initialTab) => {
+        if (plugin.origin === 'web-embed' || plugin.embed || initialTab === 'embed') {
+          ensureNetworkLoaded();
+        }
+        setDetailState({ pluginId, initialTab });
+      }}
     />
   );
 
@@ -157,7 +181,13 @@ export function PluginsTab({
               variant="primary"
               aria-label={showCreateEmbed ? '收起添加网页面板表单' : '添加网页面板'}
               disabled={busyAction !== null}
-              onClick={() => setShowCreateEmbed((prev) => !prev)}
+              onClick={() => {
+                if (showCreateEmbed) {
+                  setShowCreateEmbed(false);
+                } else {
+                  openCreateEmbed();
+                }
+              }}
             >
               <Plus className="size-3.5" />
               {showCreateEmbed ? '收起表单' : '添加网页面板'}
@@ -191,6 +221,9 @@ export function PluginsTab({
       {showCreateEmbed && category === 'web-embed' ? (
         <CreateWebEmbedCard
           isBusy={busyAction === 'create-web-embed'}
+          currentWifiSsid={currentWifiSsid}
+          networkLoading={networkLoading}
+          onDetectWifiSsid={onDetectWifiSsid}
           onCreate={onCreateWebEmbed}
           onCancel={() => setShowCreateEmbed(false)}
         />
@@ -200,7 +233,7 @@ export function PluginsTab({
         category={category}
         grouped={grouped}
         renderCard={renderCard}
-        onStartCreateEmbed={() => setShowCreateEmbed(true)}
+        onStartCreateEmbed={openCreateEmbed}
         onStartImport={() => setShowImportModal(true)}
       />
 
@@ -221,6 +254,9 @@ export function PluginsTab({
           isMatched={matchedIds.includes(activeDetailPlugin.id)}
           isBusy={busyAction === `plugin-${activeDetailPlugin.id}`}
           foregroundPackage={fgPkg}
+          currentWifiSsid={currentWifiSsid}
+          networkLoading={networkLoading}
+          onDetectWifiSsid={onDetectWifiSsid}
           onClose={() => setDetailState(null)}
           onSetEnabled={onSetEnabled}
           onSetPriority={onSetPriority}

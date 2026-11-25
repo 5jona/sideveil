@@ -1,86 +1,17 @@
 import { SettingRow, Switch } from '@gojona/ui';
-import { ChevronDown, ChevronUp, SlidersHorizontal } from 'lucide-react';
-import { useId } from 'react';
+import { ChevronDown, ChevronUp, SlidersHorizontal, Wifi } from 'lucide-react';
+import { useEffect, useId, useRef, useState } from 'react';
+import {
+  cleanWifiSsid,
+  DEFAULT_WEB_EMBED_ADVANCED,
+  EMBED_PRESETS,
+  type EmbedPreset,
+  resolveWifiSsidDetection,
+  WEB_EMBED_ADVANCED_TOGGLES,
+  type WebEmbedAdvancedValues,
+} from '../webEmbedHelpers.ts';
 
-export interface WebEmbedAdvancedValues {
-  remoteUrl: string;
-  lanSsidsText: string;
-  widthDp: number;
-  heightPercent: number;
-  textZoom: number;
-  keepAliveGraceSec: number;
-  wideViewport: boolean;
-  allowZoom: boolean;
-  webHistoryBack: boolean;
-  showToolbar: boolean;
-}
-
-export const DEFAULT_WEB_EMBED_ADVANCED: WebEmbedAdvancedValues = {
-  remoteUrl: '',
-  lanSsidsText: '',
-  widthDp: 380,
-  heightPercent: 78,
-  textZoom: 100,
-  keepAliveGraceSec: 180,
-  wideViewport: true,
-  allowZoom: false,
-  webHistoryBack: true,
-  showToolbar: true,
-};
-
-export interface EmbedPreset {
-  label: string;
-  id: string;
-  name: string;
-  url: string;
-  allowCleartext: boolean;
-  keepAlive: boolean;
-  advanced?: Partial<WebEmbedAdvancedValues>;
-}
-
-export const EMBED_PRESETS: readonly EmbedPreset[] = [
-  {
-    label: 'Home Assistant',
-    id: 'lan.homeassistant',
-    name: 'Home Assistant',
-    url: 'http://homeassistant.local:8123',
-    allowCleartext: true,
-    keepAlive: true,
-    advanced: {
-      keepAliveGraceSec: 180,
-      widthDp: 400,
-      textZoom: 95,
-      showToolbar: true,
-      webHistoryBack: true,
-      wideViewport: true,
-      allowZoom: false,
-    },
-  },
-  {
-    label: 'OpenClash',
-    id: 'lan.openclash',
-    name: 'OpenClash',
-    url: 'http://192.168.1.1:9090/ui',
-    allowCleartext: true,
-    keepAlive: true,
-  },
-  {
-    label: 'LuCI',
-    id: 'lan.luci',
-    name: 'OpenWrt LuCI',
-    url: 'http://192.168.1.1/cgi-bin/luci',
-    allowCleartext: true,
-    keepAlive: false,
-  },
-  {
-    label: 'Zashboard',
-    id: 'lan.zashboard',
-    name: 'Zashboard',
-    url: 'http://127.0.0.1:9090/ui',
-    allowCleartext: true,
-    keepAlive: true,
-  },
-];
+export { DEFAULT_WEB_EMBED_ADVANCED, EMBED_PRESETS, type EmbedPreset, type WebEmbedAdvancedValues };
 
 export interface WebEmbedAdvancedFieldsProps {
   labelPrefix?: string;
@@ -88,6 +19,9 @@ export interface WebEmbedAdvancedFieldsProps {
   keepAlive: boolean;
   isBusy: boolean;
   expanded: boolean;
+  currentWifiSsid?: string | null;
+  networkLoading?: boolean;
+  onDetectWifiSsid?: () => Promise<string | null>;
   onToggleExpanded: () => void;
   onChange: (patch: Partial<WebEmbedAdvancedValues>) => void;
 }
@@ -98,11 +32,53 @@ export function WebEmbedAdvancedFields({
   keepAlive,
   isBusy,
   expanded,
+  currentWifiSsid,
+  networkLoading = false,
+  onDetectWifiSsid,
   onToggleExpanded,
   onChange,
 }: WebEmbedAdvancedFieldsProps) {
   const fieldId = useId();
+  const [detectingWifi, setDetectingWifi] = useState(false);
+  const [wifiHint, setWifiHint] = useState<string | null>(null);
+  const lanSsidsRef = useRef(values.lanSsidsText);
+  lanSsidsRef.current = values.lanSsidsText;
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   const hasRemote = values.remoteUrl.trim().length > 0;
+  const detectedWifiSsid = cleanWifiSsid(currentWifiSsid);
+  const isDetectingWifi = detectingWifi || networkLoading;
+  const showWifiAction = Boolean(onDetectWifiSsid || detectedWifiSsid);
+
+  const handleFillCurrentWifi = async () => {
+    setWifiHint(null);
+    setDetectingWifi(true);
+    try {
+      const result = await resolveWifiSsidDetection(
+        lanSsidsRef.current,
+        currentWifiSsid,
+        onDetectWifiSsid,
+      );
+      if (!mountedRef.current) return;
+      if (result.filledSsid) {
+        onChange({ lanSsidsText: result.nextText });
+        setWifiHint(null);
+      } else {
+        setWifiHint(result.hint);
+      }
+    } finally {
+      if (mountedRef.current) {
+        setDetectingWifi(false);
+      }
+    }
+  };
 
   return (
     <div className="flex flex-col gap-2.5 rounded-[var(--radius-control)] border border-[var(--border-hairline)] bg-[var(--surface-elevated)] p-2.5">
@@ -145,21 +121,52 @@ export function WebEmbedAdvancedFields({
               />
             </label>
 
-            <label className="flex flex-col gap-1 text-xs" htmlFor={`${fieldId}-lan-ssids`}>
-              <span className="font-medium text-[var(--text-secondary)]">
-                家庭 Wi-Fi SSID（逗号分隔）
-              </span>
+            <div className="flex flex-col gap-1 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-1.5">
+                <label
+                  className="font-medium text-[var(--text-secondary)]"
+                  htmlFor={`${fieldId}-lan-ssids`}
+                >
+                  家庭 Wi-Fi SSID（逗号分隔）
+                </label>
+                {showWifiAction ? (
+                  <button
+                    type="button"
+                    aria-label={`${labelPrefix}填入当前 Wi-Fi SSID`}
+                    disabled={isBusy || isDetectingWifi}
+                    onClick={() => void handleFillCurrentWifi()}
+                    className="inline-flex cursor-pointer items-center gap-1 rounded-[var(--radius-control)] border border-[var(--border-hairline)] bg-[var(--surface-card)] px-2 py-0.5 text-[11px] font-medium text-[var(--accent)] transition-colors hover:bg-[var(--accent-soft)] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Wifi className={`size-3 ${isDetectingWifi ? 'animate-pulse' : ''}`} />
+                    <span>
+                      {isDetectingWifi
+                        ? '检测中...'
+                        : detectedWifiSsid
+                          ? `填入当前 Wi-Fi · ${detectedWifiSsid}`
+                          : '填入当前 Wi-Fi'}
+                    </span>
+                  </button>
+                ) : null}
+              </div>
               <input
                 id={`${fieldId}-lan-ssids`}
                 type="text"
                 aria-label={`${labelPrefix}家庭 Wi-Fi SSID`}
-                placeholder="例如 Home-5G, Home-IoT"
+                placeholder="例如 HomeRouter-5G, Office-5G"
                 disabled={isBusy}
                 className="rounded-[var(--radius-control)] border border-[var(--border-hairline)] bg-[var(--surface-card)] px-2.5 py-1.5 font-mono text-xs text-[var(--text-primary)]"
                 value={values.lanSsidsText}
-                onChange={(e) => onChange({ lanSsidsText: e.target.value })}
+                onChange={(e) => {
+                  if (wifiHint) setWifiHint(null);
+                  onChange({ lanSsidsText: e.target.value });
+                }}
               />
-            </label>
+              {wifiHint ? (
+                <span role="status" className="text-[11px] text-[var(--warning)]">
+                  {wifiHint}
+                </span>
+              ) : null}
+            </div>
 
             <label className="flex flex-col gap-1 text-xs" htmlFor={`${fieldId}-width-dp`}>
               <span className="font-medium text-[var(--text-secondary)]">
@@ -231,58 +238,22 @@ export function WebEmbedAdvancedFields({
           </div>
 
           <div className="flex flex-col gap-2">
-            <SettingRow
-              variant="plain"
-              title="显示极简快捷顶栏"
-              description="在面板顶部提供地址状态、内外网切换、刷新与外部浏览器打开按钮"
-              control={
-                <Switch
-                  checked={values.showToolbar}
-                  onCheckedChange={(checked) => onChange({ showToolbar: checked })}
-                  aria-label={`${labelPrefix}显示极简快捷顶栏`}
-                  disabled={isBusy}
-                />
-              }
-            />
-            <SettingRow
-              variant="plain"
-              title="网页内优先返回"
-              description="返回手势优先后退网页历史记录，到达根页后再收起侧边栏"
-              control={
-                <Switch
-                  checked={values.webHistoryBack}
-                  onCheckedChange={(checked) => onChange({ webHistoryBack: checked })}
-                  aria-label={`${labelPrefix}网页内优先返回`}
-                  disabled={isBusy}
-                />
-              }
-            />
-            <SettingRow
-              variant="plain"
-              title="宽视口"
-              description="启用自适应宽视口布局，改善仪表盘与多列卡片显示"
-              control={
-                <Switch
-                  checked={values.wideViewport}
-                  onCheckedChange={(checked) => onChange({ wideViewport: checked })}
-                  aria-label={`${labelPrefix}宽视口`}
-                  disabled={isBusy}
-                />
-              }
-            />
-            <SettingRow
-              variant="plain"
-              title="允许双指缩放"
-              description="允许在网页区域内使用双指捏合手势缩放页面"
-              control={
-                <Switch
-                  checked={values.allowZoom}
-                  onCheckedChange={(checked) => onChange({ allowZoom: checked })}
-                  aria-label={`${labelPrefix}允许双指缩放`}
-                  disabled={isBusy}
-                />
-              }
-            />
+            {WEB_EMBED_ADVANCED_TOGGLES.map((toggle) => (
+              <SettingRow
+                key={toggle.key}
+                variant="plain"
+                title={toggle.title}
+                description={toggle.description}
+                control={
+                  <Switch
+                    checked={values[toggle.key]}
+                    onCheckedChange={(checked) => onChange({ [toggle.key]: checked })}
+                    aria-label={`${labelPrefix}${toggle.title}`}
+                    disabled={isBusy}
+                  />
+                }
+              />
+            ))}
           </div>
         </div>
       ) : null}

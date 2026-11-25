@@ -18,6 +18,9 @@ export interface PluginEmbedDialogProps {
   initialWidthDp?: number;
   initialHeightPercent?: number;
   isBusy: boolean;
+  currentWifiSsid?: string | null;
+  networkLoading?: boolean;
+  onDetectWifiSsid?: () => Promise<string | null>;
   onSave: (pluginId: string, input: PluginEmbedConfigInput) => Promise<boolean>;
   onCancel: () => void;
 }
@@ -30,6 +33,9 @@ export function PluginEmbedDialog({
   initialWidthDp,
   initialHeightPercent,
   isBusy,
+  currentWifiSsid,
+  networkLoading = false,
+  onDetectWifiSsid,
   onSave,
   onCancel,
 }: PluginEmbedDialogProps) {
@@ -161,6 +167,9 @@ export function PluginEmbedDialog({
         keepAlive={keepAlive}
         isBusy={isBusy}
         expanded={showAdvanced}
+        currentWifiSsid={currentWifiSsid}
+        networkLoading={networkLoading}
+        onDetectWifiSsid={onDetectWifiSsid}
         onToggleExpanded={() => setShowAdvanced((prev) => !prev)}
         onChange={(patch) => setAdvanced((prev) => ({ ...prev, ...patch }))}
       />

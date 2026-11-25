@@ -26,7 +26,7 @@ export function PluginCategoryContent({
       <EmptyState
         icon={<GlobeLock className="size-5" />}
         title="暂无网页面板"
-        description="将 Home Assistant、OpenClash、LuCI 或任意局域网仪表盘安全嵌入侧边栏，不授予任何宿主特权。"
+        description="将 Home Assistant 或任意自定义局域网 / 远程网页仪表盘安全嵌入侧边栏，不授予任何宿主特权。"
         action={
           <Button size="sm" variant="primary" onClick={onStartCreateEmbed}>
             <Plus className="size-3.5" />

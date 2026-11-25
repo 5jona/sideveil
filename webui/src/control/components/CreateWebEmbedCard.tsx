@@ -9,29 +9,39 @@ import {
   Switch,
 } from '@gojona/ui';
 import { GlobeLock, Plus, X } from 'lucide-react';
-import { useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
+import type { CreateWebEmbedInput } from '../hooks/pluginCommandHelpers.ts';
 import {
-  type CreateWebEmbedInput,
-  clampEmbedNumber,
-  normalizeOriginList,
-  normalizeSsidList,
-} from '../hooks/pluginCommandHelpers.ts';
-import {
+  buildCreateWebEmbedInput,
+  buildPresetAdvancedValues,
+  cleanWifiSsid,
   DEFAULT_WEB_EMBED_ADVANCED,
   EMBED_PRESETS,
   type EmbedPreset,
-  WebEmbedAdvancedFields,
+  isValidCreateWebEmbedDraft,
   type WebEmbedAdvancedValues,
-} from './WebEmbedAdvancedFields.tsx';
+} from '../webEmbedHelpers.ts';
+import { WebEmbedAdvancedFields } from './WebEmbedAdvancedFields.tsx';
 
 export interface CreateWebEmbedCardProps {
   isBusy: boolean;
+  currentWifiSsid?: string | null;
+  networkLoading?: boolean;
+  onDetectWifiSsid?: () => Promise<string | null>;
   onCreate: (input: CreateWebEmbedInput) => Promise<boolean>;
   onCancel: () => void;
 }
 
-export function CreateWebEmbedCard({ isBusy, onCreate, onCancel }: CreateWebEmbedCardProps) {
+export function CreateWebEmbedCard({
+  isBusy,
+  currentWifiSsid,
+  networkLoading = false,
+  onDetectWifiSsid,
+  onCreate,
+  onCancel,
+}: CreateWebEmbedCardProps) {
   const formId = useId();
+  const mountedRef = useRef(true);
   const [pluginId, setPluginId] = useState('');
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
@@ -43,16 +53,14 @@ export function CreateWebEmbedCard({ isBusy, onCreate, onCancel }: CreateWebEmbe
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [advanced, setAdvanced] = useState<WebEmbedAdvancedValues>(DEFAULT_WEB_EMBED_ADVANCED);
 
-  const trimmedId = pluginId.trim();
-  const trimmedName = name.trim();
-  const trimmedUrl = url.trim();
-  const trimmedRemoteUrl = advanced.remoteUrl.trim();
-  const canSubmit =
-    !isBusy &&
-    trimmedId.length > 0 &&
-    trimmedName.length > 0 &&
-    /^https?:\/\/.+/.test(trimmedUrl) &&
-    (trimmedRemoteUrl.length === 0 || /^https?:\/\/.+/.test(trimmedRemoteUrl));
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const canSubmit = !isBusy && isValidCreateWebEmbedDraft(pluginId, name, url, advanced.remoteUrl);
 
   const applyPreset = (preset: EmbedPreset) => {
     setPluginId(preset.id);
@@ -61,39 +69,37 @@ export function CreateWebEmbedCard({ isBusy, onCreate, onCancel }: CreateWebEmbe
     setAllowCleartext(preset.allowCleartext);
     setKeepAlive(preset.keepAlive);
     setOriginsText('');
-    setAdvanced({
-      ...DEFAULT_WEB_EMBED_ADVANCED,
-      ...preset.advanced,
-    });
-    if (preset.advanced) {
-      setShowAdvanced(true);
+    const nextAdvanced = buildPresetAdvancedValues(preset, advanced.lanSsidsText, currentWifiSsid);
+    setAdvanced(nextAdvanced);
+    if (preset.advanced) setShowAdvanced(true);
+    if (!nextAdvanced.lanSsidsText.trim() && onDetectWifiSsid) {
+      void onDetectWifiSsid()
+        .then((detected) => {
+          const cleaned = cleanWifiSsid(detected);
+          if (!mountedRef.current || !cleaned) return;
+          setAdvanced((prev) =>
+            prev.lanSsidsText.trim().length > 0 ? prev : { ...prev, lanSsidsText: cleaned },
+          );
+        })
+        .catch(() => {});
     }
   };
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
-    const origins = normalizeOriginList(originsText);
-    const lanSsids = normalizeSsidList(advanced.lanSsidsText);
-    const ok = await onCreate({
-      id: trimmedId,
-      name: trimmedName,
-      url: trimmedUrl,
-      ...(trimmedRemoteUrl.length > 0 ? { remoteUrl: trimmedRemoteUrl } : {}),
-      ...(lanSsids.length > 0 ? { lanSsids } : {}),
-      ...(origins.length > 0 ? { allowedOrigins: origins } : {}),
-      allowCleartext,
-      keepAlive,
-      wideViewport: advanced.wideViewport,
-      allowZoom: advanced.allowZoom,
-      webHistoryBack: advanced.webHistoryBack,
-      textZoom: clampEmbedNumber(advanced.textZoom, 50, 200, 100),
-      showToolbar: advanced.showToolbar,
-      keepAliveGraceSec: clampEmbedNumber(advanced.keepAliveGraceSec, 0, 1800, 180),
-      widthDp: clampEmbedNumber(advanced.widthDp, 240, 720, 380),
-      heightPercent: clampEmbedNumber(advanced.heightPercent, 30, 100, 78),
-      global: globalScope,
-      priority,
-    });
+    const ok = await onCreate(
+      buildCreateWebEmbedInput({
+        id: pluginId,
+        name,
+        url,
+        originsText,
+        allowCleartext,
+        keepAlive,
+        globalScope,
+        priority,
+        advanced,
+      }),
+    );
     if (ok) onCancel();
   };
 
@@ -107,7 +113,7 @@ export function CreateWebEmbedCard({ isBusy, onCreate, onCancel }: CreateWebEmbe
               新建隔离网页嵌入
             </CardTitle>
             <CardDescription>
-              将 Home Assistant、OpenClash、LuCI 或 Zashboard 等面板安全嵌入侧边栏，不注入特权桥接
+              将 Home Assistant 或任意自定义局域网 / 远程网页仪表盘安全嵌入侧边栏，不注入特权桥接
             </CardDescription>
           </div>
           <Button
@@ -254,6 +260,9 @@ export function CreateWebEmbedCard({ isBusy, onCreate, onCancel }: CreateWebEmbe
           keepAlive={keepAlive}
           isBusy={isBusy}
           expanded={showAdvanced}
+          currentWifiSsid={currentWifiSsid}
+          networkLoading={networkLoading}
+          onDetectWifiSsid={onDetectWifiSsid}
           onToggleExpanded={() => setShowAdvanced((prev) => !prev)}
           onChange={(patch) => setAdvanced((prev) => ({ ...prev, ...patch }))}
         />

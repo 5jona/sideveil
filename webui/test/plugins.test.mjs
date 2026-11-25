@@ -123,13 +123,13 @@ test('handleMockControlExec supports web-embed create, edit, uninstall, and netw
   assert.equal(netSnap.transport, 'wifi');
   assert.equal(typeof netSnap.vpnActive, 'boolean');
 
-  // create web-embed with enhanced Phase 1 fields
+  // create custom web-embed with enhanced Phase 1 fields
   const createInput = {
-    id: 'lan.openclash',
-    name: 'OpenClash',
-    url: 'http://192.168.1.1:9090/ui',
-    remoteUrl: 'https://clash.example.com:9443/ui',
-    lanSsids: ['Home-5G', ' Home-IoT ', 'Home-5G'],
+    id: 'lan.dashboard',
+    name: 'Custom Dashboard',
+    url: 'http://192.168.1.10:8080/ui',
+    remoteUrl: 'https://dashboard.example.com:8443/ui',
+    lanSsids: ['HomeRouter-5G', ' Office-5G ', 'HomeRouter-5G'],
     allowCleartext: true,
     keepAlive: true,
     wideViewport: true,
@@ -144,8 +144,8 @@ test('handleMockControlExec supports web-embed create, edit, uninstall, and netw
     priority: 12,
   };
   const createParams = buildCreateWebEmbedParams(createInput);
-  assert.equal(createParams.remoteUrl, 'https://clash.example.com:9443/ui');
-  assert.deepEqual(createParams.lanSsids, ['Home-5G', 'Home-IoT']);
+  assert.equal(createParams.remoteUrl, 'https://dashboard.example.com:8443/ui');
+  assert.deepEqual(createParams.lanSsids, ['HomeRouter-5G', 'Office-5G']);
   assert.equal(createParams.wideViewport, true);
   assert.equal(createParams.allowZoom, false);
   assert.equal(createParams.webHistoryBack, true);
@@ -160,14 +160,14 @@ test('handleMockControlExec supports web-embed create, edit, uninstall, and netw
   assert.equal(createRes.errno, 0);
   const createdEnvelope = JSON.parse(createRes.stdout);
   const createdPlugin = createdEnvelope.result.snapshot.plugins.find(
-    (p) => p.id === 'lan.openclash',
+    (p) => p.id === 'lan.dashboard',
   );
-  assert.equal(createdPlugin?.embed?.url, 'http://192.168.1.1:9090/ui');
-  assert.equal(createdPlugin?.embed?.remoteUrl, 'https://clash.example.com:9443/ui');
-  assert.deepEqual(createdPlugin?.embed?.lanSsids, ['Home-5G', 'Home-IoT']);
+  assert.equal(createdPlugin?.embed?.url, 'http://192.168.1.10:8080/ui');
+  assert.equal(createdPlugin?.embed?.remoteUrl, 'https://dashboard.example.com:8443/ui');
+  assert.deepEqual(createdPlugin?.embed?.lanSsids, ['HomeRouter-5G', 'Office-5G']);
   assert.deepEqual(createdPlugin?.embed?.allowedOrigins, [
-    'http://192.168.1.1:9090',
-    'https://clash.example.com:9443',
+    'http://192.168.1.10:8080',
+    'https://dashboard.example.com:8443',
   ]);
   assert.equal(createdPlugin?.embed?.allowCleartext, true);
   assert.equal(createdPlugin?.embed?.wideViewport, true);
@@ -182,10 +182,10 @@ test('handleMockControlExec supports web-embed create, edit, uninstall, and netw
 
   // edit embed config including new Phase 1 fields
   const editInput = {
-    embedUrl: 'http://192.168.1.2:9090/ui',
+    embedUrl: 'http://192.168.1.20:8080/ui',
     remoteUrl: 'https://ha.example.com:8123',
-    lanSsids: ['Office-WiFi'],
-    allowedOrigins: ['http://192.168.1.2:9090', 'https://ha.example.com:8123'],
+    lanSsids: ['Office-5G'],
+    allowedOrigins: ['http://192.168.1.20:8080', 'https://ha.example.com:8123'],
     allowCleartext: false,
     keepAlive: false,
     wideViewport: false,
@@ -197,10 +197,10 @@ test('handleMockControlExec supports web-embed create, edit, uninstall, and netw
     widthDp: 440,
     heightPercent: 85,
   };
-  const editParams = buildSetEmbedConfigParams('lan.openclash', editInput);
-  assert.equal(editParams.pluginId, 'lan.openclash');
+  const editParams = buildSetEmbedConfigParams('lan.dashboard', editInput);
+  assert.equal(editParams.pluginId, 'lan.dashboard');
   assert.equal(editParams.remoteUrl, 'https://ha.example.com:8123');
-  assert.deepEqual(editParams.lanSsids, ['Office-WiFi']);
+  assert.deepEqual(editParams.lanSsids, ['Office-5G']);
   assert.equal(editParams.wideViewport, false);
   assert.equal(editParams.allowZoom, true);
   assert.equal(editParams.webHistoryBack, false);
@@ -210,14 +210,14 @@ test('handleMockControlExec supports web-embed create, edit, uninstall, and netw
   assert.equal(editParams.widthDp, 440);
   assert.equal(editParams.heightPercent, 85);
 
-  const editCmd = buildSetEmbedConfigCommand('lan.openclash', editInput);
+  const editCmd = buildSetEmbedConfigCommand('lan.dashboard', editInput);
   const editRes = await handleMockControlExec(editCmd);
   assert.equal(editRes.errno, 0);
   const editedEnvelope = JSON.parse(editRes.stdout);
-  const editedPlugin = editedEnvelope.result.plugins.find((p) => p.id === 'lan.openclash');
-  assert.equal(editedPlugin?.embed?.url, 'http://192.168.1.2:9090/ui');
+  const editedPlugin = editedEnvelope.result.plugins.find((p) => p.id === 'lan.dashboard');
+  assert.equal(editedPlugin?.embed?.url, 'http://192.168.1.20:8080/ui');
   assert.equal(editedPlugin?.embed?.remoteUrl, 'https://ha.example.com:8123');
-  assert.deepEqual(editedPlugin?.embed?.lanSsids, ['Office-WiFi']);
+  assert.deepEqual(editedPlugin?.embed?.lanSsids, ['Office-5G']);
   assert.equal(editedPlugin?.embed?.allowCleartext, false);
   assert.equal(editedPlugin?.embed?.wideViewport, false);
   assert.equal(editedPlugin?.embed?.allowZoom, true);
@@ -230,7 +230,10 @@ test('handleMockControlExec supports web-embed create, edit, uninstall, and netw
   assert.equal(editedPlugin?.surface?.heightPercent, 85);
 
   // normalizeSsidList, normalizeOriginList, clampEmbedNumber
-  assert.deepEqual(normalizeSsidList('Home-5G, Home-IoT\nHome-5G'), ['Home-5G', 'Home-IoT']);
+  assert.deepEqual(normalizeSsidList('HomeRouter-5G, Office-5G\nHomeRouter-5G'), [
+    'HomeRouter-5G',
+    'Office-5G',
+  ]);
   assert.deepEqual(normalizeOriginList('http://127.0.0.1:8123, https://ha.example.com:8123'), [
     'http://127.0.0.1:8123',
     'https://ha.example.com:8123',
@@ -240,12 +243,12 @@ test('handleMockControlExec supports web-embed create, edit, uninstall, and netw
   assert.equal(clampEmbedNumber(Number.NaN, 240, 720, 380), 380);
 
   // uninstall
-  const uninstallCmd = buildUninstallPluginCommand('lan.openclash');
+  const uninstallCmd = buildUninstallPluginCommand('lan.dashboard');
   const uninstallRes = await handleMockControlExec(uninstallCmd);
   assert.equal(uninstallRes.errno, 0);
   const afterUninstall = JSON.parse(uninstallRes.stdout);
   assert.equal(
-    afterUninstall.result.snapshot.plugins.some((p) => p.id === 'lan.openclash'),
+    afterUninstall.result.snapshot.plugins.some((p) => p.id === 'lan.dashboard'),
     false,
   );
 });

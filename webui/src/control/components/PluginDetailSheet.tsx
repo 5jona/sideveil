@@ -1,5 +1,5 @@
 import { Badge, Button, SegmentedControl, type SegmentedControlOption, Switch } from '@gojona/ui';
-import { CheckCircle2, Play, RefreshCw, Sliders, X } from 'lucide-react';
+import { CheckCircle2, Sliders, X } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
 import type { PluginRuntimeDescriptor } from '../../shared/types.ts';
 import type {
@@ -10,9 +10,9 @@ import type {
 import { canUninstallPlugin, formatOriginLabel, needsPermissionAttention } from '../pluginMeta.ts';
 import { PluginUninstallAction } from './PluginCardActions.tsx';
 import { PluginDaemonSection } from './PluginDaemonSection.tsx';
+import { PluginDetailOverview } from './PluginDetailOverview.tsx';
 import { PluginDevDialog } from './PluginDevDialog.tsx';
 import { PluginEmbedDialog } from './PluginEmbedDialog.tsx';
-import { PluginPermissionsSection } from './PluginPermissionsSection.tsx';
 import { PluginScopeEditor } from './PluginScopeEditor.tsx';
 
 export type PluginDetailTab = 'overview' | 'scope' | 'dev' | 'embed';
@@ -24,6 +24,9 @@ export interface PluginDetailSheetProps {
   isMatched: boolean;
   isBusy: boolean;
   foregroundPackage: string;
+  currentWifiSsid?: string | null;
+  networkLoading?: boolean;
+  onDetectWifiSsid?: () => Promise<string | null>;
   onClose: () => void;
   onSetEnabled: (pluginId: string, enabled: boolean) => Promise<void>;
   onSetPriority: (pluginId: string, priority: number) => Promise<void>;
@@ -44,6 +47,9 @@ export function PluginDetailSheet({
   isMatched,
   isBusy,
   foregroundPackage,
+  currentWifiSsid,
+  networkLoading,
+  onDetectWifiSsid,
   onClose,
   onSetEnabled,
   onSetPriority,
@@ -160,54 +166,24 @@ export function PluginDetailSheet({
               initialWidthDp={plugin.surface.widthDp}
               initialHeightPercent={plugin.surface.heightPercent}
               isBusy={isBusy}
+              currentWifiSsid={currentWifiSsid}
+              networkLoading={networkLoading}
+              onDetectWifiSsid={onDetectWifiSsid}
               onSave={onSetEmbedConfig}
               onCancel={onClose}
             />
           ) : null}
 
           {tab === 'overview' ? (
-            <div className="flex flex-col gap-3">
-              {plugin.description ? (
-                <p className="text-xs leading-relaxed text-[var(--text-secondary)]">
-                  {plugin.description}
-                </p>
-              ) : null}
-              <div className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius-control)] border border-[var(--border-hairline)] bg-[var(--surface-elevated)] px-3 py-2 text-xs">
-                <span className="text-[var(--text-secondary)]">
-                  API v{plugin.apiVersion} · 底板 {plugin.surface.backdrop}
-                  {plugin.surface.widthDp ? ` · ${plugin.surface.widthDp}dp` : ''}
-                </span>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {plugin.enabled && isMatched && !isActive ? (
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      aria-label={`切换到 ${plugin.name}`}
-                      disabled={isBusy}
-                      onClick={() => void onSelectPlugin(plugin.id)}
-                    >
-                      <Play className="size-3.5" />
-                      切换至此
-                    </Button>
-                  ) : null}
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    aria-label={`重载 ${plugin.name} WebView`}
-                    disabled={isBusy}
-                    onClick={() => void onReloadWebView(plugin.id)}
-                  >
-                    <RefreshCw className="size-3.5" />
-                    重载 WebView
-                  </Button>
-                </div>
-              </div>
-              <PluginPermissionsSection
-                plugin={plugin}
-                isBusy={isBusy}
-                onGrantCapabilities={onGrantCapabilities}
-              />
-            </div>
+            <PluginDetailOverview
+              plugin={plugin}
+              isActive={isActive}
+              isMatched={isMatched}
+              isBusy={isBusy}
+              onSelectPlugin={onSelectPlugin}
+              onReloadWebView={onReloadWebView}
+              onGrantCapabilities={onGrantCapabilities}
+            />
           ) : null}
 
           {tab === 'scope' ? (

@@ -34,59 +34,24 @@ const CONTROL_TAB_ORDER = ['overview', 'appearance', 'plugins', 'diagnostics'] a
 
 function ControlWorkbench() {
   const { pushToast } = useToast();
-  const {
-    bridge,
-    config,
-    status,
-    logs,
-    pluginsSnapshot,
-    pluginsLoadError,
-    auditReport,
-    busyAction,
-    lastPingMs,
-    saving,
-    configLoadError,
-    daemonOfflineError,
-    updateConfig,
-    loadConfigFromDisk,
-    refreshStatus,
-    refreshLogs,
-    reloadPlugins,
-    setPluginEnabled,
-    setPluginPriority,
-    setPluginScopeOverride,
-    setPluginDevUrl,
-    grantPluginCapabilities,
-    inspectPluginArchive,
-    installPlugin,
-    fetchPluginDaemonLogs,
-    reloadPluginWebView,
-    createWebEmbed,
-    setEmbedConfig,
-    uninstallPlugin,
-    refreshPluginAudit,
-    selectPlugin,
-    runCtl,
-    clearLogs,
-  } = useSideVeilControl();
-
-  const { networkContext, networkLoading, networkError, refreshNetworkContext } =
-    useNetworkContextControl(bridge);
+  const control = useSideVeilControl();
+  const { bridge, config, status, busyAction, saving, configLoadError, daemonOfflineError } =
+    control;
 
   const {
-    cdpStatus,
-    uiSnapshot,
-    inspectCapturedAt,
-    debugBusy,
-    debugError,
-    setWebViewDebugging,
-    inspectUi,
-    resetFrameMetrics,
-  } = useDebugControl({
+    networkContext,
+    currentWifiSsid,
+    networkLoading,
+    networkError,
+    refreshNetworkContext,
+    detectWifiSsid,
+  } = useNetworkContextControl(bridge);
+
+  const debug = useDebugControl({
     bridge,
     pushToast,
-    onConfigSynced: loadConfigFromDisk,
-    onRefreshLogs: refreshLogs,
+    onConfigSynced: control.loadConfigFromDisk,
+    onRefreshLogs: control.refreshLogs,
   });
 
   const isPanelOpen = status?.panelState === 'open';
@@ -127,7 +92,10 @@ function ControlWorkbench() {
             variant={isPanelOpen ? 'secondary' : 'primary'}
             disabled={busyAction !== null}
             onClick={() =>
-              runCtl(isPanelOpen ? 'close' : 'open', isPanelOpen ? '收起侧边栏' : '弹出侧边栏')
+              control.runCtl(
+                isPanelOpen ? 'close' : 'open',
+                isPanelOpen ? '收起侧边栏' : '弹出侧边栏',
+              )
             }
           >
             {isPanelOpen ? (
@@ -159,7 +127,7 @@ function ControlWorkbench() {
               <AlertTriangle className="size-4 shrink-0 text-[var(--warning)]" />
               <span>{configLoadError}</span>
             </div>
-            <Button size="sm" variant="secondary" onClick={() => void loadConfigFromDisk()}>
+            <Button size="sm" variant="secondary" onClick={() => void control.loadConfigFromDisk()}>
               重试加载
             </Button>
           </div>
@@ -173,7 +141,7 @@ function ControlWorkbench() {
               <AlertCircle className="size-4 shrink-0 text-[var(--danger)]" />
               <span>SideVeil 守护进程未运行：{daemonOfflineError}</span>
             </div>
-            <Button size="sm" variant="secondary" onClick={() => void refreshStatus()}>
+            <Button size="sm" variant="secondary" onClick={() => void control.refreshStatus()}>
               重试连接
             </Button>
           </div>
@@ -183,6 +151,11 @@ function ControlWorkbench() {
       <Tabs
         defaultValue="overview"
         tabOrder={CONTROL_TAB_ORDER}
+        onValueChange={(nextTab) => {
+          if (nextTab === 'plugins' && !networkLoading) {
+            void refreshNetworkContext();
+          }
+        }}
         className="flex w-full flex-1 flex-col"
       >
         <div className="w-full shrink-0 px-3 sm:px-5">
@@ -196,7 +169,7 @@ function ControlWorkbench() {
 
         <TabsContent value="overview" className="flex flex-1 flex-col">
           <div className="w-full flex-1 px-3 sm:px-5">
-            <OverviewEdgeTab config={config} status={status} onChange={updateConfig} />
+            <OverviewEdgeTab config={config} status={status} onChange={control.updateConfig} />
           </div>
         </TabsContent>
 
@@ -206,7 +179,7 @@ function ControlWorkbench() {
               config={config}
               foregroundPackage={status?.foregroundPackage ?? ''}
               crossWindowBlurSupported={status?.crossWindowBlurSupported ?? null}
-              onChange={updateConfig}
+              onChange={control.updateConfig}
             />
           </div>
         </TabsContent>
@@ -214,24 +187,28 @@ function ControlWorkbench() {
         <TabsContent value="plugins" className="flex flex-1 flex-col">
           <div className="flex w-full flex-1 flex-col px-3 sm:px-5">
             <PluginsTab
-              snapshot={pluginsSnapshot}
-              loadError={pluginsLoadError}
+              snapshot={control.pluginsSnapshot}
+              loadError={control.pluginsLoadError}
               busyAction={busyAction}
               foregroundPackage={status?.foregroundPackage ?? ''}
-              onReload={reloadPlugins}
-              onSetEnabled={setPluginEnabled}
-              onSetPriority={setPluginPriority}
-              onSetScopeOverride={setPluginScopeOverride}
-              onSetDevUrl={setPluginDevUrl}
-              onGrantCapabilities={grantPluginCapabilities}
-              onInspectArchive={inspectPluginArchive}
-              onInstallPlugin={installPlugin}
-              onFetchDaemonLogs={fetchPluginDaemonLogs}
-              onReloadWebView={reloadPluginWebView}
-              onCreateWebEmbed={createWebEmbed}
-              onSetEmbedConfig={setEmbedConfig}
-              onUninstallPlugin={uninstallPlugin}
-              onSelectPlugin={selectPlugin}
+              currentWifiSsid={currentWifiSsid}
+              networkLoaded={networkContext !== null}
+              networkLoading={networkLoading}
+              onDetectWifiSsid={detectWifiSsid}
+              onReload={control.reloadPlugins}
+              onSetEnabled={control.setPluginEnabled}
+              onSetPriority={control.setPluginPriority}
+              onSetScopeOverride={control.setPluginScopeOverride}
+              onSetDevUrl={control.setPluginDevUrl}
+              onGrantCapabilities={control.grantPluginCapabilities}
+              onInspectArchive={control.inspectPluginArchive}
+              onInstallPlugin={control.installPlugin}
+              onFetchDaemonLogs={control.fetchPluginDaemonLogs}
+              onReloadWebView={control.reloadPluginWebView}
+              onCreateWebEmbed={control.createWebEmbed}
+              onSetEmbedConfig={control.setEmbedConfig}
+              onUninstallPlugin={control.uninstallPlugin}
+              onSelectPlugin={control.selectPlugin}
             />
           </div>
         </TabsContent>
@@ -242,27 +219,27 @@ function ControlWorkbench() {
               bridge={bridge}
               config={config}
               status={status}
-              logs={logs}
-              auditReport={auditReport}
+              logs={control.logs}
+              auditReport={control.auditReport}
               busyAction={busyAction}
-              lastPingMs={lastPingMs}
-              cdpStatus={cdpStatus}
-              uiSnapshot={uiSnapshot}
-              inspectCapturedAt={inspectCapturedAt}
-              debugBusy={debugBusy}
-              debugError={debugError}
+              lastPingMs={control.lastPingMs}
+              cdpStatus={debug.cdpStatus}
+              uiSnapshot={debug.uiSnapshot}
+              inspectCapturedAt={debug.inspectCapturedAt}
+              debugBusy={debug.debugBusy}
+              debugError={debug.debugError}
               networkContext={networkContext}
               networkLoading={networkLoading}
               networkError={networkError}
-              onPing={() => void runCtl('ping', 'Daemon Ping')}
-              onReloadConfig={() => void runCtl('reload', '重载配置')}
-              onRestartHost={() => void runCtl('restart-host', '重启 Host 服务')}
-              onRefreshLogs={() => void refreshLogs()}
-              onClearLogs={() => void clearLogs()}
-              onRefreshAudit={refreshPluginAudit}
-              onSetWebViewDebugging={(enabled) => void setWebViewDebugging(enabled)}
-              onInspectUi={() => void inspectUi()}
-              onResetFrameMetrics={() => void resetFrameMetrics()}
+              onPing={() => void control.runCtl('ping', 'Daemon Ping')}
+              onReloadConfig={() => void control.runCtl('reload', '重载配置')}
+              onRestartHost={() => void control.runCtl('restart-host', '重启 Host 服务')}
+              onRefreshLogs={() => void control.refreshLogs()}
+              onClearLogs={() => void control.clearLogs()}
+              onRefreshAudit={control.refreshPluginAudit}
+              onSetWebViewDebugging={(enabled) => void debug.setWebViewDebugging(enabled)}
+              onInspectUi={() => void debug.inspectUi()}
+              onResetFrameMetrics={() => void debug.resetFrameMetrics()}
               onRefreshNetwork={() => void refreshNetworkContext()}
             />
           </div>
