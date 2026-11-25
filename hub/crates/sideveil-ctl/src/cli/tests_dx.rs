@@ -156,5 +156,24 @@ fn init_validate_pack_round_trip_succeeds_offline() {
     assert_eq!(val_svp["ok"], true);
     assert_eq!(val_svp["pluginId"], "com.example.hello");
 
+    let react_dir = root.join("com.example.react");
+    run_init("com.example.react", PluginTemplate::React, Some(&react_dir)).expect("init react");
+    let react_pkg = fs::read_to_string(react_dir.join("package.json")).expect("read react pkg");
+    assert!(react_pkg.contains("\"vite\": \"^8.0.0\""));
+    assert!(react_pkg.contains("\"@vitejs/plugin-react\": \"^6.0.0\""));
+
+    let native_dir = root.join("com.example.native");
+    run_init(
+        "com.example.native",
+        PluginTemplate::UdsNative,
+        Some(&native_dir),
+    )
+    .expect("init uds-native");
+    let cargo_toml = fs::read_to_string(native_dir.join("Cargo.toml")).expect("read Cargo.toml");
+    let expected_tag = format!("tag = \"v{}\"", env!("CARGO_PKG_VERSION"));
+    assert!(cargo_toml.contains("sideveil-plugin-sdk"));
+    assert!(cargo_toml.contains("sideveil-protocol"));
+    assert!(cargo_toml.contains(&expected_tag));
+
     let _ = fs::remove_dir_all(&root);
 }

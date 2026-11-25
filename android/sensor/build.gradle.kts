@@ -97,5 +97,5 @@ tasks.register<BuildSensorDexTask>("buildDex") {
     runtimeJars.from(configurations.runtimeClasspath)
     androidJar.set(androidPlatformJar)
     d8Executable.set(d8Bin)
-    outputDex.set(rootProject.layout.projectDirectory.file("../bin/sideveil-sensor.dex"))
+    outputDex.set(rootProject.layout.projectDirectory.file("../out/stage/bin/sideveil-sensor.dex"))
 }

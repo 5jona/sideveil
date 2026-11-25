@@ -40,12 +40,17 @@ sync_host_apk_if_overridden() {
     INS_SHA="${INS_SHA%% *}"
     if [ -n "$MOD_SHA" ] && [ -n "$INS_SHA" ] && [ "$MOD_SHA" != "$INS_SHA" ]; then
         log_info "Detected stale /data/app override for ${HOST_PKG}; syncing module APK..."
-        if pm install -r -d "$MODULE_HOST_APK" >/dev/null 2>&1; then
+        if pm install -r -d -g "$MODULE_HOST_APK" >/dev/null 2>&1; then
             log_info "Synchronized ${HOST_PKG} from ${MODULE_HOST_APK}."
         else
             log_info "Warning: failed to sync ${HOST_PKG} from ${MODULE_HOST_APK}."
         fi
     fi
+}
+
+ensure_host_runtime_permissions() {
+    # Android 17+ (API 37) gates RFC1918/.local WebView connections behind ACCESS_LOCAL_NETWORK.
+    pm grant "$HOST_PKG" android.permission.ACCESS_LOCAL_NETWORK >/dev/null 2>&1 || true
 }
 
 terminate_pid_gracefully() {
@@ -157,6 +162,7 @@ if [ ! -x "$HUB_BIN" ]; then
 fi
 
 sync_host_apk_if_overridden
+ensure_host_runtime_permissions
 stop_existing_processes
 
 while true; do

@@ -11,15 +11,15 @@ dir = "{{config_root}}"
 
 [tasks.build]
 description = "Build Rust hub binaries, WebUI bundles, sensor DEX, host APK, and KernelSU ZIP archive"
-run = "bash build.sh"
+run = "bash scripts/build.sh"
 
 [tasks.reload]
 description = "Build and hot-reload SideVeil onto Android device via container SSH or on-device host-exec"
-run = "bash reload.sh"
+run = "bash scripts/reload.sh"
 
 [tasks."reload:fast"]
 description = "Skip full build and hot-reload existing SideVeil artifacts (forwards extra flags like --hub-only / --ssh)"
-run = "bash reload.sh --skip-build"
+run = "bash scripts/reload.sh --skip-build"
 
 [tasks."verify:live"]
 description = "Run live end-to-end SideVeil verification harness (supports --ssh, --mode, --report-json)"
@@ -73,10 +73,18 @@ run = "webui/node_modules/.bin/pochita-contracts-gen generate contracts/protocol
 description = "Verify generated contract files have zero drift and validate all golden wire fixtures against JSON Schemas"
 run = "CLI=webui/node_modules/.bin/pochita-contracts-gen && \"$CLI\" check contracts/protocol-constants.contract.json contracts/config-bounds.contract.json contracts/protocol-wire.contract.json contracts/theme-hud.contract.json contracts/plugin-manifest.contract.json && \"$CLI\" validate-fixtures contracts/schemas/config.schema.json contracts/fixtures/config && \"$CLI\" validate-fixtures contracts/schemas/protocol-status.schema.json contracts/fixtures/status && \"$CLI\" validate-fixtures contracts/schemas/protocol-events.schema.json contracts/fixtures/events && \"$CLI\" validate-fixtures contracts/schemas/protocol-theme-hud.schema.json contracts/fixtures/theme-hud && \"$CLI\" validate-fixtures contracts/schemas/plugin-manifest.schema.json contracts/fixtures/plugin-manifest"
 
+[tasks."version:bump"]
+description = "Bump module, Rust, Kotlin, contract, WebUI, example, and CHANGELOG versions (usage: mise run version:bump -- <X.Y.Z>)"
+run = "node scripts/bump-version.mjs"
+
+[tasks."version:check"]
+description = "Verify module, Rust, Kotlin, contract, WebUI, example, and CHANGELOG versions stay aligned"
+run = "node scripts/bump-version.mjs --check"
+
 [tasks.check]
-description = "Run all contract, Rust, WebUI, and Android quality gates"
-run = "mise run contracts:check && mise run hub:check && mise run webui:check && mise run android:check"
+description = "Run all version, contract, Rust, WebUI, and Android quality gates"
+run = "mise run version:check && mise run contracts:check && mise run hub:check && mise run webui:check && mise run android:check"
 
 [tasks.clean]
 description = "Clean Gradle, Rust, and WebUI build outputs"
-run = "rm -rf out webroot bin/sideveild bin/sideveil-ctl bin/sideveil-example-perf-hud bin/sideveil-sensor.dex system/priv-app/SideVeilHost/SideVeilHost.apk android/host-app/src/main/assets/panel android/host-app/src/main/jniLibs examples/vello-vector-scope/web examples/native-perf-hud/web hub/target examples/native-perf-hud/target && cd android && ./gradlew clean"
+run = "rm -rf out android/host-app/src/main/assets/panel android/host-app/src/main/jniLibs examples/vello-vector-scope/web examples/native-perf-hud/web hub/target examples/native-perf-hud/target && cd android && ./gradlew clean"

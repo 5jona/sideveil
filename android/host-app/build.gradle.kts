@@ -10,7 +10,7 @@ plugins {
 val moduleProps =
     Properties().apply {
         providers
-            .fileContents(rootProject.layout.projectDirectory.file("../module.prop"))
+            .fileContents(rootProject.layout.projectDirectory.file("../module/module.prop"))
             .asText
             .orNull
             ?.let { load(it.reader()) }

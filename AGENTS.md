@@ -1,6 +1,6 @@
 # SideVeil — Agent Guidelines
 
-For the full repository navigation map, runtime data flows, ABI-pinned FQCNs, and protocol trust boundaries, see `ARCHITECTURE.md`. For empirical Android 16+ (API 36+, arm64) platform constraints and rendering decisions, see `docs/architecture-decisions.md`. Subsystem-specific rules live in `hub/AGENTS.md`, `android/AGENTS.md`, and `webui/AGENTS.md`.
+For the full repository navigation map, runtime data flows, ABI-pinned FQCNs, and protocol trust boundaries, see `docs/ARCHITECTURE.md`. For empirical Android 16+ (API 36+, arm64) platform constraints and rendering decisions, see `docs/architecture-decisions.md`. Subsystem-specific rules live in `hub/AGENTS.md`, `android/AGENTS.md`, and `webui/AGENTS.md`.
 
 ## Architecture & Role Boundaries
 SideVeil enforces strict separation across four layers:
@@ -11,12 +11,12 @@ SideVeil enforces strict separation across four layers:
 
 ## Non-Negotiable Invariants
 - **File Size & Modularity**: Keep every source file `<= 300` lines (hard limit `400`). Split by cohesion before approaching the limit. Extract pure logic (state machines, spring kinematics, protocol codecs, palette/vector synthesis) into host-unit-tested modules without Android Framework or live socket dependencies.
-- **Single Source of Truth & Version Parity**: Never duplicate protocol event/method constants, schema definitions, or theme allowlists across modules. Keep `module.prop` (`versionCode = MAJOR*10000 + MINOR*100 + PATCH`, `>= 200` for `SideVeilHost.apk`), `hub/Cargo.toml`, `SensorMain.kt`, `protocol-constants.contract.json`, `webui`, and bundled `examples/*` synchronized (enforced by `webui/test/contracts.test.mjs`). After editing contracts, run `mise run contracts:gen` and `bash scripts/sync-kit-contracts.sh`. Use full `reload.sh` whenever `module.prop` or APK metadata changes.
+- **Single Source of Truth & Version Parity**: Never duplicate protocol event/method constants, schema definitions, or theme allowlists across modules. Keep `module/module.prop` (`versionCode = MAJOR*10000 + MINOR*100 + PATCH`, `>= 200` for `SideVeilHost.apk`), `hub/Cargo.toml`, `SensorMain.kt`, `protocol-constants.contract.json`, `webui`, and bundled `examples/*` synchronized (enforced by `webui/test/contracts.test.mjs`). After editing contracts, run `mise run contracts:gen` and `bash scripts/sync-kit-contracts.sh`. Use full `scripts/reload.sh` whenever `module/module.prop` or APK metadata changes.
 - **Uncapped Adaptive Refresh Rate**: Never hardcode FPS or refresh-rate ceilings in native or web code. Visible overlay windows dynamically request the display's maximum supported refresh rate at the current physical resolution and clear votes when hidden.
 - **Language & Privacy**: Objective English for all code, comments, logs, commit messages, and engineering docs; Simplified Chinese (`zh-CN`) for user-facing UI copy. Never commit device serials, hardware-specific specs, private IPs, or personal paths.
 - **Commit Messages**: Conventional Commits (`<type>(<scope>): <imperative summary>`, `<= 72` chars). Single-line for small focused changes; 2–5 concise bullets explaining key changes and rationale for multi-file or architectural commits.
 
 ## Build & Verification Commands
-- Full quality gate: `mise run check` (`hub:check`, `webui:check`, `android:check`) with zero warnings or errors.
-- Full module archive build: `bash build.sh` (outputs `out/sideveil.zip`).
-- Live device hot-reload & verification (when requested): `bash reload.sh --skip-build --ssh <host|user@host>` (or `STRATA_SSH_HOST` / `--local`) followed by `python3 scripts/verify-live.py`.
+- Full quality gate: `mise run check` (`version:check`, `contracts:check`, `hub:check`, `webui:check`, `android:check`) with zero warnings or errors.
+- Full module archive build: `bash scripts/build.sh` (outputs `out/sideveil.zip`).
+- Live device hot-reload & verification (when requested): `bash scripts/reload.sh --skip-build --ssh <host|user@host>` (or `STRATA_SSH_HOST` / `--local`) followed by `python3 scripts/verify-live.py`.

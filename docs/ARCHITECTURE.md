@@ -1,7 +1,7 @@
 # SideVeil Architecture & Navigation Map
 
 SideVeil is a generic Android 16+ (API 36+, arm64, Linux GKI 6.12+) sidebar microkernel packaged as a KernelSU module.
-Use this document as the primary codebase navigation map; empirical Android 16+ platform findings and ADRs live in [`docs/architecture-decisions.md`](docs/architecture-decisions.md), and subsystem-specific coding rules live in [`AGENTS.md`](AGENTS.md), [`hub/AGENTS.md`](hub/AGENTS.md), [`android/AGENTS.md`](android/AGENTS.md), and [`webui/AGENTS.md`](webui/AGENTS.md).
+Use this document as the primary codebase navigation map; empirical Android 16+ platform findings and ADRs live in [`architecture-decisions.md`](architecture-decisions.md), and subsystem-specific coding rules live in [`AGENTS.md`](../AGENTS.md), [`hub/AGENTS.md`](../hub/AGENTS.md), [`android/AGENTS.md`](../android/AGENTS.md), and [`webui/AGENTS.md`](../webui/AGENTS.md).
 
 ## 1. Four-Layer System Topology
 
@@ -72,18 +72,18 @@ SideVeil separates privileges, hidden Android APIs, overlay window rendering, an
 
 | Area | Path | Output / Role |
 | --- | --- | --- |
-| Control Plane WebUI | `webui/control/` + `webui/src/control/` | Builds via `vite.control.config.mjs` -> `webroot/` (KernelSU WebUI manager). |
+| Control Plane WebUI | `webui/control/` + `webui/src/control/` | Builds via `vite.control.config.mjs` -> `out/stage/webroot/` (KernelSU WebUI manager). |
 | Diagnostic Panel | `webui/panel/` + `webui/src/panel/` | Builds via `vite.panel.config.mjs` -> `android/host-app/src/main/assets/panel/` (`sideveil.diagnostic`). |
 | Vello Vector Scope | `webui/plugins/vello-scope/` + `webui/src/plugins/vello-scope/` | Builds via `vite.vello-scope.config.mjs` -> `examples/vello-vector-scope/web/` (COOP/COEP WebGPU + Canvas 2D renderer). |
 | Native Perf HUD UI | `webui/plugins/native-perf-hud/` + `webui/src/plugins/native-perf-hud/` | Builds via `vite.native-perf-hud.config.mjs` -> `examples/native-perf-hud/web/`. |
-| Module Lifecycle | `service.sh`, `post-fs-data.sh`, `customize.sh`, `uninstall.sh`, `system/` | KernelSU Magic Mount, privapp-permissions, sysconfig allowlist, boot launch. |
-| Build & Verification | `build.sh`, `reload.sh`, `scripts/lib/module-env.sh`, `scripts/reload-*.sh`, `scripts/verify-live.py`, `scripts/verify_live/` | Shared `run_in_env` + `BUNDLED_PLUGINS`, full module archive build, zero-reboot incremental deploy, and live E2E checks. |
+| Module Lifecycle | `module/{module.prop,config.json,*.sh,system/}` | KernelSU Magic Mount, privapp-permissions, sysconfig allowlist, boot launch. |
+| Build & Verification | `scripts/{build,reload}.sh`, `scripts/lib/module-env.sh`, `scripts/reload-*.sh`, `scripts/verify-live.py`, `scripts/verify_live/` | Shared `run_in_env` + `BUNDLED_PLUGINS`, full module archive build, zero-reboot incremental deploy, and live E2E checks. |
 
 ### ABI-Pinned Fully Qualified Class Names
 
 Do not rename or move these three classes without coordinated updates across manifests, Rust supervisor code, and JNI exports:
 
-1. `pochita.sideveil.host.HostService` — Pinned by `android/host-app/src/main/AndroidManifest.xml`, `hub/crates/sideveild/src/supervisor/host_wake.rs`, and `reload.sh`.
+1. `pochita.sideveil.host.HostService` — Pinned by `android/host-app/src/main/AndroidManifest.xml`, `hub/crates/sideveild/src/supervisor/host_wake.rs`, and `scripts/reload.sh`.
 2. `pochita.sideveil.host.NativeHudRenderer` — Pinned by JNI C symbol names `Java_pochita_sideveil_host_NativeHudRenderer_nativeRenderScene` and `nativeResetCache` in `hub/crates/sideveil-hud-jni/src/lib.rs`.
 3. `pochita.sideveil.sensor.SensorMain` — Pinned by `SENSOR_MAIN_CLASS` in `hub/crates/sideveild/src/supervisor/sensor.rs` for `/system/bin/app_process64` startup.
 
@@ -174,7 +174,7 @@ SideVeil enforces **7 explicit protocol boundaries**:
 
 ## 5. Non-Negotiable Platform Invariants
 
-Full empirical rationale and Android 16+ test evidence live in [`docs/architecture-decisions.md`](docs/architecture-decisions.md):
+Full empirical rationale and Android 16+ test evidence live in [`architecture-decisions.md`](architecture-decisions.md):
 
 - **Dialog + Blur/Backdrop Split**: All translucent `native-glass` overlay windows (`panel/SidebarPanelWindow`, `rail/PluginRailWindow`, `pinned/PinnedContainerWindow`, `hud/NativeHudWindow`) must use a `Dialog` (never raw `WindowManager.addView`), binding an immutable `overlay/BlurMaskDrawable` to `Window.setBackgroundDrawable(...)` and stateful `overlay/GlassBackdropDrawable` to the content container.
 - **Zero-Reflow Warm Residency**: Keep overlay windows warm-attached (`1x1 INVISIBLE` when collapsed) with `PRIVATE_FLAG_NO_MOVE_ANIMATION`, and lock `LayoutParams` width/height during spring motion so embedded WebViews never reflow.
@@ -192,6 +192,6 @@ Full empirical rationale and Android 16+ test evidence live in [`docs/architectu
 | Rust hub & example daemon | `mise run hub:check` | `cargo fmt --check`, `cargo clippy --all-targets -D warnings`, `cargo test` for `hub/` and `examples/native-perf-hud`. |
 | WebUI & bundled plugins | `mise run webui:check` | Biome lint, `tsc --noEmit`, unit & `standards.test.mjs` checks, all 4 Vite builds. |
 | Android protocol/sensor/host | `mise run android:check` | Spotless, Detekt, Android Lint, JVM unit tests (`:protocol`, `:sensor`, `:host-app`), `:sensor:buildDex`, `:host-app:assembleRelease`. |
-| Full KernelSU module ZIP | `bash build.sh` | Cross-compiles arm64 Rust/JNI, builds WebUI + DEX + APK, packages `out/sideveil.zip`. |
-| Incremental device hot-reload | `bash reload.sh --skip-build --ssh <host>` | Pushes artifacts over `--ssh`, `--adb <serial>`, or `--local` (supports `--hub-only`, `--host-only`, `--sensor-only`, `--webui-only`, `--plugin <id>`, `--cdp-forward`). |
+| Full KernelSU module ZIP | `bash scripts/build.sh` | Cross-compiles arm64 Rust/JNI, builds WebUI + DEX + APK, packages `out/sideveil.zip` (`--mode both` also outputs `out/sideveil-debug.zip`). |
+| Incremental device hot-reload | `bash scripts/reload.sh --skip-build --ssh <host>` | Pushes artifacts over `--ssh`, `--adb <serial>`, or `--local` (supports `--hub-only`, `--host-only`, `--sensor-only`, `--webui-only`, `--plugin <id>`, `--cdp-forward`). |
 | Live E2E device harness | `python3 scripts/verify-live.py` | Verifies daemon/sensor/host health, live appearance, plugins E2E, native HUD, UI inspector, CDP, and zero WebView console errors. |

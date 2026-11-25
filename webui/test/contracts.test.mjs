@@ -68,7 +68,9 @@ test('root config.json and DEFAULT_CONFIG match config.schema.json and generated
   const configSchema = JSON.parse(
     fs.readFileSync(path.join(CONTRACTS_DIR, 'schemas/config.schema.json'), 'utf8'),
   );
-  const rootConfig = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'config.json'), 'utf8'));
+  const rootConfig = JSON.parse(
+    fs.readFileSync(path.join(REPO_ROOT, 'module/config.json'), 'utf8'),
+  );
 
   const rootCheck = validateFixtureData(configSchema, 'SideVeilConfig', rootConfig);
   assert.equal(rootCheck.ok, true, `config.json schema errors: ${rootCheck.errors.join(', ')}`);
@@ -116,13 +118,13 @@ test('all golden fixtures pass their generated JSON Schemas', () => {
     { schema: 'schemas/protocol-status.schema.json', dir: 'fixtures/status' },
     { schema: 'schemas/protocol-events.schema.json', dir: 'fixtures/events' },
     { schema: 'schemas/protocol-theme-hud.schema.json', dir: 'fixtures/theme-hud' },
-    { schema: 'schemas/plugin-manifest.schema.json', dir: 'fixtures/plugin' },
+    { schema: 'schemas/plugin-manifest.schema.json', dir: 'fixtures/plugin-manifest' },
   ];
 
   let totalFixtures = 0;
   for (const { schema, dir } of suites) {
     const fixtureDir = path.join(CONTRACTS_DIR, dir);
-    if (!fs.existsSync(fixtureDir)) continue;
+    assert.ok(fs.existsSync(fixtureDir), `Missing fixture directory: ${dir}`);
     const rootSchema = JSON.parse(fs.readFileSync(path.join(CONTRACTS_DIR, schema), 'utf8'));
     const files = collectFixtureFiles([fixtureDir]);
     assert.ok(files.length > 0, `Expected fixtures under ${dir}`);
@@ -140,13 +142,15 @@ test('all golden fixtures pass their generated JSON Schemas', () => {
 });
 
 test('version and versionCode stay aligned across module.prop, Rust, Kotlin sensor, WebUI, and bundled plugins', () => {
-  const moduleProp = fs.readFileSync(path.join(REPO_ROOT, 'module.prop'), 'utf8');
-  const versionMatch = moduleProp.match(/^version=v([0-9]+)\.([0-9]+)\.([0-9]+)$/m);
+  const moduleProp = fs.readFileSync(path.join(REPO_ROOT, 'module/module.prop'), 'utf8');
+  const versionMatch = moduleProp.match(
+    /^version=v([0-9]+)\.([0-9]+)\.([0-9]+)(-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/m,
+  );
   const codeMatch = moduleProp.match(/^versionCode=([0-9]+)$/m);
   assert.ok(versionMatch, 'module.prop must declare version=vMAJOR.MINOR.PATCH');
   assert.ok(codeMatch, 'module.prop must declare numeric versionCode');
 
-  const expectedVersion = `${versionMatch[1]}.${versionMatch[2]}.${versionMatch[3]}`;
+  const expectedVersion = `${versionMatch[1]}.${versionMatch[2]}.${versionMatch[3]}${versionMatch[4] ?? ''}`;
   const expectedCode =
     Number(versionMatch[1]) * 10000 + Number(versionMatch[2]) * 100 + Number(versionMatch[3]);
   assert.equal(Number(codeMatch[1]), expectedCode);

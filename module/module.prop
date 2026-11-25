@@ -4,3 +4,4 @@ version=v0.2.0
 versionCode=200
 author=pochita
 description=Android 16+ open sidebar plugin host powered by a Rust core hub, thin UID 1000 gesture sensor, and hardware-blurred priv-app render host.
+updateJson=https://github.com/5jona/sideveil/releases/latest/download/update.json

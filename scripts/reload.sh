@@ -10,6 +10,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+MODULE_DIR="${ROOT_DIR}/module"
+STAGE_OUT_DIR="${ROOT_DIR}/out/stage"
 MODULE_ID="sideveil"
 REMOTE_MOD_DIR="/data/adb/modules/${MODULE_ID}"
 REMOTE_STATE_DIR="/data/system/${MODULE_ID}"
@@ -37,15 +40,15 @@ TRANSPORT_LABEL=""
 SSH_OPTS=()
 
 # shellcheck source=scripts/lib/module-env.sh
-source "${SCRIPT_DIR}/scripts/lib/module-env.sh"
+source "${SCRIPT_DIR}/lib/module-env.sh"
 # shellcheck source=scripts/reload-helpers.sh
-source "${SCRIPT_DIR}/scripts/reload-helpers.sh"
+source "${SCRIPT_DIR}/reload-helpers.sh"
 
 trap cleanup_reload EXIT
 
 usage() {
     cat <<'EOF'
-Usage: ./reload.sh [options] [ssh-target]
+Usage: ./scripts/reload.sh [options] [ssh-target]
 
 Options:
   --ssh <host|user@host>     Deploy and reload over Strata container SSH (host-exec)
@@ -112,43 +115,43 @@ if [ "$SKIP_BUILD" -eq 0 ]; then
             ;;
         hub)
             echo "[*] Incremental build: Rust hub + example HUD binaries..."
-            (cd "${SCRIPT_DIR}/hub" && run_in_env cargo build --release --target aarch64-linux-android -p sideveild -p sideveil-ctl)
-            (cd "${SCRIPT_DIR}/examples/native-perf-hud" && run_in_env cargo build --release --target aarch64-linux-android)
-            mkdir -p "${SCRIPT_DIR}/bin"
-            cp "${SCRIPT_DIR}/hub/target/aarch64-linux-android/release/sideveild" "${SCRIPT_DIR}/bin/sideveild"
-            cp "${SCRIPT_DIR}/hub/target/aarch64-linux-android/release/sideveil-ctl" "${SCRIPT_DIR}/bin/sideveil-ctl"
-            chmod 0755 "${SCRIPT_DIR}/bin/sideveild" "${SCRIPT_DIR}/bin/sideveil-ctl"
+            (cd "${ROOT_DIR}/hub" && run_in_env cargo build --release --target aarch64-linux-android -p sideveild -p sideveil-ctl)
+            (cd "${ROOT_DIR}/examples/native-perf-hud" && run_in_env cargo build --release --target aarch64-linux-android)
+            mkdir -p "${STAGE_OUT_DIR}/bin"
+            cp "${ROOT_DIR}/hub/target/aarch64-linux-android/release/sideveild" "${STAGE_OUT_DIR}/bin/sideveild"
+            cp "${ROOT_DIR}/hub/target/aarch64-linux-android/release/sideveil-ctl" "${STAGE_OUT_DIR}/bin/sideveil-ctl"
+            chmod 0755 "${STAGE_OUT_DIR}/bin/sideveild" "${STAGE_OUT_DIR}/bin/sideveil-ctl"
             ;;
         host)
             echo "[*] Incremental build: panel WebUI + sideveil-hud-jni + SideVeilHost APK..."
-            (cd "${SCRIPT_DIR}/webui" && run_in_env pnpm build:panel)
-            (cd "${SCRIPT_DIR}/hub" && run_in_env cargo build --release --target aarch64-linux-android -p sideveil-hud-jni)
-            mkdir -p "${SCRIPT_DIR}/android/host-app/src/main/jniLibs/arm64-v8a"
-            cp "${SCRIPT_DIR}/hub/target/aarch64-linux-android/release/libsideveil_hud.so" \
-               "${SCRIPT_DIR}/android/host-app/src/main/jniLibs/arm64-v8a/libsideveil_hud.so"
-            chmod 0644 "${SCRIPT_DIR}/android/host-app/src/main/jniLibs/arm64-v8a/libsideveil_hud.so"
-            (cd "${SCRIPT_DIR}/android" && run_in_env ./gradlew :host-app:assembleRelease)
-            cp "${SCRIPT_DIR}/android/host-app/build/outputs/apk/release/host-app-release.apk" \
-               "${SCRIPT_DIR}/system/priv-app/SideVeilHost/SideVeilHost.apk"
-            chmod 0644 "${SCRIPT_DIR}/system/priv-app/SideVeilHost/SideVeilHost.apk"
+            (cd "${ROOT_DIR}/webui" && run_in_env pnpm build:panel)
+            (cd "${ROOT_DIR}/hub" && run_in_env cargo build --release --target aarch64-linux-android -p sideveil-hud-jni)
+            mkdir -p "${ROOT_DIR}/android/host-app/src/main/jniLibs/arm64-v8a" "${STAGE_OUT_DIR}/system/priv-app/SideVeilHost"
+            cp "${ROOT_DIR}/hub/target/aarch64-linux-android/release/libsideveil_hud.so" \
+               "${ROOT_DIR}/android/host-app/src/main/jniLibs/arm64-v8a/libsideveil_hud.so"
+            chmod 0644 "${ROOT_DIR}/android/host-app/src/main/jniLibs/arm64-v8a/libsideveil_hud.so"
+            (cd "${ROOT_DIR}/android" && run_in_env ./gradlew :host-app:assembleRelease)
+            cp "${ROOT_DIR}/android/host-app/build/outputs/apk/release/host-app-release.apk" \
+               "${STAGE_OUT_DIR}/system/priv-app/SideVeilHost/SideVeilHost.apk"
+            chmod 0644 "${STAGE_OUT_DIR}/system/priv-app/SideVeilHost/SideVeilHost.apk"
             ;;
         sensor)
             echo "[*] Incremental build: sideveil-sensor.dex..."
-            (cd "${SCRIPT_DIR}/android" && run_in_env ./gradlew :sensor:buildDex)
+            (cd "${ROOT_DIR}/android" && run_in_env ./gradlew :sensor:buildDex)
             ;;
         webui)
             echo "[*] Incremental build: Control Plane WebUI..."
-            (cd "${SCRIPT_DIR}/webui" && run_in_env pnpm build:control)
+            (cd "${ROOT_DIR}/webui" && run_in_env pnpm build:control)
             ;;
         plugin)
             case "$TARGET_PLUGIN" in
                 example.vello-scope|vello-vector-scope)
                     echo "[*] Incremental build: bundled plugin vello-scope..."
-                    (cd "${SCRIPT_DIR}/webui" && run_in_env pnpm build:vello-scope)
+                    (cd "${ROOT_DIR}/webui" && run_in_env pnpm build:vello-scope)
                     ;;
                 example.native-perf-hud|native-perf-hud)
                     echo "[*] Incremental build: bundled plugin native-perf-hud..."
-                    (cd "${SCRIPT_DIR}/webui" && run_in_env pnpm build:native-perf-hud)
+                    (cd "${ROOT_DIR}/webui" && run_in_env pnpm build:native-perf-hud)
                     ;;
                 *)
                     echo "[*] Skipping bundled WebUI rebuild for external plugin '${TARGET_PLUGIN}'."
@@ -165,23 +168,23 @@ TMP_STAGE="$(mktemp -d)"
 
 case "$DEPLOY_MODE" in
     full)
-        PERF_HUD_BIN="${SCRIPT_DIR}/examples/native-perf-hud/target/aarch64-linux-android/release/sideveil-example-perf-hud"
-        cp "${SCRIPT_DIR}/module.prop" "${SCRIPT_DIR}/config.json" \
-           "${SCRIPT_DIR}/service.sh" "${SCRIPT_DIR}/post-fs-data.sh" \
-           "${SCRIPT_DIR}/customize.sh" "${SCRIPT_DIR}/uninstall.sh" "${TMP_STAGE}/"
-        cp "${SCRIPT_DIR}/bin/sideveild" "${SCRIPT_DIR}/bin/sideveil-ctl" \
-           "${SCRIPT_DIR}/bin/sideveil-sensor.dex" "${TMP_STAGE}/"
-        cp "${SCRIPT_DIR}/system/priv-app/SideVeilHost/SideVeilHost.apk" "${TMP_STAGE}/SideVeilHost.apk"
-        cp "${SCRIPT_DIR}/system/etc/permissions/privapp-permissions-pochita-sideveil.xml" "${TMP_STAGE}/privapp.xml"
-        cp "${SCRIPT_DIR}/system/etc/sysconfig/sideveil-allowlist.xml" "${TMP_STAGE}/sysconfig.xml"
-        cp -r "${SCRIPT_DIR}/webroot" "${TMP_STAGE}/webroot"
+        PERF_HUD_BIN="${ROOT_DIR}/examples/native-perf-hud/target/aarch64-linux-android/release/sideveil-example-perf-hud"
+        cp "${MODULE_DIR}/module.prop" "${MODULE_DIR}/config.json" \
+           "${MODULE_DIR}/service.sh" "${MODULE_DIR}/post-fs-data.sh" \
+           "${MODULE_DIR}/customize.sh" "${MODULE_DIR}/uninstall.sh" "${TMP_STAGE}/"
+        cp "${STAGE_OUT_DIR}/bin/sideveild" "${STAGE_OUT_DIR}/bin/sideveil-ctl" \
+           "${STAGE_OUT_DIR}/bin/sideveil-sensor.dex" "${TMP_STAGE}/"
+        cp "${STAGE_OUT_DIR}/system/priv-app/SideVeilHost/SideVeilHost.apk" "${TMP_STAGE}/SideVeilHost.apk"
+        cp "${MODULE_DIR}/system/etc/permissions/privapp-permissions-pochita-sideveil.xml" "${TMP_STAGE}/privapp.xml"
+        cp "${MODULE_DIR}/system/etc/sysconfig/sideveil-allowlist.xml" "${TMP_STAGE}/sysconfig.xml"
+        cp -r "${STAGE_OUT_DIR}/webroot" "${TMP_STAGE}/webroot"
         for entry in "${BUNDLED_PLUGINS[@]}"; do
             src_rel="${entry%%:*}"
             plugin_id="${entry#*:}"
             mkdir -p "${TMP_STAGE}/plugins/${plugin_id}"
-            cp "${SCRIPT_DIR}/${src_rel}/manifest.json" "${TMP_STAGE}/plugins/${plugin_id}/"
-            if [ -d "${SCRIPT_DIR}/${src_rel}/web" ]; then
-                cp -r "${SCRIPT_DIR}/${src_rel}/web" "${TMP_STAGE}/plugins/${plugin_id}/web"
+            cp "${ROOT_DIR}/${src_rel}/manifest.json" "${TMP_STAGE}/plugins/${plugin_id}/"
+            if [ -d "${ROOT_DIR}/${src_rel}/web" ]; then
+                cp -r "${ROOT_DIR}/${src_rel}/web" "${TMP_STAGE}/plugins/${plugin_id}/web"
             fi
             if [ "${plugin_id}" = "example.native-perf-hud" ] && [ -f "${PERF_HUD_BIN}" ]; then
                 mkdir -p "${TMP_STAGE}/plugins/${plugin_id}/bin"
@@ -197,8 +200,8 @@ case "$DEPLOY_MODE" in
         wait_for_ready 12000
         ;;
     hub)
-        PERF_HUD_BIN="${SCRIPT_DIR}/examples/native-perf-hud/target/aarch64-linux-android/release/sideveil-example-perf-hud"
-        cp "${SCRIPT_DIR}/bin/sideveild" "${SCRIPT_DIR}/bin/sideveil-ctl" "${TMP_STAGE}/"
+        PERF_HUD_BIN="${ROOT_DIR}/examples/native-perf-hud/target/aarch64-linux-android/release/sideveil-example-perf-hud"
+        cp "${STAGE_OUT_DIR}/bin/sideveild" "${STAGE_OUT_DIR}/bin/sideveil-ctl" "${TMP_STAGE}/"
         if [ -f "${PERF_HUD_BIN}" ]; then
             cp "${PERF_HUD_BIN}" "${TMP_STAGE}/sideveil-example-perf-hud"
         fi
@@ -225,12 +228,13 @@ EOF
         wait_for_ready 12000
         ;;
     host)
-        cp "${SCRIPT_DIR}/system/priv-app/SideVeilHost/SideVeilHost.apk" "${TMP_STAGE}/SideVeilHost.apk"
+        cp "${STAGE_OUT_DIR}/system/priv-app/SideVeilHost/SideVeilHost.apk" "${TMP_STAGE}/SideVeilHost.apk"
         push_stage_dir "${TMP_STAGE}"
         run_remote_sh <<EOF
 set -e
 am force-stop pochita.sideveil.host 2>/dev/null || true
-pm install -r -d ${STAGE_DIR}/SideVeilHost.apk
+pm install -r -d -g ${STAGE_DIR}/SideVeilHost.apk
+pm grant pochita.sideveil.host android.permission.ACCESS_LOCAL_NETWORK >/dev/null 2>&1 || true
 cp ${STAGE_DIR}/SideVeilHost.apk ${REMOTE_MOD_DIR}/system/priv-app/SideVeilHost/SideVeilHost.apk
 chmod 0644 ${REMOTE_MOD_DIR}/system/priv-app/SideVeilHost/SideVeilHost.apk
 rm -rf ${STAGE_DIR}
@@ -239,7 +243,7 @@ EOF
         wait_for_ready 12000
         ;;
     sensor)
-        cp "${SCRIPT_DIR}/bin/sideveil-sensor.dex" "${TMP_STAGE}/sideveil-sensor.dex"
+        cp "${STAGE_OUT_DIR}/bin/sideveil-sensor.dex" "${TMP_STAGE}/sideveil-sensor.dex"
         push_stage_dir "${TMP_STAGE}"
         run_remote_sh <<EOF
 set -e
@@ -251,7 +255,7 @@ EOF
         wait_for_ready 12000
         ;;
     webui)
-        cp -r "${SCRIPT_DIR}/webroot" "${TMP_STAGE}/webroot"
+        cp -r "${STAGE_OUT_DIR}/webroot" "${TMP_STAGE}/webroot"
         push_stage_dir "${TMP_STAGE}"
         run_remote_sh <<EOF
 set -e
@@ -277,13 +281,13 @@ EOF
         if [ -d "${SRC_PLUGIN_DIR}/bin" ]; then
             cp -r "${SRC_PLUGIN_DIR}/bin" "${TMP_STAGE}/${PLUGIN_ID}/bin"
         fi
-        PERF_HUD_BIN="${SCRIPT_DIR}/examples/native-perf-hud/target/aarch64-linux-android/release/sideveil-example-perf-hud"
+        PERF_HUD_BIN="${ROOT_DIR}/examples/native-perf-hud/target/aarch64-linux-android/release/sideveil-example-perf-hud"
         if [ "${PLUGIN_ID}" = "example.native-perf-hud" ] && [ -f "${PERF_HUD_BIN}" ]; then
             mkdir -p "${TMP_STAGE}/${PLUGIN_ID}/bin"
             cp "${PERF_HUD_BIN}" "${TMP_STAGE}/${PLUGIN_ID}/bin/sideveil-example-perf-hud"
         fi
         push_stage_dir "${TMP_STAGE}"
-        if [[ "${SRC_PLUGIN_DIR}" == "${SCRIPT_DIR}/examples/"* ]]; then
+        if [[ "${SRC_PLUGIN_DIR}" == "${ROOT_DIR}/examples/"* ]]; then
             TARGET_DIR="${REMOTE_MOD_DIR}/plugins/${PLUGIN_ID}"
         else
             TARGET_DIR="${REMOTE_STATE_DIR}/plugins/${PLUGIN_ID}"

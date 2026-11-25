@@ -9,7 +9,7 @@ const kitRoot = process.env.POCHITA_KIT_ROOT
   : undefined;
 
 const baseConfig = createPochitaViteConfig({
-  outDir: path.resolve(__dirname, '../webroot'),
+  outDir: path.resolve(__dirname, '../out/stage/webroot'),
   port: 5174,
   ...(kitRoot ? { kitRoot } : {}),
   surface: 'standalone',

@@ -7,12 +7,21 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Archive tag label for manual builds (defaults to git describe)"
+        description: "Archive tag label for manual dry-run builds (defaults to git describe)"
         required: false
         type: string
+      dry_run:
+        description: "Dry-run mode (builds archives without publishing a GitHub Release)"
+        required: false
+        default: true
+        type: boolean
 
 permissions:
   contents: write
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build-and-release:
@@ -20,11 +29,21 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER: "${{ github.workspace }}/hub/scripts/aarch64-android-linker.sh"
+      CC_aarch64_linux_android: "${{ github.workspace }}/hub/scripts/aarch64-android-linker.sh"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Verify version parity and tag alignment
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            node scripts/bump-version.mjs --check --tag "${GITHUB_REF_NAME}"
+          else
+            node scripts/bump-version.mjs --check
+          fi
 
       - name: Setup Rust toolchain (with aarch64-linux-android)
         uses: dtolnay/rust-toolchain@stable
@@ -35,7 +54,9 @@ jobs:
       - name: Cache Cargo artifacts
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: hub
+          workspaces: |
+            hub
+            examples/native-perf-hud
 
       - name: Setup Java 25
         uses: actions/setup-java@v5
@@ -55,17 +76,41 @@ jobs:
           cache: pnpm
           cache-dependency-path: webui/pnpm-lock.yaml
 
-      - name: Install Android SDK & NDK components
+      - name: Resolve Android SDK & NDK paths
         run: |
           set -euo pipefail
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          NDK_HOME="${SDK_ROOT}/ndk/30.0.16248370"
+          NDK_BIN="${NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          echo "${NDK_BIN}" >> "${GITHUB_PATH}"
+          {
+            echo "ANDROID_HOME=${SDK_ROOT}"
+            echo "ANDROID_SDK_ROOT=${SDK_ROOT}"
+            echo "ANDROID_NDK_HOME=${NDK_HOME}"
+            echo "AR_aarch64_linux_android=${NDK_BIN}/llvm-ar"
+            echo "RANLIB_aarch64_linux_android=${NDK_BIN}/llvm-ranlib"
+          } >> "${GITHUB_ENV}"
+
+      - name: Cache Android NDK r30
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.ANDROID_NDK_HOME }}
+          key: android-ndk-${{ runner.os }}-30.0.16248370
+
+      - name: Install Android SDK & NDK components
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT}"
           SDKMANAGER="$(find "${SDK_ROOT}/cmdline-tools" -name sdkmanager -type f | sort -V | tail -n 1)"
           echo "Using sdkmanager: ${SDKMANAGER} (SDK_ROOT=${SDK_ROOT})"
           yes | "${SDKMANAGER}" --sdk_root="${SDK_ROOT}" --licenses >/dev/null || true
-          "${SDKMANAGER}" --sdk_root="${SDK_ROOT}" --install "platforms;android-37.0" "build-tools;36.0.0" "ndk;30.0.16248370"
-          echo "ANDROID_HOME=${SDK_ROOT}" >> "${GITHUB_ENV}"
-          echo "ANDROID_SDK_ROOT=${SDK_ROOT}" >> "${GITHUB_ENV}"
-          echo "ANDROID_NDK_HOME=${SDK_ROOT}/ndk/30.0.16248370" >> "${GITHUB_ENV}"
+          PACKAGES=("platforms;android-37.0" "build-tools;36.0.0")
+          if [ ! -d "${ANDROID_NDK_HOME}" ]; then
+            PACKAGES+=("ndk;30.0.16248370")
+          else
+            echo "[*] Reusing cached Android NDK at ${ANDROID_NDK_HOME}"
+          fi
+          "${SDKMANAGER}" --sdk_root="${SDK_ROOT}" --install "${PACKAGES[@]}"
 
       - name: Setup Gradle cache
         uses: gradle/actions/setup-gradle@v4
@@ -116,20 +161,15 @@ jobs:
             echo "::warning::ANDROID_KEYSTORE_BASE64 is empty; continuing workflow_dispatch build with debug signing fallback."
           fi
 
-      - name: Build release archive
+      - name: Build release and debug archives (single pass)
         run: |
           set -euo pipefail
           mkdir -p release-assets
-          bash build.sh --mode release
+          bash scripts/build.sh --mode both
           cp out/sideveil.zip "release-assets/sideveil-${RELEASE_TAG}.zip"
+          cp out/sideveil-debug.zip "release-assets/sideveil-${RELEASE_TAG}-debug.zip"
 
-      - name: Build debug archive
-        run: |
-          set -euo pipefail
-          bash build.sh --mode debug
-          cp out/sideveil.zip "release-assets/sideveil-${RELEASE_TAG}-debug.zip"
-
-      - name: Generate SHA-256 checksums
+      - name: Generate SHA-256 checksums and OTA update.json
         run: |
           set -euo pipefail
           (
@@ -140,6 +180,21 @@ jobs:
               > SHA256SUMS.txt
           )
           cat release-assets/SHA256SUMS.txt
+          node -e '
+            const fs = require("node:fs");
+            const prop = fs.readFileSync("module/module.prop", "utf8");
+            const codeMatch = prop.match(/^versionCode=(\d+)$/m);
+            if (!codeMatch) throw new Error("Missing versionCode in module/module.prop");
+            const tag = process.env.RELEASE_TAG;
+            const repo = process.env.GITHUB_REPOSITORY || "5jona/sideveil";
+            const payload = {
+              version: tag,
+              versionCode: Number(codeMatch[1]),
+              zipUrl: `https://github.com/${repo}/releases/download/${tag}/sideveil-${tag}.zip`,
+              changelog: `https://raw.githubusercontent.com/${repo}/${tag}/docs/CHANGELOG.md`,
+            };
+            fs.writeFileSync("release-assets/update.json", `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+          '
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
@@ -147,25 +202,57 @@ jobs:
           name: sideveil-${{ env.RELEASE_TAG }}
           path: release-assets/
 
+      - name: Extract release notes from docs/CHANGELOG.md
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          node -e '
+            const fs = require("node:fs");
+            const ver = process.argv[1];
+            const lines = fs.readFileSync("docs/CHANGELOG.md", "utf8").split(/\r?\n/);
+            const headerRe = new RegExp(`^## \\[${ver.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")}\\](?:\\s|$)`);
+            const start = lines.findIndex((l) => headerRe.test(l));
+            if (start === -1) {
+              console.error(`Missing docs/CHANGELOG.md section for ${ver}`);
+              process.exit(1);
+            }
+            const rest = lines.slice(start + 1);
+            const endOffset = rest.findIndex((l) => /^## \[/.test(l));
+            const body = (endOffset === -1 ? rest : rest.slice(0, endOffset)).join("\n").trim();
+            if (!body) {
+              console.error(`Empty docs/CHANGELOG.md section for ${ver}`);
+              process.exit(1);
+            }
+            fs.writeFileSync("RELEASE_NOTES.md", `${body}\n`, "utf8");
+          ' "${VERSION}"
+
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          extra_args=()
+          if [[ "${RELEASE_TAG}" == *-alpha* || "${RELEASE_TAG}" == *-beta* || "${RELEASE_TAG}" == *-rc* ]]; then
+            extra_args+=(--prerelease)
+          fi
           if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
             gh release upload "${RELEASE_TAG}" \
               "release-assets/sideveil-${RELEASE_TAG}.zip" \
               "release-assets/sideveil-${RELEASE_TAG}-debug.zip" \
               "release-assets/SHA256SUMS.txt" \
+              "release-assets/update.json" \
               --clobber
           else
             gh release create "${RELEASE_TAG}" \
               "release-assets/sideveil-${RELEASE_TAG}.zip" \
               "release-assets/sideveil-${RELEASE_TAG}-debug.zip" \
               "release-assets/SHA256SUMS.txt" \
+              "release-assets/update.json" \
               --title "SideVeil ${RELEASE_TAG}" \
-              --generate-notes
+              --notes-file RELEASE_NOTES.md \
+              "${extra_args[@]}"
           fi
 
       - name: Remove temporary keystore

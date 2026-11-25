@@ -205,8 +205,8 @@ test('normalizeSideVeilConfig handles NaN and non-number fallback values cleanly
   assert.equal(result.panel.scrimAlpha, DEFAULT_CONFIG.panel.scrimAlpha);
 });
 
-test('root config.json snapshot matches DEFAULT_CONFIG and wire contract constants are aligned', () => {
-  const rootConfigPath = path.resolve(__dirname, '../../config.json');
+test('module/config.json snapshot matches DEFAULT_CONFIG and wire contract constants are aligned', () => {
+  const rootConfigPath = path.resolve(__dirname, '../../module/config.json');
   const raw = JSON.parse(fs.readFileSync(rootConfigPath, 'utf8'));
   assert.deepEqual(normalizeSideVeilConfig(raw), DEFAULT_CONFIG);
   assert.deepEqual(raw, DEFAULT_CONFIG);

@@ -4,9 +4,9 @@
 #
 
 # shellcheck source=scripts/lib/module-env.sh
-source "${SCRIPT_DIR}/scripts/lib/module-env.sh"
+source "${SCRIPT_DIR}/lib/module-env.sh"
 # shellcheck source=scripts/reload-transport.sh
-source "${SCRIPT_DIR}/scripts/reload-transport.sh"
+source "${SCRIPT_DIR}/reload-transport.sh"
 
 wait_for_ready() {
     local max_wait_ms="${1:-12000}"
@@ -113,7 +113,7 @@ resolve_plugin_source_dir() {
         return 0
     fi
     local candidate
-    for candidate in "${SCRIPT_DIR}"/examples/*; do
+    for candidate in "${ROOT_DIR}"/examples/*; do
         [ -f "${candidate}/manifest.json" ] || continue
         local mid
         mid="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "${candidate}/manifest.json" 2>/dev/null || true)"
@@ -191,7 +191,8 @@ EOF
 install_full_staged_script() {
     cat <<EOF
 set -e
-pm install -r -d ${STAGE_DIR}/SideVeilHost.apk
+pm install -r -d -g ${STAGE_DIR}/SideVeilHost.apk
+pm grant pochita.sideveil.host android.permission.ACCESS_LOCAL_NETWORK >/dev/null 2>&1 || true
 cp ${STAGE_DIR}/module.prop ${REMOTE_MOD_DIR}/module.prop
 cp ${STAGE_DIR}/config.json ${REMOTE_MOD_DIR}/config.json
 cp ${STAGE_DIR}/service.sh ${REMOTE_MOD_DIR}/service.sh

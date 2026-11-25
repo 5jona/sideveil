@@ -242,7 +242,7 @@ fn build_template_html(id: &str, template: PluginTemplate) -> String {
 
 fn build_react_package_json(id: &str) -> String {
     format!(
-        "{{\n  \"name\": \"{id}\",\n  \"private\": true,\n  \"version\": \"0.1.0\",\n  \"type\": \"module\",\n  \"scripts\": {{ \"build\": \"vite build --outDir web\" }},\n  \"dependencies\": {{ \"react\": \"^19.0.0\", \"react-dom\": \"^19.0.0\" }},\n  \"devDependencies\": {{ \"vite\": \"^6.0.0\", \"@vitejs/plugin-react\": \"^4.3.0\" }}\n}}\n"
+        "{{\n  \"name\": \"{id}\",\n  \"private\": true,\n  \"version\": \"0.1.0\",\n  \"type\": \"module\",\n  \"scripts\": {{ \"build\": \"vite build --outDir web\" }},\n  \"dependencies\": {{ \"react\": \"^19.0.0\", \"react-dom\": \"^19.0.0\" }},\n  \"devDependencies\": {{ \"vite\": \"^8.0.0\", \"@vitejs/plugin-react\": \"^6.0.0\" }}\n}}\n"
     )
 }
 
@@ -254,8 +254,9 @@ fn build_react_app_tsx(id: &str) -> String {
 
 fn build_native_cargo_toml(id: &str) -> String {
     let crate_name = id.replace('.', "-");
+    let tag = concat!("v", env!("CARGO_PKG_VERSION"));
     format!(
-        "[package]\nname = \"{crate_name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[dependencies]\nserde_json = \"1\"\nsideveil-plugin-sdk = \"0.1\"\ntokio = {{ version = \"1\", features = [\"rt-multi-thread\", \"macros\", \"signal\"] }}\n"
+        "[package]\nname = \"{crate_name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[dependencies]\nserde_json = \"1\"\nsideveil-plugin-sdk = {{ git = \"https://github.com/5jona/sideveil.git\", tag = \"{tag}\" }}\nsideveil-protocol = {{ git = \"https://github.com/5jona/sideveil.git\", tag = \"{tag}\" }}\ntokio = {{ version = \"1\", features = [\"rt-multi-thread\", \"macros\", \"signal\"] }}\n"
     )
 }
 

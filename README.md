@@ -5,7 +5,7 @@ Target baseline: Android 16+ (API 36+, arm64) on Linux GKI 6.12+. Built around a
 
 ## Architecture
 
-For the full repository navigation map, runtime data flows, ABI-pinned FQCNs, and 7 protocol trust boundaries, see [`ARCHITECTURE.md`](./ARCHITECTURE.md). Empirical Android 16+ platform findings and ADRs live in [`docs/architecture-decisions.md`](./docs/architecture-decisions.md).
+For the full repository navigation map, runtime data flows, ABI-pinned FQCNs, and 7 protocol trust boundaries, see [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md). Empirical Android 16+ platform findings and ADRs live in [`docs/architecture-decisions.md`](./docs/architecture-decisions.md).
 
 1. **Rust Core Hub (`hub/crates/sideveild`, `sideveil-gfx`, `sideveil-hud-jni`, `sideveil-ctl`)**
    - Supervises `sideveil-sensor` directly (`UID 1000` drop via `pre_exec`) and `SideVeilHost` via Linux `pidfd_open` + Tokio `AsyncFd` (`epoll`) with zero shell/curl polling.
@@ -58,21 +58,16 @@ sideveil/
 │   ├── sensor/                 # Thin UID 1000 app_process sensor -> bin/sideveil-sensor.dex
 │   └── host-app/               # Headless priv-app overlay host -> SideVeilHost.apk
 ├── docs/
+│   ├── ARCHITECTURE.md           # Full navigation map, data flows & protocol trust boundaries
+│   ├── CHANGELOG.md              # Release history
 │   └── architecture-decisions.md # Android 16+ UID 1000 boundaries, rendering notes & ADRs
 ├── examples/                   # Official reference plugins (vello-vector-scope, native-perf-hud)
-├── scripts/                    # Contract sync, reload transport helpers & live E2E harness
-├── system/                     # KernelSU Magic Mount priv-app & sysconfig XMLs
+├── module/                     # KernelSU static files (module.prop, config.json, *.sh, system/)
+├── out/                        # Gitignored staging outputs (out/stage/) & KernelSU ZIPs
+├── scripts/                    # Build, hot-reload, contract sync, version bump & E2E harness
 ├── webui/                      # React + Vite + Tailwind v4 Control Plane & Panel apps
-├── build.sh                    # Full Rust + WebUI + Gradle + KernelSU ZIP packager
-├── reload.sh                   # Zero-reboot SSH / on-device push/install/restart helper
-├── config.json                 # Default configuration template
-├── CHANGELOG.md
-├── LICENSE                     # GNU General Public License v3.0 (GPL-3.0-only)
-├── module.prop
-├── post-fs-data.sh
-├── service.sh
-├── customize.sh
-└── uninstall.sh
+├── AGENTS.md
+└── LICENSE                     # GNU General Public License v3.0 (GPL-3.0-only)
 ```
 
 ## Tooling & Build Commands
@@ -80,27 +75,31 @@ sideveil/
 Pinned tool versions live in [`mise.toml`](./mise.toml) (`java = 25`, `android-sdk = 23.0`, `pnpm = 12.22.0`) alongside Rust Edition 2024 (`aarch64-linux-android` via NDK 30).
 
 ```bash
-# Run all contract, Rust, WebUI, and Android quality gates
+# Run all version, contract, Rust, WebUI, and Android quality gates
 mise run check
 
 # Build a lean release archive (skips bundled example test plugins)
-bash build.sh --mode release
+bash scripts/build.sh --mode release
 
 # Build a debug archive (packages bundled example.vello-scope & example.native-perf-hud)
-bash build.sh --mode debug
+bash scripts/build.sh --mode debug
+
+# Build both clean and debug archives in a single pass
+bash scripts/build.sh --mode both
 
 # Regenerate cross-language contract artifacts and optionally sync TS outputs upstream
 mise run contracts:gen
 bash scripts/sync-kit-contracts.sh [path/to/gojona-kit]
 
 # Build + live-reload onto Android device via Strata container SSH (or on-device --local)
-bash reload.sh --ssh <host|user@host>
+bash scripts/reload.sh --ssh <host|user@host>
 ```
 
-### Build Modes (`--mode release|debug`)
+### Build Modes (`--mode release|debug|both`)
 
 - `--mode release`: Builds a lean KernelSU archive (`out/sideveil.zip`) containing only the Core Hub, System Sensor, Render Host APK, Control Plane WebUI, and built-in diagnostic panel, skipping the source-level reference plugins (`example.vello-scope` and `example.native-perf-hud`).
 - `--mode debug` (default): Also compiles and bundles `example.vello-scope` and `example.native-perf-hud` (toggleable at runtime via `debug.setRuntimeMode`).
+- `--mode both`: Compiles once and emits both `out/sideveil.zip` (lean) and `out/sideveil-debug.zip` (with bundled examples).
 
 ### Android Release Signing
 
@@ -119,7 +118,7 @@ For CI or environment-driven builds, export `KEYSTORE_FILE`, `KEYSTORE_PASSWORD`
 ## Runtime Notes
 
 - `/data/adb` is `0700 root:root` on Android/KernelSU; shared runtime state (`config.json`, `run/`, `plugins/`, `data/`, staged `sideveil-sensor.dex`) lives under `/data/system/sideveil/`.
-- `reload.sh` installs `SideVeilHost.apk` via `pm install -r -d` for immediate zero-reboot testing; flashing `out/sideveil.zip` mounts the `priv-app` and whitelist XMLs systemlessly after a reboot.
+- `scripts/reload.sh` installs `SideVeilHost.apk` via `pm install -r -d` for immediate zero-reboot testing; flashing `out/sideveil.zip` mounts the `priv-app` and whitelist XMLs systemlessly after a reboot.
 
 ## License
 
