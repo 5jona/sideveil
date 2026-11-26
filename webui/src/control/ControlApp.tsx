@@ -1,7 +1,6 @@
 import { type BridgeOptions, BridgeProvider, type MockExecHandler } from '@gojona/bridge';
 import {
   AppShell,
-  Badge,
   BottomNav,
   Button,
   ErrorBoundary,
@@ -17,12 +16,11 @@ import {
   AlertTriangle,
   Boxes,
   Palette,
-  PanelRightClose,
-  PanelRightOpen,
   SlidersHorizontal,
   Terminal,
 } from 'lucide-react';
 import { lazy, Suspense, useCallback, useMemo, useState } from 'react';
+import { ControlHeaderActions } from './components/ControlHeaderActions.tsx';
 import { OverviewEdgeTab } from './components/OverviewEdgeTab.tsx';
 import { useDebugControl } from './hooks/useDebugControl.ts';
 import { useNetworkContextControl } from './hooks/useNetworkContextControl.ts';
@@ -46,13 +44,11 @@ const handleLazyMockControlExec: MockExecHandler = async (cmd) => {
 const CONTROL_TAB_ORDER = ['overview', 'appearance', 'plugins', 'diagnostics'] as const;
 type ControlTab = (typeof CONTROL_TAB_ORDER)[number];
 
-function TabLoadingFallback() {
-  return (
-    <div className="flex flex-1 items-center justify-center py-12 text-xs text-[var(--text-secondary)]">
-      正在加载模块...
-    </div>
-  );
-}
+const TabLoadingFallback = () => (
+  <div className="flex flex-1 items-center justify-center py-12 text-xs text-[var(--text-secondary)]">
+    正在加载模块...
+  </div>
+);
 
 function ControlWorkbench() {
   const { pushToast } = useToast();
@@ -96,7 +92,6 @@ function ControlWorkbench() {
     [control, networkLoading, refreshNetworkContext, visitedTabs],
   );
 
-  const isPanelOpen = status?.panelState === 'open';
   const envLabel =
     bridge.env === 'ksu'
       ? 'KernelSU WebUI'
@@ -123,45 +118,14 @@ function ControlWorkbench() {
           </div>
         }
         headerTrailing={
-          <>
-            <Badge
-              variant={
-                status?.hostConnected ? 'success' : daemonOfflineError ? 'danger' : 'warning'
-              }
-              dot
-              pulse={status?.hostConnected}
-            >
-              {status?.hostConnected
-                ? 'Host 已连接'
-                : daemonOfflineError
-                  ? 'Daemon 离线'
-                  : '等待 Host'}
-            </Badge>
-            <Badge variant="neutral">{saving ? '正在写入...' : envLabel}</Badge>
-            <Button
-              size="sm"
-              variant={isPanelOpen ? 'secondary' : 'primary'}
-              disabled={busyAction !== null}
-              onClick={() =>
-                control.runCtl(
-                  isPanelOpen ? 'close' : 'open',
-                  isPanelOpen ? '收起侧边栏' : '弹出侧边栏',
-                )
-              }
-            >
-              {isPanelOpen ? (
-                <>
-                  <PanelRightClose className="size-3.5" />
-                  收起侧边栏
-                </>
-              ) : (
-                <>
-                  <PanelRightOpen className="size-3.5" />
-                  弹出侧边栏
-                </>
-              )}
-            </Button>
-          </>
+          <ControlHeaderActions
+            status={status}
+            daemonOfflineError={daemonOfflineError}
+            saving={saving}
+            envLabel={envLabel}
+            busyAction={busyAction}
+            onRunCtl={(action, label) => void control.runCtl(action, label)}
+          />
         }
         bodyClassName="flex max-w-none flex-col px-0"
         bottomSlot={

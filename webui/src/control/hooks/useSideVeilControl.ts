@@ -1,21 +1,17 @@
-import { shellQuote, useBridge } from '@gojona/bridge';
-import { type LogEntry, useTheme, useToast } from '@gojona/ui';
+import { useBridge } from '@gojona/bridge';
+import { useTheme, useToast } from '@gojona/ui';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   CONFIG_PATH,
-  CTL_BIN,
-  type CtlCommand,
-  type DaemonStatus,
   DEFAULT_CONFIG,
   normalizeSideVeilConfig,
-  SIDEVEIL_METHODS,
   type SideVeilConfig,
 } from '../../shared/types.ts';
 import {
   shouldPollControlInBackground,
   shouldRefreshOnVisibility,
 } from './controlPollingPolicy.ts';
-import { parseDaemonLogsStdout, parseDaemonStatusStdout } from './logParser.ts';
+import { useDaemonStatus } from './useDaemonStatus.ts';
 import { usePluginsControl } from './usePluginsControl.ts';
 
 /**
@@ -30,17 +26,11 @@ export function useSideVeilControl(options?: { logsEnabled?: boolean }) {
   logsEnabledRef.current = Boolean(options?.logsEnabled);
 
   const [config, setConfigState] = useState<SideVeilConfig>(DEFAULT_CONFIG);
-  const [status, setStatus] = useState<DaemonStatus | null>(null);
-  const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [ctlBusyAction, setCtlBusyAction] = useState<CtlCommand | null>(null);
-  const [lastPingMs, setLastPingMs] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [configLoadError, setConfigLoadError] = useState<string | null>(null);
-  const [daemonOfflineError, setDaemonOfflineError] = useState<string | null>(null);
 
   const pluginsControl = usePluginsControl(bridge, pushToast);
   const { refreshPlugins } = pluginsControl;
-  const busyAction = ctlBusyAction ?? pluginsControl.pluginBusyAction;
 
   const mountedRef = useRef(true);
   const latestConfigRef = useRef<SideVeilConfig>(DEFAULT_CONFIG);
@@ -50,42 +40,21 @@ export function useSideVeilControl(options?: { logsEnabled?: boolean }) {
   const configLoadErrorRef = useRef<string | null>(null);
   configLoadErrorRef.current = configLoadError;
   const isLoadedRef = useRef(false);
-  const isPollingRef = useRef(false);
   const lastVisibilityRefreshRef = useRef(0);
   const saveTimerRef = useRef<number | null>(null);
+  const loadConfigRef = useRef<() => Promise<void>>(async () => {});
+  const refreshStatusRef = useRef<() => Promise<void>>(async () => {});
 
-  const refreshStatus = useCallback(async () => {
-    if (isPollingRef.current) return;
-    isPollingRef.current = true;
-    try {
-      const res = await bridge.exec(`${shellQuote(CTL_BIN)} status`);
-      if (!mountedRef.current) return;
-      if (res.errno === 0 && res.stdout.trim()) {
-        const parsed = parseDaemonStatusStdout(res.stdout);
-        if (parsed) {
-          setStatus(parsed);
-          setDaemonOfflineError(null);
-        }
-      } else {
-        setDaemonOfflineError(
-          res.stderr.trim() || res.stdout.trim() || `服务未就绪 (errno ${res.errno})`,
-        );
-      }
-    } catch (err) {
-      if (!mountedRef.current) return;
-      const msg = err instanceof Error ? err.message : String(err);
-      setDaemonOfflineError(`无法连接 Daemon: ${msg}`);
-    } finally {
-      isPollingRef.current = false;
-    }
-  }, [bridge]);
-
-  const refreshLogs = useCallback(async () => {
-    const res = await bridge.exec(`${shellQuote(CTL_BIN)} logs`);
-    if (!mountedRef.current || res.errno !== 0) return;
-    const entries = parseDaemonLogsStdout(res.stdout);
-    if (entries) setLogs(entries);
-  }, [bridge]);
+  const daemon = useDaemonStatus({
+    bridge,
+    pushToast,
+    logsEnabledRef,
+    mountedRef,
+    onConfigReloaded: useCallback(() => loadConfigRef.current(), []),
+  });
+  const { refreshStatus, refreshLogs } = daemon;
+  refreshStatusRef.current = refreshStatus;
+  const busyAction = daemon.ctlBusyAction ?? pluginsControl.pluginBusyAction;
 
   const enqueueAtomicWrite = useCallback(
     (nextConfig: SideVeilConfig, notifyOnFailure: boolean): Promise<void> => {
@@ -101,7 +70,7 @@ export function useSideVeilControl(options?: { logsEnabled?: boolean }) {
           if (res.errno !== 0) {
             if (notifyOnFailure) pushToast('保存配置失败', 'danger');
           } else if (notifyOnFailure) {
-            void refreshStatus();
+            void refreshStatusRef.current();
           }
         } catch {
           if (mountedRef.current && notifyOnFailure) pushToast('保存配置失败', 'danger');
@@ -119,7 +88,7 @@ export function useSideVeilControl(options?: { logsEnabled?: boolean }) {
       saveQueueRef.current = run.catch(() => {});
       return run;
     },
-    [bridge, pushToast, refreshStatus],
+    [bridge, pushToast],
   );
 
   const loadConfigFromDisk = useCallback(async () => {
@@ -147,6 +116,7 @@ export function useSideVeilControl(options?: { logsEnabled?: boolean }) {
       if (mountedRef.current) setConfigLoadError(errMsg);
     }
   }, [bridge, enqueueAtomicWrite, setColorMode, setThemeId]);
+  loadConfigRef.current = loadConfigFromDisk;
 
   const flushPendingSave = useCallback(() => {
     if (saveTimerRef.current !== null) {
@@ -235,59 +205,22 @@ export function useSideVeilControl(options?: { logsEnabled?: boolean }) {
     refreshStatus,
   ]);
 
-  const runCtl = useCallback(
-    async (action: CtlCommand, label: string) => {
-      setCtlBusyAction(action);
-      const t0 = performance.now();
-      try {
-        const res = await bridge.exec(`${shellQuote(CTL_BIN)} ${shellQuote(action)}`);
-        if (!mountedRef.current) return;
-        const dt = Math.max(1, Math.round(performance.now() - t0));
-        if (res.errno === 0) {
-          if (action === 'ping') setLastPingMs(dt);
-          pushToast(`${label}成功（${dt} ms）`, 'success');
-          if (action === 'reload') await loadConfigFromDisk();
-          await Promise.all([
-            refreshStatus(),
-            logsEnabledRef.current ? refreshLogs() : Promise.resolve(),
-          ]);
-        } else {
-          pushToast(`${label}失败：${res.stderr || res.stdout}`, 'warning');
-        }
-      } finally {
-        if (mountedRef.current) setCtlBusyAction(null);
-      }
-    },
-    [bridge, loadConfigFromDisk, pushToast, refreshLogs, refreshStatus],
-  );
-
-  const clearLogs = useCallback(async () => {
-    try {
-      await (bridge.env === 'host'
-        ? bridge.invoke(SIDEVEIL_METHODS.DAEMON_LOGS_CLEAR)
-        : bridge.exec(`${shellQuote(CTL_BIN)} logs --clear`));
-    } catch {
-      // Best-effort remote clear; still clear local log buffer.
-    }
-    if (mountedRef.current) setLogs([]);
-  }, [bridge]);
-
   return {
     bridge,
     config,
-    status,
-    logs,
+    status: daemon.status,
+    logs: daemon.logs,
     ...pluginsControl,
     busyAction,
-    lastPingMs,
+    lastPingMs: daemon.lastPingMs,
     saving,
     configLoadError,
-    daemonOfflineError,
+    daemonOfflineError: daemon.daemonOfflineError,
     updateConfig,
     loadConfigFromDisk,
     refreshStatus,
     refreshLogs,
-    runCtl,
-    clearLogs,
+    runCtl: daemon.runCtl,
+    clearLogs: daemon.clearLogs,
   };
 }

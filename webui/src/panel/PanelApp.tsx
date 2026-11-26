@@ -1,9 +1,4 @@
-import {
-  type BridgeOptions,
-  type ContainerAction,
-  type MockRpcHandler,
-  useContainerThemeSync,
-} from '@gojona/bridge';
+import type { BridgeOptions, ContainerAction, MockRpcHandler } from '@gojona/bridge';
 import { BUILTIN_DIAG_PLUGIN_ID, SideVeilPluginProvider, useClipboard } from '@gojona/sideveil-sdk';
 import {
   AppShell,
@@ -11,21 +6,19 @@ import {
   Button,
   Card,
   cn,
-  ErrorBoundary,
   Input,
   LogConsole,
   type LogEntry,
   MetricTile,
   SettingRow,
   Switch,
-  ThemeProvider,
   ThemeSwitcher,
-  ToastProvider,
 } from '@gojona/ui';
 import { Activity, RefreshCw, Sparkles, X, Zap } from 'lucide-react';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useDiagnosticPanel } from './hooks/useDiagnosticPanel.ts';
 import { DIAGNOSTIC_PLUGIN_MANIFEST } from './manifest.ts';
+import { PanelThemedContainer } from './PanelThemedContainer.tsx';
 
 let mockPanelRpcPromise: Promise<MockRpcHandler> | null = null;
 const handleLazyMockPanelRpc: MockRpcHandler = async (method, params) => {
@@ -96,11 +89,18 @@ function PanelWorkbench({
         }
         headerTrailing={
           <div className="flex items-center gap-1.5">
-            <Badge variant={isNativeHost ? 'success' : 'accent'} dot>
+            <Badge
+              variant={isNativeHost ? 'success' : 'accent'}
+              dot
+              className="shrink-0 whitespace-nowrap"
+            >
               {isNativeHost ? '在线' : '预览'}
             </Badge>
             {backendState !== 'none' ? (
-              <Badge variant={backendState === 'online' ? 'success' : 'neutral'}>
+              <Badge
+                variant={backendState === 'online' ? 'success' : 'neutral'}
+                className="shrink-0 whitespace-nowrap"
+              >
                 {backendState === 'online' ? '后端就绪' : '后端离线'}
               </Badge>
             ) : null}
@@ -198,7 +198,7 @@ function PanelWorkbench({
               aria-label="中文输入法测试框"
             />
             {imeText ? (
-              <div className="rounded-[var(--radius-control)] bg-[var(--surface-elevated)] px-2.5 py-1.5 text-[11px] text-[var(--text-primary)]">
+              <div className="break-words rounded-[var(--radius-control)] bg-[var(--surface-elevated)] px-2.5 py-1.5 text-[11px] text-[var(--text-primary)]">
                 回显：{imeText}
               </div>
             ) : null}
@@ -214,41 +214,6 @@ function PanelWorkbench({
         </div>
       </AppShell>
     </div>
-  );
-}
-
-function PanelThemedContainer({
-  eventsLog,
-  onAppendLog,
-  onClearLogs,
-}: {
-  eventsLog: readonly LogEntry[];
-  onAppendLog: (level: LogEntry['level'], message: string) => void;
-  onClearLogs: () => void;
-}) {
-  const [hydrated, setHydrated] = useState(false);
-  const markHydrated = useCallback(() => setHydrated(true), []);
-  const handleThemeSync = useContainerThemeSync({ includeAppearanceHints: false });
-
-  return (
-    <ThemeProvider
-      defaultTheme="coloros-glass"
-      defaultColorMode="system"
-      defaultSurfaceMode="native-glass"
-      syncEnabled={hydrated}
-      onThemeSync={handleThemeSync}
-    >
-      <ToastProvider>
-        <ErrorBoundary title="诊断面板渲染异常">
-          <PanelWorkbench
-            eventsLog={eventsLog}
-            onAppendLog={onAppendLog}
-            onClearLogs={onClearLogs}
-            onHydrated={markHydrated}
-          />
-        </ErrorBoundary>
-      </ToastProvider>
-    </ThemeProvider>
   );
 }
 
@@ -301,7 +266,16 @@ export function PanelApp() {
       manifest={DIAGNOSTIC_PLUGIN_MANIFEST}
       bridgeOptions={bridgeOptions}
     >
-      <PanelThemedContainer eventsLog={eventsLog} onAppendLog={appendLog} onClearLogs={clearLogs} />
+      <PanelThemedContainer>
+        {(onHydrated) => (
+          <PanelWorkbench
+            eventsLog={eventsLog}
+            onAppendLog={appendLog}
+            onClearLogs={clearLogs}
+            onHydrated={onHydrated}
+          />
+        )}
+      </PanelThemedContainer>
     </SideVeilPluginProvider>
   );
 }
