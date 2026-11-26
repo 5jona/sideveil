@@ -2,7 +2,7 @@
 
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
@@ -12,6 +12,17 @@ use tokio::process::Command;
 
 use crate::fs_util::{chown_path, unique_tmp_path};
 use crate::state::HubState;
+
+/// Outcome of attempting to sync `daemon_endpoint.json` and wake `SideVeilHost`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HostWakeOutcome {
+    /// Endpoint synced and `am start-foreground-service` invoked.
+    Woken,
+    /// Host CE data directory is not mounted yet (e.g., Direct Boot prior to user-0 unlock).
+    DataDirNotReady,
+    /// Hub WS server port is not ready or endpoint sync failed with a non-NotFound I/O error.
+    SyncFailed,
+}
 
 pub(crate) async fn force_stop_host(host_package: &str) {
     let _ = Command::new("/system/bin/am")
@@ -23,15 +34,31 @@ pub(crate) async fn force_stop_host(host_package: &str) {
         .await;
 }
 
-pub(crate) async fn wake_host_service(host_package: &str, state: &Arc<HubState>) {
+pub(crate) async fn wake_host_service(
+    host_package: &str,
+    state: &Arc<HubState>,
+    log_not_ready: bool,
+) -> HostWakeOutcome {
     let port = state.ws_port();
     if port == 0 {
-        return;
+        return HostWakeOutcome::SyncFailed;
     }
-    if let Err(err) = sync_host_endpoint(host_package, port, state.ws_token()).await {
-        state
-            .logs()
-            .warn(format!("Failed syncing host endpoint: {err}"));
+    match sync_host_endpoint(host_package, port, state.ws_token()).await {
+        Ok(()) => {}
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            if log_not_ready {
+                state.logs().info(format!(
+                    "Deferring SideVeilHost wake until user-0 CE data directory is mounted ({err})"
+                ));
+            }
+            return HostWakeOutcome::DataDirNotReady;
+        }
+        Err(err) => {
+            state
+                .logs()
+                .warn(format!("Failed syncing host endpoint: {err}"));
+            return HostWakeOutcome::SyncFailed;
+        }
     }
     let component = format!("{host_package}/.HostService");
     let action = format!("{host_package}.ACTION_SYNC_ENDPOINT");
@@ -50,6 +77,7 @@ pub(crate) async fn wake_host_service(host_package: &str, state: &Arc<HubState>)
         .stderr(Stdio::null())
         .status()
         .await;
+    HostWakeOutcome::Woken
 }
 
 async fn sync_host_endpoint(host_package: &str, port: u16, token: &str) -> io::Result<()> {
@@ -83,7 +111,11 @@ async fn sync_host_endpoint(host_package: &str, port: u16, token: &str) -> io::R
 
     let dst = no_backup.join("daemon_endpoint.json");
     let tmp = unique_tmp_path(&dst);
-    let mut file = OpenOptions::new().create_new(true).write(true).open(&tmp)?;
+    let mut file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .mode(0o600)
+        .open(&tmp)?;
     file.write_all(payload.as_bytes())?;
     file.write_all(b"\n")?;
     file.sync_all()?;

@@ -15,6 +15,33 @@ import pochita.sideveil.protocol.EdgeSide
 import pochita.sideveil.protocol.EdgeStatusPayload
 
 /**
+ * Immutable snapshot of `WindowManager.LayoutParams` fields relevant to `EdgeIndicatorWindow`
+ * so `WindowManager.updateViewLayout` is only called when window geometry or flags actually change.
+ */
+internal data class EdgeWindowLayoutSnapshot(
+    val gravity: Int,
+    val width: Int,
+    val height: Int,
+    val x: Int,
+    val y: Int,
+    val flags: Int,
+    val alpha: Float,
+) {
+    companion object {
+        fun from(lp: WindowManager.LayoutParams): EdgeWindowLayoutSnapshot =
+            EdgeWindowLayoutSnapshot(
+                gravity = lp.gravity,
+                width = lp.width,
+                height = lp.height,
+                x = lp.x,
+                y = lp.y,
+                flags = lp.flags,
+                alpha = lp.alpha,
+            )
+    }
+}
+
+/**
  * Pure visual styling, badge layout, and idle-dim transform helpers for [EdgeIndicatorWindow].
  */
 @SuppressLint("RtlHardcoded")
@@ -25,6 +52,8 @@ internal class EdgeIndicatorAppearance(
     private val badgeView: TextView,
     private val pillDrawable: GradientDrawable,
 ) {
+    private val badgeDrawable = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE }
+
     fun applyLayoutAndVisuals(
         layoutParams: WindowManager.LayoutParams,
         screenHeightPx: Int,
@@ -92,12 +121,11 @@ internal class EdgeIndicatorAppearance(
             badgeView.text = badgeText
             badgeView.visibility = View.VISIBLE
             (badgeView.layoutParams as FrameLayout.LayoutParams).gravity = Gravity.CENTER_VERTICAL or gravityHorizontal
-            badgeView.background =
-                GradientDrawable().apply {
-                    shape = GradientDrawable.RECTANGLE
-                    cornerRadius = dp(9f).toFloat()
-                    setColor(parseStatusAccent(activeEdgeStatus) ?: Color.argb(230, 37, 99, 235))
-                }
+            badgeDrawable.cornerRadius = dp(9f).toFloat()
+            badgeDrawable.setColor(parseStatusAccent(activeEdgeStatus) ?: Color.argb(230, 37, 99, 235))
+            if (badgeView.background !== badgeDrawable) {
+                badgeView.background = badgeDrawable
+            }
             pillView.visibility = View.GONE
         } else {
             badgeView.visibility = View.GONE

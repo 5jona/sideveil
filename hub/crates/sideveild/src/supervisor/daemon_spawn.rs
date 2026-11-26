@@ -104,7 +104,7 @@ pub(super) fn spawn_plugin_daemon(
     data_dir: &Path,
 ) -> io::Result<Child> {
     fs::create_dir_all(data_dir)?;
-    let _ = fs::set_permissions(data_dir, fs::Permissions::from_mode(0o755));
+    fs::set_permissions(data_dir, fs::Permissions::from_mode(0o700))?;
 
     let mut cmd = Command::new(bin_path);
     cmd.env_clear()

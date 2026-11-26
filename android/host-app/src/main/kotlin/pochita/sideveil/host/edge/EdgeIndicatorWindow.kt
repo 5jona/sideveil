@@ -73,6 +73,7 @@ class EdgeIndicatorWindow(
             }
 
     private var attached = false
+    private var lastAppliedLayout: EdgeWindowLayoutSnapshot? = null
     private var fullscreenBarsHidden = false
     private var idleDimmed = false
     private var dragPulseProgress = 0f
@@ -93,13 +94,17 @@ class EdgeIndicatorWindow(
             }
         }
 
+    private val pendingInsetsApply = Runnable { applyAppearance() }
+
     private val windowInsetsListener =
         View.OnApplyWindowInsetsListener { _, insets ->
             val hidden = !insets.isVisible(WindowInsets.Type.statusBars())
             if (hidden != fullscreenBarsHidden) {
                 fullscreenBarsHidden = hidden
                 onFullscreenChanged(hidden)
-                applyAppearance()
+                // Defer appearance/layout updates outside performTraversals to avoid abandoned handleResized warnings.
+                mainHandler.removeCallbacks(pendingInsetsApply)
+                mainHandler.post(pendingInsetsApply)
             }
             insets
         }
@@ -136,6 +141,7 @@ class EdgeIndicatorWindow(
         runCatching {
             windowManager.addView(rootView, layoutParams)
             attached = true
+            lastAppliedLayout = EdgeWindowLayoutSnapshot.from(layoutParams)
             applyAppearance()
         }.onFailure { err ->
             Log.w(TAG, "Failed to attach edge indicator overlay", err)
@@ -202,11 +208,13 @@ class EdgeIndicatorWindow(
     /** Cancels active animators, clears the insets listener, and removes the overlay view. */
     fun detach() {
         mainHandler.removeCallbacks(idleDimRunnable)
+        mainHandler.removeCallbacks(pendingInsetsApply)
         appearance.cancelAnimations()
         rootView.setOnApplyWindowInsetsListener(null)
         if (!attached) return
         runCatching { windowManager.removeViewImmediate(rootView) }
         attached = false
+        lastAppliedLayout = null
     }
 
     private fun applyAppearance() {
@@ -214,8 +222,10 @@ class EdgeIndicatorWindow(
         val shouldShow =
             repositionActive ||
                 (latestScopeActive && latestEdge.handleVisible && latestPanelState == PanelState.CLOSED)
-        rootView.visibility = if (shouldShow) View.VISIBLE else View.GONE
         if (!shouldShow) {
+            if (rootView.visibility != View.GONE) {
+                rootView.visibility = View.GONE
+            }
             mainHandler.removeCallbacks(idleDimRunnable)
             return
         }
@@ -237,7 +247,16 @@ class EdgeIndicatorWindow(
             dragPulseProgress = dragPulseProgress,
             activeEdgeStatus = activeEdgeStatus,
         )
-        runCatching { windowManager.updateViewLayout(rootView, layoutParams) }
+        val nextLayout = EdgeWindowLayoutSnapshot.from(layoutParams)
+        if (nextLayout != lastAppliedLayout) {
+            runCatching {
+                windowManager.updateViewLayout(rootView, layoutParams)
+                lastAppliedLayout = nextLayout
+            }
+        }
+        if (rootView.visibility != View.VISIBLE) {
+            rootView.visibility = View.VISIBLE
+        }
     }
 
     private fun wakeAndRescheduleIdle() {

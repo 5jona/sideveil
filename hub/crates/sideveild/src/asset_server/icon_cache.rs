@@ -13,7 +13,7 @@ use sideveil_gfx::svg_icon::{
 };
 use tokio::fs;
 
-use crate::asset_server::{mime_type_for, resolve_asset_file};
+use crate::asset_server::{ResolveAssetError, mime_type_for, resolve_asset_file_checked};
 use crate::fs_util::write_file_atomic;
 use crate::state::HubState;
 
@@ -73,9 +73,12 @@ pub(crate) async fn load_or_rasterize_icon(
     };
 
     let normalized_rel = normalize_icon_rel(&raw_icon);
-    let file_path = resolve_asset_file(plugin_root, &normalized_rel)
+    let file_path = resolve_asset_file_checked(plugin_root, &normalized_rel)
         .await
-        .map_err(|_| (403, "Forbidden"))?;
+        .map_err(|err| match err {
+            ResolveAssetError::NotFound => (404, "Icon Not Found"),
+            ResolveAssetError::Forbidden(_) => (403, "Forbidden"),
+        })?;
 
     let meta = fs::metadata(&file_path)
         .await

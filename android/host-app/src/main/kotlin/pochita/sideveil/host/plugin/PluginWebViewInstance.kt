@@ -33,9 +33,10 @@ internal class PluginWebViewInstance(
     initialDescriptor: PluginDescriptor,
     private val callbacks: PluginContainerCallbacks,
     initialNetworkRoute: NetworkRouteContext = NetworkRouteContext(),
-) {
+) : PluginEventTarget {
     private val mainHandler = Handler(Looper.getMainLooper())
     val webView: WebView = WebView(context)
+    override val visibilityTracker: PluginVisibilityTracker = PluginVisibilityTracker()
     private val dormancy =
         WebViewDormancyController.forWebView(webView, mainHandler, WebViewDormancyController.resolveHidePauseDelayMs(initialDescriptor))
     private val embedSession = EmbedSessionController(webView, mainHandler, initialNetworkRoute)
@@ -61,7 +62,7 @@ internal class PluginWebViewInstance(
 
     @Volatile private var hadMainFrameErrorThisLoad: Boolean = false
 
-    val isUntrustedEmbed: Boolean = PluginNetworkPolicy.isUntrustedEmbed(initialDescriptor)
+    override val isUntrustedEmbed: Boolean = PluginNetworkPolicy.isUntrustedEmbed(initialDescriptor)
 
     private val messageBridge: PluginWebMessageBridge? =
         deps.createMessageBridgeIfTrusted(
@@ -119,7 +120,7 @@ internal class PluginWebViewInstance(
         if (isUntrustedEmbed) embedSession.reload(descriptor) else loadEntry()
     }
 
-    fun pushBackendState() {
+    override fun pushBackendState() {
         if (isUntrustedEmbed || descriptor.backend == PluginBackendKind.NONE) return
         val payload = PluginBackendStatePayload(pluginId = descriptor.id, state = descriptor.backendState)
         pushEvent(SideVeilEvents.PLUGIN_BACKEND_STATE, SideVeilWireJson.encodeToJsonElement(payload))
@@ -173,14 +174,13 @@ internal class PluginWebViewInstance(
             keepAlive,
         )
 
-    fun loadEntry(restoreUrl: String? = null) {
+    override fun loadEntry(restoreUrl: String?) {
         hadMainFrameErrorThisLoad = false
         callbacks.onMainFrameStatusChanged(descriptor.id, errorTitle = null, errorDetail = null)
         dormancy.onLoadStarted()
+        visibilityTracker.reset()
         messageBridge?.resetBeforeLoad()
-        if (descriptor.embed !=
-            null
-        ) {
+        if (descriptor.embed != null) {
             embedSession.loadInitial(descriptor, restoreUrl)
         } else {
             webView.loadUrl(deps.assetFetcher.entryUrlFor(descriptor))
@@ -198,14 +198,14 @@ internal class PluginWebViewInstance(
         onDismissPanel: () -> Unit,
     ): EmbedToolbarBinding? = embedSession.resolveToolbarBinding(context, descriptor, isUntrustedEmbed, onDismissPanel)
 
-    fun pushEvent(
+    override fun pushEvent(
         event: String,
         payload: JsonElement?,
     ) {
         messageBridge?.postRawAsync(SideVeilWireJson.encodeToString(HostEventEnvelope(event = event, payload = payload)))
     }
 
-    fun pushEnvelope(envelope: HostEventEnvelope) {
+    override fun pushEnvelope(envelope: HostEventEnvelope) {
         messageBridge?.postRawAsync(SideVeilWireJson.encodeToString(envelope))
     }
 

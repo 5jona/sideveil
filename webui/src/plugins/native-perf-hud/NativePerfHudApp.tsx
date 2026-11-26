@@ -13,6 +13,7 @@ import {
   Button,
   Card,
   cn,
+  ErrorBoundary,
   MetricTile,
   SettingRow,
   Switch,
@@ -234,7 +235,9 @@ export function NativePerfHudApp() {
         defaultSurfaceMode="native-glass"
         syncEnabled={false}
       >
-        <NativePerfHudWorkbench />
+        <ErrorBoundary title="性能监控渲染异常">
+          <NativePerfHudWorkbench />
+        </ErrorBoundary>
       </ThemeProvider>
     </SideVeilPluginProvider>
   );

@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <config>
     <allow-in-power-save package="pochita.sideveil.host" />
+    <allow-in-power-save-except-idle package="pochita.sideveil.host" />
+    <allow-in-data-usage-save package="pochita.sideveil.host" />
     <hidden-api-whitelisted-app package="pochita.sideveil.host" />
 </config>

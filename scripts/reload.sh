@@ -234,7 +234,7 @@ EOF
 set -e
 am force-stop pochita.sideveil.host 2>/dev/null || true
 pm install -r -d -g ${STAGE_DIR}/SideVeilHost.apk
-pm grant pochita.sideveil.host android.permission.ACCESS_LOCAL_NETWORK >/dev/null 2>&1 || true
+$(grant_host_keepalive_script)
 cp ${STAGE_DIR}/SideVeilHost.apk ${REMOTE_MOD_DIR}/system/priv-app/SideVeilHost/SideVeilHost.apk
 chmod 0644 ${REMOTE_MOD_DIR}/system/priv-app/SideVeilHost/SideVeilHost.apk
 rm -rf ${STAGE_DIR}

@@ -87,21 +87,21 @@ print(f"{pid}\t{sock}")
         fi
     elif [ -n "$SSH_TARGET" ]; then
         echo "[*] Bridge CDP to http://127.0.0.1:${port}/json via Strata SSH:"
-        echo "    ssh -p ${SSH_PORT} -L ${port}:127.0.0.1:${port} ${SSH_TARGET} \"strata-debug cdp serve --port ${port} --pid ${host_pid}\""
+        echo "    ssh -p ${SSH_PORT} -L ${port}:127.0.0.1:${port} ${SSH_TARGET} \"strata-debug cdp forward --port ${port} --pid ${host_pid}\""
         if [ "$exec_mode" -eq 1 ]; then
             if [ "${ADB_SSH_ISOLATED:-0}" -eq 1 ]; then
                 ssh "${SSH_OPTS[@]}" -L "${port}:127.0.0.1:${port}" "${SSH_TARGET}" \
-                    "strata-debug cdp serve --port ${port} --pid ${host_pid}"
+                    "strata-debug cdp forward --port ${port} --pid ${host_pid}"
             else
                 exec ssh -p "${SSH_PORT}" -L "${port}:127.0.0.1:${port}" "${SSH_TARGET}" \
-                    "strata-debug cdp serve --port ${port} --pid ${host_pid}"
+                    "strata-debug cdp forward --port ${port} --pid ${host_pid}"
             fi
         fi
     else
-        echo "[*] Serve CDP locally on http://127.0.0.1:${port}/json:"
-        echo "    strata-debug cdp serve --port ${port} --pid ${host_pid}"
+        echo "[*] Forward CDP locally on http://127.0.0.1:${port}/json:"
+        echo "    strata-debug cdp forward --port ${port} --pid ${host_pid}"
         if [ "$exec_mode" -eq 1 ]; then
-            exec strata-debug cdp serve --port "${port}" --pid "${host_pid}"
+            exec strata-debug cdp forward --port "${port}" --pid "${host_pid}"
         fi
     fi
 }
@@ -188,11 +188,24 @@ rm -f ${REMOTE_STATE_DIR}/run/hub.sock ${REMOTE_STATE_DIR}/run/app.sock ${REMOTE
 EOF
 }
 
+grant_host_keepalive_script() {
+    cat <<'EOF'
+pm grant pochita.sideveil.host android.permission.ACCESS_LOCAL_NETWORK >/dev/null 2>&1 || true
+pm grant pochita.sideveil.host android.permission.POST_NOTIFICATIONS >/dev/null 2>&1 || true
+cmd appops set pochita.sideveil.host SYSTEM_ALERT_WINDOW allow >/dev/null 2>&1 || true
+cmd appops set pochita.sideveil.host RUN_IN_BACKGROUND allow >/dev/null 2>&1 || true
+cmd appops set pochita.sideveil.host RUN_ANY_IN_BACKGROUND allow >/dev/null 2>&1 || true
+cmd appops set pochita.sideveil.host START_FOREGROUND allow >/dev/null 2>&1 || true
+dumpsys deviceidle whitelist +pochita.sideveil.host >/dev/null 2>&1 || true
+am set-standby-bucket pochita.sideveil.host active >/dev/null 2>&1 || true
+EOF
+}
+
 install_full_staged_script() {
     cat <<EOF
 set -e
 pm install -r -d -g ${STAGE_DIR}/SideVeilHost.apk
-pm grant pochita.sideveil.host android.permission.ACCESS_LOCAL_NETWORK >/dev/null 2>&1 || true
+$(grant_host_keepalive_script)
 cp ${STAGE_DIR}/module.prop ${REMOTE_MOD_DIR}/module.prop
 cp ${STAGE_DIR}/config.json ${REMOTE_MOD_DIR}/config.json
 cp ${STAGE_DIR}/service.sh ${REMOTE_MOD_DIR}/service.sh

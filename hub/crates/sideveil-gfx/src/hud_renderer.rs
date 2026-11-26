@@ -19,7 +19,8 @@ use vello_cpu::{
 use self::primitives::draw_primitive;
 use crate::GfxError;
 
-const MAX_HUD_PIXEL_DIM: u16 = 2048;
+/// Maximum supported pixel width or height for a native HUD rasterization surface.
+pub const MAX_HUD_PIXEL_DIM: u16 = 2048;
 
 /// Reusable `vello_cpu` HUD rasterization scratchpad avoiding per-frame allocations at 60Hz.
 pub struct HudCanvas {

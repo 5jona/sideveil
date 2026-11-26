@@ -258,6 +258,7 @@ class SidebarPanelWindow(
             runCatching { dialog.dismiss() }
             attached = false
         }
+        windowLayout.resetAppliedLayoutSnapshot()
     }
 
     private fun handleDragWatchdogTimeout() {

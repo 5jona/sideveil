@@ -221,6 +221,7 @@ class PluginRailWindow(
             runCatching { dialog.dismiss() }
             attached = false
         }
+        surfaceController.resetAppliedLayoutSnapshot()
     }
 
     private fun refreshVisibility() {

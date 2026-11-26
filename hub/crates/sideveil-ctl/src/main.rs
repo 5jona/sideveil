@@ -28,10 +28,13 @@ fn main() -> ExitCode {
     };
 
     match execute(&invocation) {
-        Ok(output) => {
-            println!("{output}");
-            ExitCode::SUCCESS
-        }
+        Ok(output) => match write_line_handling_broken_pipe(io::stdout().lock(), &output) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                print_error(&format!("Failed writing stdout: {err}"));
+                ExitCode::FAILURE
+            }
+        },
         Err(msg) => {
             print_error(&msg);
             ExitCode::FAILURE
@@ -169,6 +172,48 @@ fn connect_socket(path: &Path, timeout: Duration) -> Result<UnixStream, String> 
     Ok(stream)
 }
 
+fn write_line_handling_broken_pipe<W: Write>(mut writer: W, line: &str) -> io::Result<()> {
+    match writeln!(writer, "{line}").and_then(|()| writer.flush()) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == io::ErrorKind::BrokenPipe => Ok(()),
+        Err(err) => Err(err),
+    }
+}
+
 fn print_error(message: &str) {
-    eprintln!("{}", json!({ "error": message }));
+    let payload = json!({ "error": message }).to_string();
+    let _ = write_line_handling_broken_pipe(io::stderr().lock(), &payload);
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{self, Write};
+
+    use super::write_line_handling_broken_pipe;
+
+    struct FailingWriter(io::ErrorKind);
+
+    impl Write for FailingWriter {
+        fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+            Err(io::Error::new(self.0, "simulated write failure"))
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Err(io::Error::new(self.0, "simulated flush failure"))
+        }
+    }
+
+    #[test]
+    fn broken_pipe_exits_silently_as_ok() {
+        let writer = FailingWriter(io::ErrorKind::BrokenPipe);
+        assert!(write_line_handling_broken_pipe(writer, "{\"ok\":true}").is_ok());
+    }
+
+    #[test]
+    fn non_broken_pipe_write_error_is_propagated() {
+        let writer = FailingWriter(io::ErrorKind::PermissionDenied);
+        let err = write_line_handling_broken_pipe(writer, "{\"ok\":true}")
+            .expect_err("non-broken-pipe error should propagate");
+        assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
+    }
 }

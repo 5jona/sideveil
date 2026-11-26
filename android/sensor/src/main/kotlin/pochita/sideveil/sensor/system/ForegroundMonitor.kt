@@ -168,18 +168,12 @@ class ForegroundMonitor(
 
             val method =
                 getTasksMethod
-                    ?: atm.javaClass
-                        .getMethod(
-                            "getTasks",
-                            Int::class.javaPrimitiveType,
-                            Boolean::class.javaPrimitiveType,
-                            Boolean::class.javaPrimitiveType,
-                            Int::class.javaPrimitiveType,
-                        ).also { getTasksMethod = it }
+                    ?: resolveGetTasksMethod(atm)?.also { getTasksMethod = it }
+                    ?: return "" to ""
 
             @Suppress("UNCHECKED_CAST")
             val tasks =
-                (method.invoke(atm, 5, false, false, 0) as? List<ActivityManager.RunningTaskInfo>).orEmpty()
+                (invokeGetTasks(atm, method) as? List<ActivityManager.RunningTaskInfo>).orEmpty()
 
             for (task in tasks) {
                 val component: ComponentName = task.topActivity ?: task.baseActivity ?: continue
@@ -192,6 +186,39 @@ class ForegroundMonitor(
         }.onFailure { err ->
             SensorLog.warn("ATM.getTasks query failed", err)
         }.getOrDefault("" to "")
+
+    private fun resolveGetTasksMethod(atm: Any): Method? {
+        val cls = atm.javaClass
+        return runCatching {
+            cls.getMethod(
+                "getTasks",
+                Int::class.javaPrimitiveType,
+                Boolean::class.javaPrimitiveType,
+                Boolean::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType,
+            )
+        }.recoverCatching {
+            cls.getMethod(
+                "getTasks",
+                Int::class.javaPrimitiveType,
+                Boolean::class.javaPrimitiveType,
+                Boolean::class.javaPrimitiveType,
+            )
+        }.recoverCatching {
+            cls.getMethod("getTasks", Int::class.javaPrimitiveType)
+        }.getOrNull()
+    }
+
+    private fun invokeGetTasks(
+        atm: Any,
+        method: Method,
+    ): Any? =
+        when (method.parameterCount) {
+            4 -> method.invoke(atm, 5, false, false, 0)
+            3 -> method.invoke(atm, 5, false, false)
+            1 -> method.invoke(atm, 5)
+            else -> null
+        }
 
     private fun queryViaOplusWindowManager(): Pair<String, String> =
         runCatching {

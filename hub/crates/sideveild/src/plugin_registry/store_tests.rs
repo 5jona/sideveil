@@ -166,3 +166,44 @@ fn compute_asset_revision_detects_entry_changes_and_rejects_traversal() {
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn uninstall_purges_orphaned_override_when_directory_was_deleted_externally() {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!(
+        "sideveil-orphan-uninstall-{}-{nanos}",
+        std::process::id()
+    ));
+    let plugins_dir = dir.join("plugins");
+    let overrides_path = dir.join("plugins.json");
+    let cache_dir = dir.join("cache");
+    let data_dir = dir.join("data");
+    fs::create_dir_all(&plugins_dir).expect("mkdir plugins");
+    fs::write(
+        &overrides_path,
+        r#"{"overrides":{"test.phase4a.smoke":{"priority":42}},"mruByPackage":{"com.demo":"test.phase4a.smoke"}}"#,
+    )
+    .expect("seed orphaned plugins.json");
+
+    let logs = Arc::new(LogRing::new());
+    let registry = PluginRegistry::open(plugins_dir, overrides_path.clone(), logs);
+
+    // Truly nonexistent plugin with no override still returns NotInstalled.
+    assert!(
+        registry
+            .uninstall_plugin("com.never.existed", &cache_dir, Some(&data_dir))
+            .is_err()
+    );
+
+    // Orphaned entry with deleted directory is purged cleanly from plugins.json.
+    registry
+        .uninstall_plugin("test.phase4a.smoke", &cache_dir, Some(&data_dir))
+        .expect("orphan uninstall should purge stale override");
+    let persisted = fs::read_to_string(&overrides_path).expect("read cleaned plugins.json");
+    assert!(!persisted.contains("test.phase4a.smoke"));
+
+    let _ = fs::remove_dir_all(&dir);
+}

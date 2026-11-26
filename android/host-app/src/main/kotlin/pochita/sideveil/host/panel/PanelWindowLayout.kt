@@ -13,6 +13,8 @@ import android.view.inputmethod.InputMethodManager
 import android.webkit.WebView
 import android.widget.FrameLayout
 import pochita.sideveil.host.overlay.OverlayWindowFlags
+import pochita.sideveil.host.overlay.OverlayWindowLayoutSnapshot
+import pochita.sideveil.host.overlay.WindowLayoutCommitTracker
 import pochita.sideveil.host.plugin.EmbedQuickBarView
 import pochita.sideveil.host.plugin.PluginSizeOverride
 import pochita.sideveil.protocol.EdgeSide
@@ -43,6 +45,9 @@ internal class PanelWindowLayout(
         private set
     var safeCenterOffsetY: Int = 0
         private set
+    private val layoutCommitTracker = WindowLayoutCommitTracker()
+
+    fun resetAppliedLayoutSnapshot() = layoutCommitTracker.reset()
 
     fun createContentContainer(themedContext: Context): FrameLayout =
         PanelDialogFactory.createContentContainer(themedContext, { cachedWidthPx }, { cachedHeightPx })
@@ -95,7 +100,7 @@ internal class PanelWindowLayout(
         OverlayWindowFlags.applyTouchSafeAlpha(lp)
         OverlayWindowFlags.clearPreferredRefreshRate(lp)
         OverlayWindowFlags.disableMoveAnimation(lp)
-        window.attributes = lp
+        applyAttributesIfChanged(window, lp)
     }
 
     fun mountWebView(
@@ -192,8 +197,10 @@ internal class PanelWindowLayout(
         OverlayWindowFlags.applyTouchSafeAlpha(lp)
         OverlayWindowFlags.applyPreferredMaxRefreshRate(context, lp, window.decorView.display)
         OverlayWindowFlags.disableMoveAnimation(lp)
-        window.attributes = lp
-        window.decorView.visibility = View.VISIBLE
+        applyAttributesIfChanged(window, lp)
+        if (window.decorView.visibility != View.VISIBLE) {
+            window.decorView.visibility = View.VISIBLE
+        }
         OverlayWindowFlags.applyHighFrameRate(window.decorView, context, window.decorView.display)
     }
 
@@ -205,22 +212,15 @@ internal class PanelWindowLayout(
         allowOffscreen: Boolean,
     ) {
         val lp = window.attributes
-        val xPx = frame.windowX
-        val yPx = frame.windowY + safeCenterOffsetY
         val nextFlags = computeInteractiveFlags(panelConfig, focusable, allowOffscreen)
-        val nextAlpha = OverlayWindowFlags.resolveWindowAlpha(nextFlags)
-        val geometryChanged =
-            lp.x != xPx || lp.y != yPx || lp.width != cachedWidthPx || lp.height != cachedHeightPx
-        if (geometryChanged || lp.flags != nextFlags || lp.alpha != nextAlpha) {
-            lp.x = xPx
-            lp.y = yPx
-            lp.width = cachedWidthPx
-            lp.height = cachedHeightPx
-            lp.flags = nextFlags
-            lp.alpha = nextAlpha
-            lp.dimAmount = panelConfig.scrimAlpha.coerceIn(0f, 0.75f)
-            window.attributes = lp
-        }
+        lp.x = frame.windowX
+        lp.y = frame.windowY + safeCenterOffsetY
+        lp.width = cachedWidthPx
+        lp.height = cachedHeightPx
+        lp.flags = nextFlags
+        lp.alpha = OverlayWindowFlags.resolveWindowAlpha(nextFlags)
+        lp.dimAmount = panelConfig.scrimAlpha.coerceIn(0f, 0.75f)
+        applyAttributesIfChanged(window, lp)
     }
 
     fun updateFlags(
@@ -231,17 +231,16 @@ internal class PanelWindowLayout(
     ) {
         val lp = window.attributes
         val nextFlags = computeInteractiveFlags(panelConfig, focusable, allowOffscreen)
-        val nextAlpha = OverlayWindowFlags.resolveWindowAlpha(nextFlags)
-        if (lp.flags != nextFlags || lp.alpha != nextAlpha) {
-            lp.flags = nextFlags
-            lp.alpha = nextAlpha
-            window.attributes = lp
-        }
+        lp.flags = nextFlags
+        lp.alpha = OverlayWindowFlags.resolveWindowAlpha(nextFlags)
+        applyAttributesIfChanged(window, lp)
     }
 
     fun collapseToWarmInvisible(window: Window) {
         OverlayWindowFlags.clearHighFrameRate(window.decorView)
-        window.decorView.visibility = View.INVISIBLE
+        if (window.decorView.visibility != View.INVISIBLE) {
+            window.decorView.visibility = View.INVISIBLE
+        }
         val lp = window.attributes
         lp.gravity = Gravity.TOP or Gravity.LEFT
         lp.width = 1
@@ -253,7 +252,16 @@ internal class PanelWindowLayout(
         OverlayWindowFlags.applyTouchSafeAlpha(lp)
         OverlayWindowFlags.clearPreferredRefreshRate(lp)
         OverlayWindowFlags.disableMoveAnimation(lp)
-        window.attributes = lp
+        applyAttributesIfChanged(window, lp)
+    }
+
+    private fun applyAttributesIfChanged(
+        window: Window,
+        lp: WindowManager.LayoutParams,
+    ) {
+        layoutCommitTracker.commitIfChanged(OverlayWindowLayoutSnapshot.from(lp)) {
+            window.attributes = lp
+        }
     }
 
     fun openMarginPx(

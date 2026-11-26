@@ -174,6 +174,14 @@ class PluginWebViewManager(
                 if (pluginId == activePluginId && pluginId != pinnedPluginId && existing.webView.parent == null) {
                     containerCallbacks.mountInstance(existing)
                 }
+                val visible = (panelState != PanelState.CLOSED && pluginId == activePluginId) || pluginId == pinnedPluginId
+                val effectiveState =
+                    when {
+                        pluginId == pinnedPluginId && panelState == PanelState.CLOSED -> PanelState.OPEN
+                        visible -> panelState
+                        else -> PanelState.CLOSED
+                    }
+                eventBridge.pushVisibility(existing, visible = visible, state = effectiveState, force = true)
             }
 
             pluginId == activePluginId -> {
@@ -254,7 +262,8 @@ class PluginWebViewManager(
 
         activePluginId = descriptor.id
         surfaceDelegate.setPanelOverlayState(PluginPanelOverlayState.None)
-        val instance = getOrCreateInstance(descriptor)
+        var createdNewInstance = false
+        val instance = getOrCreateInstance(descriptor) { createdNewInstance = true }
         if (instance.presentationMode == PluginPresentationMode.PINNED) {
             instance.resetPresentationToDrawer()
             if (pinnedPluginId == descriptor.id) evictOverlay(EvictedOverlayKind.PINNED, descriptor.id)
@@ -262,12 +271,13 @@ class PluginWebViewManager(
         pool.updateRendererPriorities(panelState, activePluginId, pinnedPluginId)
         if (switching || forceMount || instance.webView.parent == null) containerCallbacks.mountInstance(instance)
         eventBridge.reportDiagnostics(pool.warmPluginIds(), activeHudPluginId)
-        if (switching && panelState != PanelState.CLOSED) {
-            eventBridge.pushVisibility(instance, visible = true, state = panelState)
-        }
+        eventBridge.syncActivatedVisibility(instance, panelState, createdNewInstance)
     }
 
-    private fun getOrCreateInstance(descriptor: PluginDescriptor): PluginWebViewInstance {
+    private fun getOrCreateInstance(
+        descriptor: PluginDescriptor,
+        onCreated: () -> Unit = {},
+    ): PluginWebViewInstance {
         pool.peek(descriptor.id)?.let { existing ->
             if (existing.isUntrustedEmbed != PluginNetworkPolicy.isUntrustedEmbed(descriptor)) {
                 if (descriptor.id == pinnedPluginId) evictOverlay(EvictedOverlayKind.PINNED, descriptor.id)
@@ -275,6 +285,7 @@ class PluginWebViewManager(
             }
         }
         return pool.getOrCreate(descriptor.id, activePluginId, pinnedPluginId, keepAliveIds, { it.updateDescriptor(descriptor) }) {
+            onCreated()
             PluginWebViewInstance(context, webViewDeps, descriptor, containerCallbacks, latestNetworkRoute).also { created ->
                 val visible = (panelState != PanelState.CLOSED && descriptor.id == activePluginId) || descriptor.id == pinnedPluginId
                 eventBridge.hydrateNewInstance(created, descriptor, panelState, visible, lastUrlByPlugin.remove(descriptor.id))

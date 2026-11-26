@@ -235,12 +235,17 @@ fn extract_and_validate_host<'a>(
         });
     }
 
-    if let Ok(v4) = host.parse::<Ipv4Addr>()
-        && v4.is_unspecified()
-    {
+    if let Ok(v4) = host.parse::<Ipv4Addr>() {
+        if v4.is_unspecified() {
+            return Err(ManifestValidationError::InvalidUrl {
+                url: full_url.to_owned(),
+                reason: "unspecified IPv4 address (0.0.0.0) is forbidden".to_owned(),
+            });
+        }
+    } else if !authority.starts_with('[') && looks_like_non_canonical_ipv4(host) {
         return Err(ManifestValidationError::InvalidUrl {
             url: full_url.to_owned(),
-            reason: "unspecified IPv4 address (0.0.0.0) is forbidden".to_owned(),
+            reason: "non-canonical numeric/octal/hex IPv4 host is forbidden".to_owned(),
         });
     }
     if let Ok(v6) = host.parse::<Ipv6Addr>()
@@ -268,4 +273,26 @@ fn extract_and_validate_host<'a>(
     }
 
     Ok(host)
+}
+
+/// Detects non-canonical numeric/octal/hex IPv4 host representations (such as `0177.0.0.1`,
+/// `0x7f.0.0.1`, `2130706433`, or `127.1`) that Chromium/URL parsers normalize to IPv4 literals.
+fn looks_like_non_canonical_ipv4(host: &str) -> bool {
+    let labels: Vec<&str> = host.split('.').collect();
+    if labels.is_empty() || labels.len() > 4 {
+        return false;
+    }
+    labels.iter().all(|label| {
+        if label.is_empty() {
+            return false;
+        }
+        if let Some(hex) = label
+            .strip_prefix("0x")
+            .or_else(|| label.strip_prefix("0X"))
+        {
+            !hex.is_empty() && hex.bytes().all(|b| b.is_ascii_hexdigit())
+        } else {
+            label.bytes().all(|b| b.is_ascii_digit())
+        }
+    })
 }

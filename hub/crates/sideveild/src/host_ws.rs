@@ -222,6 +222,17 @@ fn validate_ws_request(req: &Request, expected_auth: &str) -> Result<(), (u16, &
         return Err((403, "Origin header is forbidden"));
     }
 
+    let mut host_headers = req.headers().get_all("host").iter();
+    if let Some(first_host) = host_headers.next()
+        && (host_headers.next().is_some()
+            || first_host
+                .to_str()
+                .ok()
+                .is_none_or(|h| !is_loopback_host_header(h)))
+    {
+        return Err((403, "Host header must target loopback"));
+    }
+
     let auth = req
         .headers()
         .get("authorization")
@@ -232,6 +243,43 @@ fn validate_ws_request(req: &Request, expected_auth: &str) -> Result<(), (u16, &
     }
 
     Ok(())
+}
+
+/// Validates that an HTTP `Host` header targets strictly loopback (`127.0.0.1`, `localhost`, or `[::1]`)
+/// with an optional valid numeric port (`1..=65535`).
+#[must_use]
+pub(crate) fn is_loopback_host_header(raw: &str) -> bool {
+    let trimmed = raw.trim();
+    if trimmed.is_empty()
+        || trimmed.contains('@')
+        || trimmed.bytes().any(|b| b.is_ascii_whitespace())
+    {
+        return false;
+    }
+    let (host, port_part) = if let Some(rest) = trimmed.strip_prefix('[') {
+        let Some((ipv6, after)) = rest.split_once(']') else {
+            return false;
+        };
+        if ipv6 != "::1" {
+            return false;
+        }
+        (ipv6, after)
+    } else if let Some((h, p)) = trimmed.split_once(':') {
+        (h, &trimmed[h.len()..h.len() + 1 + p.len()])
+    } else {
+        (trimmed, "")
+    };
+    let host_ok = host == "127.0.0.1" || host.eq_ignore_ascii_case("localhost") || host == "::1";
+    if !host_ok {
+        return false;
+    }
+    if port_part.is_empty() {
+        return true;
+    }
+    port_part
+        .strip_prefix(':')
+        .and_then(|digits| digits.parse::<u16>().ok())
+        .is_some_and(|p| p > 0)
 }
 
 fn reject_response(status: u16, body: &str) -> ErrorResponse {
@@ -264,5 +312,34 @@ mod tests {
         assert!(!constant_time_eq(b"secret-token-123", b"secret-token-124"));
         assert!(!constant_time_eq(b"short", b"longer"));
         assert!(constant_time_eq(b"", b""));
+    }
+
+    #[test]
+    fn loopback_host_header_rejects_dns_rebinding_hosts() {
+        for ok in [
+            "127.0.0.1",
+            "127.0.0.1:8080",
+            "localhost",
+            "LOCALHOST:443",
+            "[::1]",
+            "[::1]:8443",
+        ] {
+            assert!(is_loopback_host_header(ok), "expected valid Host: {ok}");
+        }
+        for bad in [
+            "",
+            "evil.example",
+            "evil.example:8080",
+            "127.0.0.1:0",
+            "127.0.0.1:99999",
+            "127.0.0.1@evil.example",
+            "[::2]:8080",
+            "duplicate-host",
+        ] {
+            assert!(
+                !is_loopback_host_header(bad),
+                "expected rejected Host: {bad}"
+            );
+        }
     }
 }

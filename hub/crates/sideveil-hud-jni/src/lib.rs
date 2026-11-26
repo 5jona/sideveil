@@ -4,8 +4,12 @@
 
 use std::cell::RefCell;
 
-use sideveil_gfx::hud_renderer::HudCanvas;
+use sideveil_gfx::hud_renderer::{HudCanvas, MAX_HUD_PIXEL_DIM};
 use sideveil_protocol::hud::NativeHudScene;
+
+/// Upper bound on UTF-16 code units accepted for a single HUD scene JSON string via JNI (2 MiB).
+#[cfg(target_os = "android")]
+const MAX_HUD_SCENE_JSON_UTF16: usize = 2 * 1024 * 1024;
 
 thread_local! {
     static HUD_CANVAS: RefCell<HudCanvas> = RefCell::new(HudCanvas::default());
@@ -32,7 +36,12 @@ pub fn render_scene_json_into(
     };
     let row_bytes = usize::from(width_px) * 4;
     let total_rows = usize::from(height_px);
-    if row_bytes == 0 || total_rows == 0 || stride_bytes < row_bytes {
+    if width_px == 0
+        || height_px == 0
+        || width_px > MAX_HUD_PIXEL_DIM
+        || height_px > MAX_HUD_PIXEL_DIM
+        || stride_bytes < row_bytes
+    {
         return false;
     }
     let Some(min_buf) = stride_bytes.checked_mul(total_rows) else {
@@ -133,6 +142,9 @@ mod android_jni {
         let Ok(len) = usize::try_from(utf16_len) else {
             return JNI_FALSE;
         };
+        if len > super::MAX_HUD_SCENE_JSON_UTF16 {
+            return JNI_FALSE;
+        }
         let json_str = if len == 0 {
             String::new()
         } else {
@@ -163,6 +175,15 @@ mod android_jni {
             return JNI_FALSE;
         };
         let stride = info.stride as usize;
+        let row_bytes = usize::from(w) * 4;
+        if w == 0
+            || h == 0
+            || w > sideveil_gfx::hud_renderer::MAX_HUD_PIXEL_DIM
+            || h > sideveil_gfx::hud_renderer::MAX_HUD_PIXEL_DIM
+            || stride < row_bytes
+        {
+            return JNI_FALSE;
+        }
         let Some(total_bytes) = stride.checked_mul(usize::from(h)) else {
             return JNI_FALSE;
         };
@@ -179,7 +200,10 @@ mod android_jni {
         // SAFETY: `pixel_ptr` is locked by libjnigraphics for at least `stride * height` bytes.
         let pixel_slice =
             unsafe { std::slice::from_raw_parts_mut(pixel_ptr.cast::<u8>(), total_bytes) };
-        let ok = render_scene_json_into(&json_str, density, w, h, stride, pixel_slice);
+        let ok = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            render_scene_json_into(&json_str, density, w, h, stride, pixel_slice)
+        }))
+        .unwrap_or(false);
 
         // SAFETY: Unlocks the previously locked Android Bitmap backing buffer.
         let _ = unsafe { AndroidBitmap_unlockPixels(env, bitmap) };
@@ -191,8 +215,10 @@ mod android_jni {
         _env: *mut JNIEnv,
         _clazz: jclass,
     ) {
-        HUD_CANVAS.with(|cell| {
-            *cell.borrow_mut() = HudCanvas::default();
+        let _ = std::panic::catch_unwind(|| {
+            HUD_CANVAS.with(|cell| {
+                *cell.borrow_mut() = HudCanvas::default();
+            });
         });
     }
 }
@@ -276,5 +302,21 @@ mod tests {
         // Lone surrogate degrades gracefully without panicking.
         let lone = [0x0041u16, 0xD83Du16, 0x0042u16];
         assert_eq!(decode_jni_utf16(&lone), "A\u{FFFD}B");
+    }
+
+    #[test]
+    fn rejects_oversized_strided_dimensions_without_allocating() {
+        let json =
+            r#"{"pluginId":"demo.hud","widthDp":120,"heightDp":48,"primitives":[],"texts":[]}"#;
+        let mut tiny = [0u8; 64];
+        assert!(!render_scene_json_into(
+            json,
+            1.0,
+            MAX_HUD_PIXEL_DIM + 1,
+            48,
+            usize::from(MAX_HUD_PIXEL_DIM + 1) * 4 + 16,
+            &mut tiny
+        ));
+        assert!(!render_scene_json_into(json, 1.0, 0, 48, 16, &mut tiny));
     }
 }

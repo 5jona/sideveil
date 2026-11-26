@@ -356,3 +356,23 @@ fn validates_web_embed_manifest_and_enforces_zero_privilege() {
     };
     assert!(net_cap_embed.validate().is_ok());
 }
+
+#[test]
+fn rejects_non_canonical_numeric_octal_and_hex_ipv4_hosts() {
+    for bad in [
+        "https://0177.0.0.1",
+        "https://010.0.0.1:8443",
+        "https://0x7f.0.0.1",
+        "https://0x7f000001",
+        "https://2130706433",
+        "https://127.1",
+    ] {
+        assert!(
+            matches!(
+                validate_origin_for_capabilities(bad, false, &[PluginCapability::NetworkInternet]),
+                Err(ManifestValidationError::InvalidUrl { .. })
+            ),
+            "expected non-canonical IPv4 host rejection for {bad}"
+        );
+    }
+}

@@ -140,11 +140,15 @@ fn spawn_sensor_process(
         .stdout(Stdio::null())
         .stderr(Stdio::null());
 
+    let parent_pid = unsafe {
+        // SAFETY: `getpid` is always safe and returns the current process PID before `fork`.
+        libc::getpid()
+    };
+
     unsafe {
-        // SAFETY: Only async-signal-safe syscalls (`prctl`, `setgroups`, `setgid`, `setuid`)
-        // are invoked in `pre_exec` between `fork` and `exec`.
-        cmd.pre_exec(|| {
-            let _ = libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
+        // SAFETY: Only async-signal-safe syscalls (`setgroups`, `setgid`, `setuid`, `prctl`,
+        // `getppid`, `_exit`) are invoked in `pre_exec` between `fork` and `exec`.
+        cmd.pre_exec(move || {
             if libc::getuid() == 0 {
                 let groups: [libc::gid_t; 1] = [SENSOR_UID];
                 if libc::setgroups(groups.len(), groups.as_ptr()) != 0 {
@@ -156,6 +160,12 @@ fn spawn_sensor_process(
                 if libc::setuid(SENSOR_UID) != 0 {
                     return Err(io::Error::last_os_error());
                 }
+                // Restore dumpable after UID drop so `execve` preserves `PR_SET_PDEATHSIG`.
+                let _ = libc::prctl(libc::PR_SET_DUMPABLE, 1);
+            }
+            let _ = libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
+            if libc::getppid() != parent_pid {
+                libc::_exit(1);
             }
             Ok(())
         });

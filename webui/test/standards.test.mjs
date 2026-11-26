@@ -113,13 +113,14 @@ test('bundled example plugin web outputs are compiled Vite + Pochita bundles wit
 test('all managed source files stay within the 400-line hard limit', () => {
   const roots = [
     path.join(WEBUI_ROOT, 'src'),
+    path.join(WEBUI_ROOT, 'test'),
     path.join(REPO_ROOT, 'android/host-app/src/main'),
     path.join(REPO_ROOT, 'android/sensor/src/main'),
     path.join(REPO_ROOT, 'android/protocol/src/main'),
     path.join(REPO_ROOT, 'hub/crates'),
     path.join(REPO_ROOT, 'examples/native-perf-hud/src'),
   ];
-  const extensions = ['.ts', '.tsx', '.css', '.kt', '.rs'];
+  const extensions = ['.ts', '.tsx', '.css', '.kt', '.rs', '.mjs'];
   const violations = [];
 
   for (const root of roots) {

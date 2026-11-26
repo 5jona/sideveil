@@ -2,6 +2,7 @@ package pochita.sideveil.host.plugin
 
 import android.content.ComponentCallbacks2
 import android.util.Log
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
 import pochita.sideveil.host.debug.PluginManagerDebugState
@@ -194,7 +195,7 @@ internal class PluginWebViewEventBridge(
     }
 
     fun hydrateNewInstance(
-        instance: PluginWebViewInstance,
+        instance: PluginEventTarget,
         descriptor: PluginDescriptor,
         panelState: PanelState,
         initiallyVisible: Boolean,
@@ -220,15 +221,30 @@ internal class PluginWebViewEventBridge(
         )
     }
 
+    fun syncActivatedVisibility(
+        instance: PluginEventTarget,
+        panelState: PanelState,
+        newlyCreated: Boolean,
+    ): Boolean {
+        if (newlyCreated || panelState == PanelState.CLOSED) return false
+        return pushVisibility(instance, visible = true, state = panelState)
+    }
+
     fun pushVisibility(
-        instance: PluginWebViewInstance?,
+        instance: PluginEventTarget?,
         visible: Boolean,
         state: PanelState,
-    ) {
-        instance?.pushEvent(
+        force: Boolean = false,
+    ): Boolean {
+        if (instance == null) return false
+        if (!instance.visibilityTracker.shouldDispatch(visible = visible, state = state, force = force)) {
+            return false
+        }
+        instance.pushEvent(
             SideVeilEvents.PANEL_VISIBILITY,
             SideVeilWireJson.encodeToJsonElement(PanelVisibilityPayload(visible = visible, state = state)),
         )
+        return true
     }
 
     fun reportLoopbackFetchError(

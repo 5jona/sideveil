@@ -11,6 +11,8 @@ import pochita.sideveil.host.overlay.BlurMaskDrawable
 import pochita.sideveil.host.overlay.GlassBackdropDrawable
 import pochita.sideveil.host.overlay.GlassBackdropStyle
 import pochita.sideveil.host.overlay.OverlayWindowFlags
+import pochita.sideveil.host.overlay.OverlayWindowLayoutSnapshot
+import pochita.sideveil.host.overlay.WindowLayoutCommitTracker
 import pochita.sideveil.host.panel.OverlayHorizontalMetrics
 import pochita.sideveil.host.panel.PanelInsetsCoordinator
 import pochita.sideveil.host.panel.PanelMotionChoreographer
@@ -64,6 +66,9 @@ internal class PluginRailSurfaceController(
     private var dynamicTint: GlassTintOverride? = null
     private var systemBlurSupported = runCatching { windowManager.isCrossWindowBlurEnabled }.getOrDefault(false)
     private var lastAppliedBlurRadius = -1
+    private val layoutCommitTracker = WindowLayoutCommitTracker()
+
+    fun resetAppliedLayoutSnapshot() = layoutCommitTracker.reset()
 
     private val blurEnabledListener =
         Consumer<Boolean> { enabled ->
@@ -90,16 +95,20 @@ internal class PluginRailSurfaceController(
         window.setFormat(PixelFormat.TRANSLUCENT)
         window.decorView.setPadding(0, 0, 0, 0)
         window.setBackgroundDrawable(BlurMaskDrawable(cornerPx()))
-        window.attributes =
+        val lp =
             window.attributes.apply {
                 title = "SideVeilPluginRail"
                 gravity = Gravity.TOP or Gravity.LEFT
                 width = 1
                 height = 1
+                x = 0
+                y = 0
                 flags = INVISIBLE_FLAGS
                 OverlayWindowFlags.applyTouchSafeAlpha(this)
+                OverlayWindowFlags.clearPreferredRefreshRate(this)
                 OverlayWindowFlags.disableMoveAnimation(this)
             }
+        applyAttributesIfChanged(window, lp)
     }
 
     fun updateStyle(
@@ -199,8 +208,10 @@ internal class PluginRailSurfaceController(
         OverlayWindowFlags.applyTouchSafeAlpha(lp)
         OverlayWindowFlags.applyPreferredMaxRefreshRate(context, lp, window.decorView.display)
         OverlayWindowFlags.disableMoveAnimation(lp)
-        window.attributes = lp
-        window.decorView.visibility = View.VISIBLE
+        applyAttributesIfChanged(window, lp)
+        if (window.decorView.visibility != View.VISIBLE) {
+            window.decorView.visibility = View.VISIBLE
+        }
         OverlayWindowFlags.applyHighFrameRate(railContainer, context, window.decorView.display)
         railContainer.alpha = motionProgress
         applyBackdrop(window, progress = motionProgress)
@@ -212,7 +223,9 @@ internal class PluginRailSurfaceController(
     ) {
         applyBackdrop(window, progress = 0f)
         OverlayWindowFlags.clearHighFrameRate(railContainer)
-        window.decorView.visibility = View.INVISIBLE
+        if (window.decorView.visibility != View.INVISIBLE) {
+            window.decorView.visibility = View.INVISIBLE
+        }
         railContainer.alpha = 0f
         val lp = window.attributes
         lp.gravity = Gravity.TOP or Gravity.LEFT
@@ -223,7 +236,17 @@ internal class PluginRailSurfaceController(
         lp.flags = INVISIBLE_FLAGS
         OverlayWindowFlags.applyTouchSafeAlpha(lp)
         OverlayWindowFlags.clearPreferredRefreshRate(lp)
-        window.attributes = lp
+        OverlayWindowFlags.disableMoveAnimation(lp)
+        applyAttributesIfChanged(window, lp)
+    }
+
+    private fun applyAttributesIfChanged(
+        window: Window,
+        lp: WindowManager.LayoutParams,
+    ) {
+        layoutCommitTracker.commitIfChanged(OverlayWindowLayoutSnapshot.from(lp)) {
+            window.attributes = lp
+        }
     }
 
     fun cornerPx(): Float = dp(if (lastHorizontalMetrics.compact) 16f else 20f).toFloat()

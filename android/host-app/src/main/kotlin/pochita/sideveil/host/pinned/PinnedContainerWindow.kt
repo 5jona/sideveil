@@ -116,7 +116,12 @@ class PinnedContainerWindow(
             val wasImeVisible = lastImeBottomPx > 0
             lastImeBottomPx = nextIme
             if (wasImeVisible && nextIme == 0 && imeFocused) {
-                setImeFocused(false)
+                rootContainer.post {
+                    val active = attached && visible
+                    if (active && imeFocused && lastImeBottomPx == 0) {
+                        setImeFocused(false)
+                    }
+                }
             }
             insets
         }

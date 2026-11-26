@@ -11,6 +11,7 @@ use sideveild::config_store::ConfigStore;
 use sideveild::host_ws::HostWsServer;
 use sideveild::log_ring::LogRing;
 use sideveild::peercred::PeerAuthConfig;
+use sideveild::plugin_acl::harden_data_dir_permissions;
 use sideveild::plugin_registry::PluginRegistry;
 use sideveild::singleton::{LOCK_FILE_NAME, SingletonGuard};
 use sideveild::state::HubState;
@@ -112,6 +113,12 @@ async fn run(args: DaemonArgs) -> io::Result<()> {
             return Err(err.into());
         }
     };
+    if let Err(err) = harden_data_dir_permissions(&data_dir) {
+        logs.warn(format!(
+            "Failed hardening plugin data directory permissions ({}): {err}",
+            data_dir.display()
+        ));
+    }
     logs.info(format!(
         "Starting sideveild v{} (pid={}, config={}, run_dir={})",
         env!("CARGO_PKG_VERSION"),

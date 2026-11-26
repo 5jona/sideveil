@@ -169,7 +169,7 @@ internal class PanelBackdropController(
         backdropDrawable.updateMotion(motionProgress, velocityShift)
     }
 
-    fun apply() {
+    fun apply(overrideBlurRadiusPx: Int? = null) {
         val window = windowProvider() ?: return
         val isVisible = window.decorView.isVisible
         if (pluginBackdrop == PluginSurfaceBackdrop.TRANSPARENT) {
@@ -181,7 +181,12 @@ internal class PanelBackdropController(
 
         val blurConfigured = panelConfig.nativeBlurEnabled && panelConfig.blurRadiusPx > 0
         val blurAllowed = pluginBackdrop == PluginSurfaceBackdrop.NATIVE_GLASS && systemBlurSupported
-        val effectiveBlurRadius = if (isVisible && blurConfigured && blurAllowed) panelConfig.blurRadiusPx else 0
+        val effectiveBlurRadius =
+            if (isVisible && blurConfigured && blurAllowed) {
+                (overrideBlurRadiusPx ?: panelConfig.blurRadiusPx).coerceIn(0, panelConfig.blurRadiusPx)
+            } else {
+                0
+            }
 
         if (contentContainer.background !== backdropDrawable) {
             contentContainer.background = backdropDrawable

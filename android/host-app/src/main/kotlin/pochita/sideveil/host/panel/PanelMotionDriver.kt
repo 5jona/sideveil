@@ -123,7 +123,7 @@ internal class PanelMotionDriver(
                 focusable,
                 allowOffscreen = true,
             )
-            backdropController.apply()
+            backdropController.apply(overrideBlurRadiusPx = frame.blurRadiusPx)
             applyMotionVisuals(win, frame, focusable = focusable, allowOffscreen = true)
         }
     }

@@ -1,8 +1,12 @@
 package pochita.sideveil.host.plugin
 
 import android.webkit.WebView
+import kotlinx.serialization.json.JsonElement
 import pochita.sideveil.host.pinned.PinnedBoundsSpec
 import pochita.sideveil.protocol.EdgeStatusPayload
+import pochita.sideveil.protocol.HostEventEnvelope
+import pochita.sideveil.protocol.PanelState
+import pochita.sideveil.protocol.PanelVisibilityPayload
 import pochita.sideveil.protocol.PluginDescriptor
 import pochita.sideveil.protocol.PluginPresentationMode
 import pochita.sideveil.protocol.PluginSurfaceBackdrop
@@ -65,6 +69,51 @@ internal enum class DescriptorUpdateOutcome {
     UNCHANGED,
     SURFACE_UPDATED,
     RECREATE_REQUIRED,
+}
+
+/**
+ * Pure-Kotlin per-instance visibility state tracker preventing duplicate `panel.visibility`
+ * deliveries for unchanged `(visible, state)` payloads while allowing explicit `force` refreshes
+ * and resetting when the WebView reloads its page.
+ */
+internal class PluginVisibilityTracker {
+    var lastDispatched: PanelVisibilityPayload? = null
+        private set
+
+    fun shouldDispatch(
+        visible: Boolean,
+        state: PanelState,
+        force: Boolean = false,
+    ): Boolean {
+        val next = PanelVisibilityPayload(visible = visible, state = state)
+        if (!force && lastDispatched == next) return false
+        lastDispatched = next
+        return true
+    }
+
+    fun reset() {
+        lastDispatched = null
+    }
+}
+
+/**
+ * Minimal target abstraction implemented by [PluginWebViewInstance] so initial hydration and
+ * visibility deduplication in [PluginWebViewEventBridge] can be exercised directly in JVM tests.
+ */
+internal interface PluginEventTarget {
+    val isUntrustedEmbed: Boolean
+    val visibilityTracker: PluginVisibilityTracker
+
+    fun loadEntry(restoreUrl: String? = null)
+
+    fun pushBackendState()
+
+    fun pushEvent(
+        event: String,
+        payload: JsonElement?,
+    )
+
+    fun pushEnvelope(envelope: HostEventEnvelope)
 }
 
 /**

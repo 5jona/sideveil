@@ -228,18 +228,31 @@ impl PluginRegistry {
 
     /// Removes an installed plugin directory, clears its data directory, persisted overrides/MRU,
     /// and icon cache, then rescans the registry immediately.
+    ///
+    /// If the plugin directory was already removed externally but stale overrides or MRU entries
+    /// remain in `plugins.json`, purges the orphaned metadata cleanly instead of failing.
     pub fn uninstall_plugin(
         &self,
         plugin_id: &str,
         cache_dir: &Path,
         data_dir: Option<&Path>,
     ) -> Result<(), PluginRegistryError> {
-        web_embed::uninstall_plugin_dir(&self.plugins_dir, plugin_id)?;
-        if let Some(dir) = data_dir {
-            web_embed::remove_plugin_data_dir(dir, plugin_id);
+        let id = plugin_id.trim();
+        match web_embed::uninstall_plugin_dir(&self.plugins_dir, id) {
+            Ok(()) => {}
+            Err(PluginRegistryError::NotInstalled(_))
+                if self.has_persisted_override(id)
+                    && !self
+                        .bundled_dir
+                        .as_deref()
+                        .is_some_and(|d| d.join(id).is_dir()) => {}
+            Err(err) => return Err(err),
         }
-        self.purge_plugin_overrides(plugin_id);
-        prune_plugin_icon_cache(cache_dir, plugin_id);
+        if let Some(dir) = data_dir {
+            web_embed::remove_plugin_data_dir(dir, id);
+        }
+        self.purge_plugin_overrides(id);
+        prune_plugin_icon_cache(cache_dir, id);
         let _ = self.rescan();
         Ok(())
     }

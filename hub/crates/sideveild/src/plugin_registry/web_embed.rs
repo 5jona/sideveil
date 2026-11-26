@@ -168,6 +168,7 @@ pub(super) fn create_web_embed_plugin(
     })();
     if let Err(source) = write_res {
         let _ = fs::remove_file(&tmp_path);
+        let _ = fs::remove_dir(&plugin_dir);
         return Err(PluginRegistryError::Io {
             context: "failed to write manifest.json atomically".to_owned(),
             source,

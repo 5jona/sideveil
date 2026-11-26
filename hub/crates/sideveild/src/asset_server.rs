@@ -17,7 +17,7 @@ use self::http::{parse_http_headers, write_error, write_no_content};
 pub use self::path::{
     ResolveAssetError, is_spa_route_path, resolve_asset_file, resolve_asset_file_checked,
 };
-use crate::host_ws::constant_time_eq;
+use crate::host_ws::{constant_time_eq, is_loopback_host_header};
 use crate::state::HubState;
 
 const HEADER_TIMEOUT: Duration = Duration::from_secs(4);
@@ -41,6 +41,13 @@ pub async fn handle_http_asset(stream: TcpStream, state: Arc<HubState>) {
 
     if let Some(origin) = req.origin.as_deref()
         && !origin.is_empty()
+    {
+        let _ = write_error(&mut write_half, 403, "Forbidden").await;
+        return;
+    }
+
+    if let Some(host) = req.host.as_deref()
+        && !is_loopback_host_header(host)
     {
         let _ = write_error(&mut write_half, 403, "Forbidden").await;
         return;

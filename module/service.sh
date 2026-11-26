@@ -51,6 +51,14 @@ sync_host_apk_if_overridden() {
 ensure_host_runtime_permissions() {
     # Android 17+ (API 37) gates RFC1918/.local WebView connections behind ACCESS_LOCAL_NETWORK.
     pm grant "$HOST_PKG" android.permission.ACCESS_LOCAL_NETWORK >/dev/null 2>&1 || true
+    pm grant "$HOST_PKG" android.permission.POST_NOTIFICATIONS >/dev/null 2>&1 || true
+    # Keepalive AppOps + Doze + standby bucket exemptions against OEM background killers (e.g. ColorOS o-stop).
+    cmd appops set "$HOST_PKG" SYSTEM_ALERT_WINDOW allow >/dev/null 2>&1 || true
+    cmd appops set "$HOST_PKG" RUN_IN_BACKGROUND allow >/dev/null 2>&1 || true
+    cmd appops set "$HOST_PKG" RUN_ANY_IN_BACKGROUND allow >/dev/null 2>&1 || true
+    cmd appops set "$HOST_PKG" START_FOREGROUND allow >/dev/null 2>&1 || true
+    dumpsys deviceidle whitelist +"$HOST_PKG" >/dev/null 2>&1 || true
+    am set-standby-bucket "$HOST_PKG" active >/dev/null 2>&1 || true
 }
 
 terminate_pid_gracefully() {

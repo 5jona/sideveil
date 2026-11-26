@@ -89,6 +89,7 @@ class HostService : LifecycleService() {
         startId: Int,
     ): Int {
         super.onStartCommand(intent, flags, startId)
+        HostServiceSupport.promoteForeground(this)
         syncEndpointFromDisk()
         return START_STICKY
     }
@@ -115,6 +116,7 @@ class HostService : LifecycleService() {
         frameMetricsTracker.destroy()
         dynamicThemeExtractor.stop()
         daemonClient.close()
+        mainHandler.removeCallbacksAndMessages(null)
         iconLoader.clear()
         edgeIndicator.detach()
         pluginRail.detach()

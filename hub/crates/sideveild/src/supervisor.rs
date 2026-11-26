@@ -24,7 +24,7 @@ use std::time::Duration;
 
 use tokio::sync::{mpsc, watch};
 
-use self::host_wake::{force_stop_host, wake_host_service};
+use self::host_wake::{HostWakeOutcome, force_stop_host, wake_host_service};
 use self::plugin_daemons::run_plugin_daemon_supervisor;
 use self::sensor::run_sensor_supervisor;
 use crate::pidfd::PidFd;
@@ -73,6 +73,7 @@ async fn run_host_supervisor(
     let mut watched_pidfd: Option<PidFd> = None;
     let mut retry_delay_secs = 3u64;
     let mut retry_deadline: Option<tokio::time::Instant> = Some(tokio::time::Instant::now());
+    let mut logged_data_dir_not_ready = false;
 
     loop {
         tokio::select! {
@@ -84,21 +85,26 @@ async fn run_host_supervisor(
             Some(sig) = wake_rx.recv() => {
                 match sig {
                     HostWakeSignal::SyncAndWake => {
-                        wake_host_service(&cfg.host_package, &state).await;
-                        retry_deadline = Some(tokio::time::Instant::now() + Duration::from_secs(5));
+                        let outcome = wake_host_service(&cfg.host_package, &state, !logged_data_dir_not_ready).await;
+                        logged_data_dir_not_ready = outcome == HostWakeOutcome::DataDirNotReady;
+                        let next_secs = if outcome == HostWakeOutcome::DataDirNotReady { 2 } else { 5 };
+                        retry_deadline = Some(tokio::time::Instant::now() + Duration::from_secs(next_secs));
                     }
                     HostWakeSignal::ForceRestart => {
                         watched_pidfd = None;
                         state.request_sensor_permission_refresh();
                         force_stop_host(&cfg.host_package).await;
                         tokio::time::sleep(Duration::from_millis(500)).await;
-                        wake_host_service(&cfg.host_package, &state).await;
+                        let outcome = wake_host_service(&cfg.host_package, &state, true).await;
+                        logged_data_dir_not_ready = outcome == HostWakeOutcome::DataDirNotReady;
                         retry_delay_secs = 3;
-                        retry_deadline = Some(tokio::time::Instant::now() + Duration::from_secs(5));
+                        let next_secs = if outcome == HostWakeOutcome::DataDirNotReady { 2 } else { 5 };
+                        retry_deadline = Some(tokio::time::Instant::now() + Duration::from_secs(next_secs));
                     }
                     HostWakeSignal::WatchHostPid(pid) => {
                         retry_delay_secs = 3;
                         retry_deadline = None;
+                        logged_data_dir_not_ready = false;
                         watched_pidfd = PidFd::open(pid).ok();
                         if watched_pidfd.is_some() {
                             state.logs().info(format!("Armed pidfd watcher on SideVeilHost pid={pid}"));
@@ -111,10 +117,17 @@ async fn run_host_supervisor(
                     }
                 }
             }
-            Ok(()) = wait_optional_pidfd(watched_pidfd.as_ref()) => {
+            res = wait_optional_pidfd(watched_pidfd.as_ref()) => {
                 let dead_pid = watched_pidfd.as_ref().map(PidFd::pid).unwrap_or(0);
                 watched_pidfd = None;
-                state.logs().warn(format!("SideVeilHost pid={dead_pid} exited (pidfd wakeup); scheduling wake"));
+                match res {
+                    Ok(()) => {
+                        state.logs().warn(format!("SideVeilHost pid={dead_pid} exited (pidfd wakeup); scheduling wake"));
+                    }
+                    Err(err) => {
+                        state.logs().warn(format!("SideVeilHost pid={dead_pid} pidfd wait failed ({err}); scheduling wake"));
+                    }
+                }
                 state.request_sensor_permission_refresh();
                 retry_delay_secs = 2;
                 retry_deadline = Some(tokio::time::Instant::now() + Duration::from_secs(1));
@@ -127,10 +140,17 @@ async fn run_host_supervisor(
                 if state.is_host_connected() {
                     retry_deadline = None;
                     retry_delay_secs = 3;
+                    logged_data_dir_not_ready = false;
                 } else {
                     state.request_sensor_permission_refresh();
-                    wake_host_service(&cfg.host_package, &state).await;
-                    retry_delay_secs = (retry_delay_secs * 2).min(30);
+                    let outcome = wake_host_service(&cfg.host_package, &state, !logged_data_dir_not_ready).await;
+                    if outcome == HostWakeOutcome::DataDirNotReady {
+                        logged_data_dir_not_ready = true;
+                        retry_delay_secs = 3;
+                    } else {
+                        logged_data_dir_not_ready = false;
+                        retry_delay_secs = (retry_delay_secs * 2).min(30);
+                    }
                     retry_deadline = Some(tokio::time::Instant::now() + Duration::from_secs(retry_delay_secs));
                 }
             }

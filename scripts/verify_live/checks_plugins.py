@@ -41,6 +41,9 @@ def verify_plugins_e2e(dev: DeviceRunner) -> None:
         f"echo secret > {shlex.quote(stage_root + '/private.key')}\n"
     )
 
+    orig_edge: dict | None = None
+    body_succeeded = False
+
     try:
         # 1. Atomic staged install via `sideveil-ctl plugins install`
         dev.su_sh(setup_stage)
@@ -136,13 +139,6 @@ def verify_plugins_e2e(dev: DeviceRunner) -> None:
             "result"
         ]["edge"]
         assert patched_edge["topPercent"] == 44
-        dev.ctl_json(
-            [
-                "rpc",
-                "config.patchEdge",
-                json.dumps({"side": orig_edge["side"], "topPercent": orig_edge["topPercent"]}),
-            ],
-        )
 
         audit = dev.ctl_json(["plugins", "audit"])["result"]
         assert isinstance(audit.get("entries"), list) and len(audit["entries"]) > 0
@@ -155,14 +151,36 @@ def verify_plugins_e2e(dev: DeviceRunner) -> None:
         clear_snap = dev.ctl_json(["plugins", "scope", test_id, "--clear"])["result"]
         entry = next(p for p in clear_snap["plugins"] if p["id"] == test_id)
         assert entry["hasScopeOverride"] is False and entry["global"] is False
+        body_succeeded = True
     finally:
+        if orig_edge is not None:
+            dev.ctl_json(
+                [
+                    "rpc",
+                    "config.patchEdge",
+                    json.dumps(
+                        {"side": orig_edge["side"], "topPercent": orig_edge["topPercent"]}
+                    ),
+                ],
+                check=False,
+            )
         dev.su_sh(
             f"{CTL} plugins uninstall {shlex.quote(test_id)} >/dev/null 2>&1 || true; "
             f"rm -rf {shlex.quote(plugin_root)} {shlex.quote(stage_root)} "
             f"/data/system/sideveil/cache/icons/{test_id}_*; "
             f"{CTL} close >/dev/null 2>&1 || true",
+            check=False,
         )
         time.sleep(0.7)
-        final_snap = dev.ctl_json(["plugins", "list"])["result"]
-        assert all(p["id"] != test_id for p in final_snap["plugins"]), "Temp plugin still present!"
-        print("[OK] cleaned up temp plugin and closed panel")
+        if body_succeeded:
+            final_snap = dev.ctl_json(["plugins", "list"])["result"]
+            assert all(p["id"] != test_id for p in final_snap["plugins"]), (
+                "Temp plugin still present!"
+            )
+            overrides_raw = dev.su_sh(
+                "cat /data/system/sideveil/plugins.json 2>/dev/null || true", check=False
+            )
+            assert test_id not in overrides_raw, (
+                f"Temp plugin residue '{test_id}' still present in plugins.json!"
+            )
+            print("[OK] cleaned up temp plugin, overrides, and closed panel")

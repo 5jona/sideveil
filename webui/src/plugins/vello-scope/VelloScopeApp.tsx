@@ -7,7 +7,16 @@ import {
   usePresentationMode,
   useTelemetry,
 } from '@gojona/sideveil-sdk';
-import { AppShell, Badge, Button, Card, cn, MetricTile, ThemeProvider } from '@gojona/ui';
+import {
+  AppShell,
+  Badge,
+  Button,
+  Card,
+  cn,
+  ErrorBoundary,
+  MetricTile,
+  ThemeProvider,
+} from '@gojona/ui';
 import { Activity, Cpu, Thermometer, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSyncedPluginTheme } from '../../shared/useSyncedPluginTheme.ts';
@@ -227,7 +236,9 @@ export function VelloScopeApp() {
         defaultSurfaceMode="native-glass"
         syncEnabled={false}
       >
-        <VelloScopeWorkbench />
+        <ErrorBoundary title="矢量示波器渲染异常">
+          <VelloScopeWorkbench />
+        </ErrorBoundary>
       </ThemeProvider>
     </SideVeilPluginProvider>
   );

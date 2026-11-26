@@ -1,9 +1,12 @@
 //! Capability-gated per-plugin storage (`fs.read` / `fs.writeAtomic`) and `system.exec`.
 
 mod exec;
+#[cfg(test)]
+mod tests;
 
 use std::fs::{self, File};
-use std::io::Read;
+use std::io::{self, Read};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
 
 use serde_json::{Value, json};
@@ -18,6 +21,38 @@ use crate::plugin_registry::PluginRegistry;
 pub const MAX_PLUGIN_FILE_BYTES: usize = 1024 * 1024;
 /// Maximum total directory storage quota per plugin (16 MiB).
 pub const MAX_PLUGIN_QUOTA_BYTES: u64 = 16 * 1024 * 1024;
+
+/// Tightens `data_dir` and all direct non-symlink subdirectories to mode `0700`.
+///
+/// Legacy plugin data subdirectories created before `0700` hardening (e.g. `0755`)
+/// are tightened automatically during `sideveild` startup while symlinks and regular
+/// files are left untouched.
+pub fn harden_data_dir_permissions(data_dir: &Path) -> io::Result<()> {
+    fs::create_dir_all(data_dir)?;
+    let root_meta = fs::symlink_metadata(data_dir)?;
+    if root_meta.file_type().is_symlink() || !root_meta.file_type().is_dir() {
+        return Ok(());
+    }
+    if root_meta.permissions().mode() & 0o777 != 0o700 {
+        fs::set_permissions(data_dir, fs::Permissions::from_mode(0o700))?;
+    }
+    for entry in fs::read_dir(data_dir)? {
+        let Ok(entry) = entry else {
+            continue;
+        };
+        let path = entry.path();
+        let Ok(meta) = fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if meta.file_type().is_symlink() || !meta.file_type().is_dir() {
+            continue;
+        }
+        if meta.permissions().mode() & 0o777 != 0o700 {
+            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o700));
+        }
+    }
+    Ok(())
+}
 
 /// Handles `fs.read` scoped strictly to `<data_dir>/<plugin_id>/<relative_path>`.
 pub fn handle_fs_read(
@@ -227,6 +262,7 @@ fn ensure_clean_plugin_root(data_dir: &Path, plugin_id: &str) -> Result<PathBuf,
             format!("Failed creating plugin data dir: {e}"),
         )
     })?;
+    let _ = fs::set_permissions(&root, fs::Permissions::from_mode(0o700));
     let canonical_root = fs::canonicalize(&root).map_err(|e| {
         (
             error_codes::INTERNAL_ERROR,

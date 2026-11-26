@@ -17,6 +17,7 @@ pub(super) struct ParsedHttpRequest {
     pub(super) target: String,
     pub(super) authorization: Option<String>,
     pub(super) origin: Option<String>,
+    pub(super) host: Option<String>,
 }
 
 /// Reads a single `\n`-terminated HTTP line while enforcing `max_bytes` before allocating.
@@ -85,6 +86,8 @@ pub(super) async fn parse_http_headers<R: AsyncRead + Unpin>(
     let mut authorization = None;
     let mut origin: Option<String> = None;
     let mut origin_count = 0usize;
+    let mut host: Option<String> = None;
+    let mut host_count = 0usize;
     let mut saw_terminator = false;
     for _ in 0..=MAX_HEADER_LINES {
         let Some(line) = read_bounded_http_line(reader, MAX_HEADER_LINE_BYTES).await? else {
@@ -112,6 +115,9 @@ pub(super) async fn parse_http_headers<R: AsyncRead + Unpin>(
                 if origin.is_none() || !val.is_empty() {
                     origin = Some(val);
                 }
+            } else if lower == "host" {
+                host_count += 1;
+                host = Some(val);
             }
         }
     }
@@ -126,12 +132,16 @@ pub(super) async fn parse_http_headers<R: AsyncRead + Unpin>(
     if origin_count > 1 {
         origin = Some("duplicate-origin".to_owned());
     }
+    if host_count > 1 {
+        host = Some("duplicate-host".to_owned());
+    }
 
     Ok(ParsedHttpRequest {
         method,
         target,
         authorization,
         origin,
+        host,
     })
 }
 

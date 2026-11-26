@@ -76,7 +76,9 @@ export function CdpDebugCard({
     ? (cdpStatus?.cdpSocket ?? (hostPid !== null ? `webview_devtools_remote_${hostPid}` : null))
     : null;
   const cdpCommand =
-    hostPid !== null ? `strata-debug cdp serve --pid ${hostPid}` : (activeCdpSocket ?? '');
+    hostPid !== null
+      ? `strata-debug cdp forward --port 9222 --pid ${hostPid}`
+      : (activeCdpSocket ?? '');
 
   const handleCopyCommand = async () => {
     if (!cdpCommand) return;

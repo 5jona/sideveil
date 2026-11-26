@@ -30,6 +30,16 @@ impl PluginRegistry {
         })
     }
 
+    pub(super) fn has_persisted_override(&self, plugin_id: &str) -> bool {
+        let guard = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+        guard.overrides.overrides.contains_key(plugin_id)
+            || guard
+                .overrides
+                .mru_by_package
+                .values()
+                .any(|v| v == plugin_id)
+    }
+
     pub(super) fn purge_plugin_overrides(&self, plugin_id: &str) {
         let to_save = {
             let mut guard = self.inner.write().unwrap_or_else(PoisonError::into_inner);

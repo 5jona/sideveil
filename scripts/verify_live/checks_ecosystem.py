@@ -153,7 +153,8 @@ def verify_svp_and_grants(dev: DeviceRunner) -> dict:
     finally:
         dev.su_sh(
             f"{CTL} plugins uninstall {shlex.quote(test_id)} >/dev/null 2>&1 || true; "
-            f"rm -rf {shlex.quote(base_tmp)} {shlex.quote(data_dir)}"
+            f"rm -rf {shlex.quote(base_tmp)} {shlex.quote(data_dir)}",
+            check=False,
         )
 
 

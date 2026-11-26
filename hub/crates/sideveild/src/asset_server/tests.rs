@@ -47,7 +47,7 @@ fn expanded_mime_table_and_spa_route_detection() {
     assert!(!is_spa_route_path("web/missing.png"));
 }
 
-async fn send_asset_request(state: Arc<HubState>, target: &str) -> String {
+async fn send_asset_request_with_host(state: Arc<HubState>, target: &str, host: &str) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let addr = listener.local_addr().expect("local_addr");
     let token = state.ws_token().to_owned();
@@ -60,14 +60,17 @@ async fn send_asset_request(state: Arc<HubState>, target: &str) -> String {
     });
 
     let mut client = TcpStream::connect(addr).await.expect("connect");
-    let req = format!(
-        "GET {target} HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {token}\r\n\r\n"
-    );
+    let req =
+        format!("GET {target} HTTP/1.1\r\nHost: {host}\r\nAuthorization: Bearer {token}\r\n\r\n");
     client.write_all(req.as_bytes()).await.expect("write req");
     let mut resp = String::new();
     client.read_to_string(&mut resp).await.expect("read resp");
     let _ = server.await;
     resp
+}
+
+async fn send_asset_request(state: Arc<HubState>, target: &str) -> String {
+    send_asset_request_with_host(state, target, "127.0.0.1").await
 }
 
 #[tokio::test]
@@ -172,6 +175,15 @@ async fn serves_spa_fallback_and_immutable_asset_cache_headers() {
     let sibling_403 =
         send_asset_request(Arc::clone(&state), "/plugins/com.spa.demo/secret.txt").await;
     assert!(sibling_403.starts_with("HTTP/1.1 403 Forbidden\r\n"));
+
+    // 8. DNS-rebinding Host header is rejected with 403 Forbidden.
+    let rebind_403 = send_asset_request_with_host(
+        Arc::clone(&state),
+        "/plugins/com.spa.demo/web/index.html",
+        "rebind.attacker.example",
+    )
+    .await;
+    assert!(rebind_403.starts_with("HTTP/1.1 403 Forbidden\r\n"));
 
     let _ = fs::remove_dir_all(&dir);
 }

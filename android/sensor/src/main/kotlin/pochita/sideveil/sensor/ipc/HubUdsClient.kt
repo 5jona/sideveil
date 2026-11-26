@@ -191,6 +191,7 @@ class HubUdsClient(
             if (activeSocket === socket) {
                 activeSocket = null
                 activeWriter = null
+                writeExecutor.queue.clear()
             }
         }
         runCatching { socket.close() }
@@ -202,6 +203,7 @@ class HubUdsClient(
             val sock = activeSocket
             activeSocket = null
             activeWriter = null
+            writeExecutor.queue.clear()
             runCatching { sock?.close() }
         }
     }
