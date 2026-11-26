@@ -66,6 +66,16 @@ class EdgeGestureMonitor(
     private var inputReceiver: InputEventReceiver? = null
     private var pendingLongPress: Runnable? = null
 
+    /** Single mutable snapshot reused exclusively on the input looper thread. */
+    private val reusableEnv =
+        EdgeGestureEnv(
+            config = SideVeilConfig.DEFAULT,
+            geometry = DisplayGeometry(),
+            scopeActive = false,
+            panelState = PanelState.CLOSED,
+            fullscreenActive = false,
+        )
+
     private val stateMachine: EdgeGestureStateMachine =
         EdgeGestureStateMachine(
             callbacks =
@@ -189,31 +199,35 @@ class EdgeGestureMonitor(
 
     private fun handleMotionEvent(event: MotionEvent) {
         if ((event.source and InputDevice.SOURCE_TOUCHSCREEN) == 0) return
-        val env = currentEnv()
         when (event.actionMasked) {
+            MotionEvent.ACTION_MOVE -> {
+                if (!stateMachine.isTracking) return
+                dispatchMove(event, currentEnv())
+            }
+
             MotionEvent.ACTION_DOWN -> {
-                stateMachine.onDown(event.getPointerId(0), event.rawX, event.rawY, event.eventTime, env)
+                stateMachine.onDown(event.getPointerId(0), event.rawX, event.rawY, event.eventTime, currentEnv())
             }
 
             MotionEvent.ACTION_POINTER_DOWN -> {
+                if (!stateMachine.isTracking) return
                 stateMachine.onPointerDown()
             }
 
-            MotionEvent.ACTION_MOVE -> {
-                dispatchMove(event, env)
-            }
-
             MotionEvent.ACTION_POINTER_UP -> {
+                if (!stateMachine.isTracking) return
                 val idx = event.actionIndex
-                stateMachine.onPointerUp(event.getPointerId(idx), event.getRawX(idx), event.eventTime, env)
+                stateMachine.onPointerUp(event.getPointerId(idx), event.getRawX(idx), event.eventTime, currentEnv())
             }
 
             MotionEvent.ACTION_UP -> {
-                stateMachine.onUpOrCancel(event.rawX, event.eventTime, canceled = false, env = env)
+                if (!stateMachine.isTracking) return
+                stateMachine.onUpOrCancel(event.rawX, event.eventTime, canceled = false, env = currentEnv())
             }
 
             MotionEvent.ACTION_CANCEL -> {
-                stateMachine.onUpOrCancel(rawX = null, eventTimeMs = event.eventTime, canceled = true, env = env)
+                if (!stateMachine.isTracking) return
+                stateMachine.onUpOrCancel(rawX = null, eventTimeMs = event.eventTime, canceled = true, env = currentEnv())
             }
         }
     }
@@ -222,7 +236,6 @@ class EdgeGestureMonitor(
         event: MotionEvent,
         env: EdgeGestureEnv,
     ) {
-        if (!stateMachine.isTracking) return
         val activeId = stateMachine.currentPointerId
         val pointerIndex = event.findPointerIndex(activeId)
         if (pointerIndex < 0) {
@@ -239,7 +252,7 @@ class EdgeGestureMonitor(
         )
     }
 
-    private fun currentEnv(): EdgeGestureEnv = EdgeGestureEnv(config, geometry, scopeActive, panelState, fullscreenActive)
+    private fun currentEnv(): EdgeGestureEnv = reusableEnv.update(config, geometry, scopeActive, panelState, fullscreenActive)
 
     private fun scheduleLongPress(pointerId: Int) {
         cancelPendingLongPress()

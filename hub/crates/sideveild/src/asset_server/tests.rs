@@ -60,8 +60,9 @@ async fn send_asset_request_with_host(state: Arc<HubState>, target: &str, host: 
     });
 
     let mut client = TcpStream::connect(addr).await.expect("connect");
-    let req =
-        format!("GET {target} HTTP/1.1\r\nHost: {host}\r\nAuthorization: Bearer {token}\r\n\r\n");
+    let req = format!(
+        "GET {target} HTTP/1.1\r\nHost: {host}\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n\r\n"
+    );
     client.write_all(req.as_bytes()).await.expect("write req");
     let mut resp = String::new();
     client.read_to_string(&mut resp).await.expect("read resp");
@@ -184,6 +185,45 @@ async fn serves_spa_fallback_and_immutable_asset_cache_headers() {
     )
     .await;
     assert!(rebind_403.starts_with("HTTP/1.1 403 Forbidden\r\n"));
+
+    // 9. Keep-Alive reuses one TCP connection and If-None-Match returns 304 Not Modified.
+    let etag = asset_resp
+        .lines()
+        .find_map(|line| line.strip_prefix("ETag: "))
+        .expect("asset ETag header")
+        .trim()
+        .to_owned();
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("local_addr");
+    let st = Arc::clone(&state);
+    let server = tokio::spawn(async move {
+        if let Ok((stream, _)) = listener.accept().await {
+            handle_http_asset(stream, st).await;
+        }
+    });
+    let mut client = TcpStream::connect(addr).await.expect("connect");
+    let auth = state.ws_auth_header();
+    let pipelined = format!(
+        "GET /plugins/com.spa.demo/web/assets/app-1234.js HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: {auth}\r\nIf-None-Match: {etag}\r\n\r\n\
+         GET /plugins/com.spa.demo/web/index.html HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: {auth}\r\nConnection: close\r\n\r\n"
+    );
+    client
+        .write_all(pipelined.as_bytes())
+        .await
+        .expect("write keep-alive requests");
+    let mut combined = String::new();
+    client
+        .read_to_string(&mut combined)
+        .await
+        .expect("read keep-alive responses");
+    let _ = server.await;
+    assert!(
+        combined.starts_with("HTTP/1.1 304 Not Modified\r\n"),
+        "expected 304 Not Modified first, got: {combined}"
+    );
+    assert!(combined.contains("Connection: keep-alive\r\n"));
+    assert!(combined.contains("HTTP/1.1 200 OK\r\n"));
+    assert!(combined.ends_with("<html>spa-root</html>"));
 
     let _ = fs::remove_dir_all(&dir);
 }

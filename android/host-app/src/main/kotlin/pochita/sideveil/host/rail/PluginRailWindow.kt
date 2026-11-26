@@ -61,6 +61,7 @@ class PluginRailWindow(
     private var attached = false
     private var motionProgress = 0f
     private var matchedPlugins: List<PluginDescriptor> = emptyList()
+    private val slotHolders = mutableListOf<RailSlotHolder>()
     private var activePluginId: String = ""
     private var scrubbedPluginId: String? = null
     private var lastBuiltCompact: Boolean? = null
@@ -191,14 +192,14 @@ class PluginRailWindow(
         if (idx == null) {
             if (scrubbedPluginId != null) {
                 scrubbedPluginId = null
-                rebuildItems()
+                updateSlotHighlights()
             }
             return null
         }
         val candidate = matchedPlugins[idx].id
         if (candidate != scrubbedPluginId) {
             scrubbedPluginId = candidate
-            rebuildItems()
+            updateSlotHighlights()
             return candidate
         }
         return null
@@ -209,7 +210,7 @@ class PluginRailWindow(
         val target = scrubbedPluginId
         if (target != null) {
             scrubbedPluginId = null
-            rebuildItems()
+            updateSlotHighlights()
         }
         return target
     }
@@ -247,11 +248,26 @@ class PluginRailWindow(
         val metrics = surfaceController.currentHorizontalMetrics()
         lastBuiltCompact = metrics.compact
         itemColumn.removeAllViews()
+        slotHolders.clear()
         val highlightedId = scrubbedPluginId ?: activePluginId
         for (plugin in matchedPlugins) {
             val active = plugin.id == highlightedId
             val scrubbed = plugin.id == scrubbedPluginId
-            itemColumn.addView(slotFactory.createButton(plugin, active, scrubbed, surfaceController.isDark, metrics))
+            val holder = slotFactory.createSlot(plugin, active, scrubbed, surfaceController.isDark, metrics)
+            slotHolders.add(holder)
+            itemColumn.addView(holder.root)
+        }
+    }
+
+    private fun updateSlotHighlights() {
+        val compact = lastBuiltCompact ?: surfaceController.lastHorizontalMetrics.compact
+        val highlightedId = scrubbedPluginId ?: activePluginId
+        val dark = surfaceController.isDark
+        for (i in slotHolders.indices) {
+            val holder = slotHolders[i]
+            val active = holder.pluginId == highlightedId
+            val scrubbed = holder.pluginId == scrubbedPluginId
+            slotFactory.updateSlotVisualState(holder, active, scrubbed, dark, compact)
         }
     }
 

@@ -9,6 +9,7 @@ import pochita.sideveil.protocol.EdgeConfig
 import pochita.sideveil.protocol.EdgeSide
 import pochita.sideveil.protocol.PanelState
 import pochita.sideveil.protocol.SideVeilConfig
+import pochita.sideveil.sensor.system.ForegroundMonitor
 
 class EdgeGestureStateMachineTest {
     private val geometry = DisplayGeometry(widthPx = 1000, heightPx = 2000, density = 2.0f)
@@ -243,5 +244,33 @@ class EdgeGestureStateMachineTest {
         sm.onMove(0, 460f, 70f, 520L, 520L, openEnv)
         assertEquals(1, cb.statusBarPullDownCount)
         assertEquals(0, cb.pilferCount)
+    }
+
+    @Test
+    fun `stepVelocity mutates VelocityState in place with stale decay and reusable env`() {
+        val state = VelocityState().apply { reset(100L) }
+        EdgeGestureMath.stepVelocity(EdgeSide.RIGHT, rawX = 980f, lastX = 1000f, eventTimeMs = 110L, state = state)
+        assertEquals(1200f, state.velocityPxPerSec, 1e-3f)
+        assertEquals(110L, state.eventTimeMs)
+        assertEquals(110L, state.significantMoveTimeMs)
+
+        // Sub-pixel jitter must not refresh significantMoveTimeMs.
+        EdgeGestureMath.stepVelocity(EdgeSide.RIGHT, rawX = 979.8f, lastX = 980f, eventTimeMs = 120L, state = state)
+        assertEquals(110L, state.significantMoveTimeMs)
+
+        // Move after stale window resets base velocity before EMA blending.
+        EdgeGestureMath.stepVelocity(EdgeSide.RIGHT, rawX = 970f, lastX = 980f, eventTimeMs = 200L, state = state)
+        assertEquals(75f, state.velocityPxPerSec, 1e-2f)
+        assertEquals(200L, state.significantMoveTimeMs)
+
+        val sharedEnv = env()
+        val updated = sharedEnv.update(rightConfig, geometry, scopeActive = false, panelState = PanelState.OPEN, fullscreenActive = true)
+        assertTrue(sharedEnv === updated)
+        assertFalse(sharedEnv.scopeActive)
+        assertEquals(PanelState.OPEN, sharedEnv.panelState)
+        assertTrue(sharedEnv.fullscreenActive)
+
+        assertEquals(15_000L, ForegroundMonitor.resolvePollIntervalMs(taskListenerActive = true))
+        assertEquals(2_000L, ForegroundMonitor.resolvePollIntervalMs(taskListenerActive = false))
     }
 }

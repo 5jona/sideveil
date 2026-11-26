@@ -23,7 +23,15 @@ import { Cpu, Gauge, Thermometer, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSyncedPluginTheme } from '../../shared/useSyncedPluginTheme.ts';
 import { NATIVE_PERF_HUD_MANIFEST, NATIVE_PERF_HUD_PLUGIN_ID } from './manifest.ts';
-import { createMockPerfHudHandlers, type PerfHudBackendState } from './mockPerfHudBridge.ts';
+import type { createMockPerfHudHandlers, PerfHudBackendState } from './mockPerfHudBridge.ts';
+
+let mockPerfHudPromise: Promise<ReturnType<typeof createMockPerfHudHandlers>> | null = null;
+const loadMockPerfHudHandlers = () => {
+  mockPerfHudPromise ??= import('./mockPerfHudBridge.ts').then((m) =>
+    m.createMockPerfHudHandlers(),
+  );
+  return mockPerfHudPromise;
+};
 
 function NativePerfHudWorkbench() {
   const { isNativeHost, isDark } = useSyncedPluginTheme();
@@ -212,16 +220,22 @@ function NativePerfHudWorkbench() {
 }
 
 export function NativePerfHudApp() {
-  const bridgeOptions = useMemo<BridgeOptions>(() => {
-    const mocks = createMockPerfHudHandlers();
-    return {
+  const bridgeOptions = useMemo<BridgeOptions>(
+    () => ({
       allowUrlOverride: false,
       allowedOrigins: [`https://${NATIVE_PERF_HUD_PLUGIN_ID}.plugins.sideveil.local`],
       mockNamespace: 'sideveil-native-perf-hud',
-      onMockRpc: mocks.onMockRpc,
-      onMockPluginInvoke: mocks.onMockPluginInvoke,
-    };
-  }, []);
+      onMockRpc: async (method, params) => {
+        const mocks = await loadMockPerfHudHandlers();
+        return mocks.onMockRpc(method, params);
+      },
+      onMockPluginInvoke: async (method, params) => {
+        const mocks = await loadMockPerfHudHandlers();
+        return mocks.onMockPluginInvoke(method, params);
+      },
+    }),
+    [],
+  );
 
   return (
     <SideVeilPluginProvider

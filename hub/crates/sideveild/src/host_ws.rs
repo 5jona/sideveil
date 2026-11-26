@@ -91,14 +91,14 @@ async fn handle_connection(stream: TcpStream, state: Arc<HubState>) {
         return;
     }
 
-    let expected_auth = format!("Bearer {}", state.ws_token());
+    let expected_auth = state.ws_auth_header();
 
     let ws_stream = match tokio::time::timeout(
         WS_HANDSHAKE_TIMEOUT,
         accept_hdr_async(
             stream,
             #[allow(clippy::result_large_err)]
-            |req: &Request, resp: Response| match validate_ws_request(req, &expected_auth) {
+            |req: &Request, resp: Response| match validate_ws_request(req, expected_auth) {
                 Ok(()) => Ok(resp),
                 Err((status, body)) => Err(reject_response(status, body)),
             },

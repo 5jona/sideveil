@@ -1,6 +1,6 @@
 import { Button, SegmentedControl, type SegmentedControlOption, StatusBanner } from '@gojona/ui';
 import { Boxes, FolderUp, GlobeLock, Plus, RefreshCw, Sparkles } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { lazy, Suspense, useMemo, useState } from 'react';
 import type {
   PluginArchiveInspection,
   PluginRuntimeDescriptor,
@@ -22,8 +22,14 @@ import {
 import { CreateWebEmbedCard } from './CreateWebEmbedCard.tsx';
 import { PluginCard } from './PluginCard.tsx';
 import { PluginCategoryContent } from './PluginCategoryContent.tsx';
-import { PluginDetailSheet, type PluginDetailTab } from './PluginDetailSheet.tsx';
-import { PluginImportModal } from './PluginImportModal.tsx';
+import type { PluginDetailTab } from './PluginDetailSheet.tsx';
+
+const PluginDetailSheet = lazy(() =>
+  import('./PluginDetailSheet.tsx').then((m) => ({ default: m.PluginDetailSheet })),
+);
+const PluginImportModal = lazy(() =>
+  import('./PluginImportModal.tsx').then((m) => ({ default: m.PluginImportModal })),
+);
 
 export interface PluginsTabProps {
   snapshot: PluginsSnapshot | null;
@@ -238,37 +244,41 @@ export function PluginsTab({
       />
 
       {showImportModal ? (
-        <PluginImportModal
-          isBusy={busyAction === 'inspect-archive' || busyAction === 'install-plugin'}
-          onInspect={onInspectArchive}
-          onInstall={onInstallPlugin}
-          onClose={() => setShowImportModal(false)}
-        />
+        <Suspense fallback={null}>
+          <PluginImportModal
+            isBusy={busyAction === 'inspect-archive' || busyAction === 'install-plugin'}
+            onInspect={onInspectArchive}
+            onInstall={onInstallPlugin}
+            onClose={() => setShowImportModal(false)}
+          />
+        </Suspense>
       ) : null}
 
       {activeDetailPlugin ? (
-        <PluginDetailSheet
-          plugin={activeDetailPlugin}
-          initialTab={detailState?.initialTab}
-          isActive={activeDetailPlugin.id === activePluginId}
-          isMatched={matchedIds.includes(activeDetailPlugin.id)}
-          isBusy={busyAction === `plugin-${activeDetailPlugin.id}`}
-          foregroundPackage={fgPkg}
-          currentWifiSsid={currentWifiSsid}
-          networkLoading={networkLoading}
-          onDetectWifiSsid={onDetectWifiSsid}
-          onClose={() => setDetailState(null)}
-          onSetEnabled={onSetEnabled}
-          onSetPriority={onSetPriority}
-          onSetScopeOverride={onSetScopeOverride}
-          onSetDevUrl={onSetDevUrl}
-          onSetEmbedConfig={onSetEmbedConfig}
-          onGrantCapabilities={onGrantCapabilities}
-          onFetchDaemonLogs={onFetchDaemonLogs}
-          onReloadWebView={onReloadWebView}
-          onUninstallPlugin={onUninstallPlugin}
-          onSelectPlugin={onSelectPlugin}
-        />
+        <Suspense fallback={null}>
+          <PluginDetailSheet
+            plugin={activeDetailPlugin}
+            initialTab={detailState?.initialTab}
+            isActive={activeDetailPlugin.id === activePluginId}
+            isMatched={matchedIds.includes(activeDetailPlugin.id)}
+            isBusy={busyAction === `plugin-${activeDetailPlugin.id}`}
+            foregroundPackage={fgPkg}
+            currentWifiSsid={currentWifiSsid}
+            networkLoading={networkLoading}
+            onDetectWifiSsid={onDetectWifiSsid}
+            onClose={() => setDetailState(null)}
+            onSetEnabled={onSetEnabled}
+            onSetPriority={onSetPriority}
+            onSetScopeOverride={onSetScopeOverride}
+            onSetDevUrl={onSetDevUrl}
+            onSetEmbedConfig={onSetEmbedConfig}
+            onGrantCapabilities={onGrantCapabilities}
+            onFetchDaemonLogs={onFetchDaemonLogs}
+            onReloadWebView={onReloadWebView}
+            onUninstallPlugin={onUninstallPlugin}
+            onSelectPlugin={onSelectPlugin}
+          />
+        </Suspense>
       ) : null}
     </div>
   );

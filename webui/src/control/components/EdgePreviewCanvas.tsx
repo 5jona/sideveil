@@ -24,7 +24,17 @@ export function EdgePreviewCanvas({
 }: EdgePreviewCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const drawRef = useRef<() => void>(() => {});
   const { resolvedScheme } = useTheme();
+
+  const { hotzoneWidthDp, heightDp, topPercent, side, handleVisible, edgeOffsetDp, handleOpacity } =
+    config.edge;
+  const {
+    widthDp: panelWidthDp,
+    heightPercent: panelHeightPercent,
+    cornerRadiusDp,
+    nativeBlurEnabled,
+  } = config.panel;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -98,11 +108,11 @@ export function EdgePreviewCanvas({
       }
       ctx.globalAlpha = 1;
 
-      const hotzoneW = Math.max(8, config.edge.hotzoneWidthDp * scale * 1.45);
-      const hotzoneH = Math.min(frameH - 12, Math.max(24, config.edge.heightDp * scale));
+      const hotzoneW = Math.max(8, hotzoneWidthDp * scale * 1.45);
+      const hotzoneH = Math.min(frameH - 12, Math.max(24, heightDp * scale));
       const maxTop = Math.max(0, frameH - hotzoneH);
-      const hotzoneY = frameY + Math.min(maxTop, (config.edge.topPercent / 100) * frameH);
-      const isLeft = config.edge.side === 'left';
+      const hotzoneY = frameY + Math.min(maxTop, (topPercent / 100) * frameH);
+      const isLeft = side === 'left';
       const hotzoneX = isLeft ? frameX : frameX + frameW - hotzoneW;
 
       ctx.fillStyle = colorWithAlpha(accent, 0.22);
@@ -112,12 +122,12 @@ export function EdgePreviewCanvas({
       ctx.strokeRect(hotzoneX + 0.5, hotzoneY + 0.5, hotzoneW - 1, hotzoneH - 1);
       ctx.setLineDash([]);
 
-      if (config.edge.handleVisible) {
+      if (handleVisible) {
         const pillH = Math.max(20, hotzoneH * 0.64);
         const pillY = hotzoneY + (hotzoneH - pillH) / 2;
-        const offsetPx = Math.max(0, config.edge.edgeOffsetDp * scale);
+        const offsetPx = Math.max(0, edgeOffsetDp * scale);
         const pillX = isLeft ? frameX + offsetPx : frameX + frameW - offsetPx - 4;
-        ctx.globalAlpha = config.edge.handleOpacity;
+        ctx.globalAlpha = handleOpacity;
         ctx.beginPath();
         ctx.roundRect(pillX, pillY, 4, pillH, 2);
         ctx.fillStyle = accent;
@@ -127,16 +137,16 @@ export function EdgePreviewCanvas({
 
       if (previewOpen) {
         const maxPanelW = frameW * (isPortrait ? 0.7 : 0.48);
-        const panelW = Math.min(maxPanelW, Math.max(56, config.panel.widthDp * scale));
-        const panelH = Math.min(frameH - 16, (config.panel.heightPercent / 100) * frameH);
+        const panelW = Math.min(maxPanelW, Math.max(56, panelWidthDp * scale));
+        const panelH = Math.min(frameH - 16, (panelHeightPercent / 100) * frameH);
         const panelY = frameY + (frameH - panelH) / 2;
         const inset = Math.min(10, Math.max(6, Math.round(frameW * 0.03)));
         const panelX = isLeft ? frameX + inset : frameX + frameW - panelW - inset;
-        const corner = Math.max(6, Math.min(18, config.panel.cornerRadiusDp * scale));
+        const corner = Math.max(6, Math.min(18, cornerRadiusDp * scale));
 
         ctx.beginPath();
         ctx.roundRect(panelX, panelY, panelW, panelH, corner);
-        ctx.fillStyle = colorWithAlpha(accent, config.panel.nativeBlurEnabled ? 0.14 : 0.22);
+        ctx.fillStyle = colorWithAlpha(accent, nativeBlurEnabled ? 0.14 : 0.22);
         ctx.fill();
         ctx.lineWidth = 1.2;
         ctx.strokeStyle = colorWithAlpha(accent, 0.85);
@@ -148,34 +158,54 @@ export function EdgePreviewCanvas({
         const centerX = panelX + panelW / 2;
         const centerY = panelY + panelH / 2;
         if (panelW < 88) {
-          ctx.fillText(`${config.panel.widthDp}dp`, centerX, centerY - 3);
-          ctx.fillText(`${config.panel.heightPercent}%`, centerX, centerY + 10);
+          ctx.fillText(`${panelWidthDp}dp`, centerX, centerY - 3);
+          ctx.fillText(`${panelHeightPercent}%`, centerX, centerY + 10);
         } else {
-          ctx.fillText(
-            `${config.panel.widthDp}dp · ${config.panel.heightPercent}%`,
-            centerX,
-            centerY + 3,
-          );
+          ctx.fillText(`${panelWidthDp}dp · ${panelHeightPercent}%`, centerX, centerY + 3);
         }
       }
 
       ctx.restore();
     };
 
+    drawRef.current = draw;
     draw();
-    const observer = new MutationObserver(draw);
+  }, [
+    cornerRadiusDp,
+    density,
+    edgeOffsetDp,
+    handleOpacity,
+    handleVisible,
+    heightDp,
+    hotzoneWidthDp,
+    nativeBlurEnabled,
+    panelHeightPercent,
+    panelWidthDp,
+    previewOpen,
+    resolvedScheme,
+    screenHeightPx,
+    screenWidthPx,
+    side,
+    topPercent,
+  ]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const redraw = () => drawRef.current();
+    const observer = new MutationObserver(redraw);
     observer.observe(document.documentElement, {
       attributes: true,
       attributeFilter: ['data-theme', 'data-surface', 'class'],
     });
-    const resizeObserver = new ResizeObserver(draw);
+    const resizeObserver = new ResizeObserver(redraw);
     resizeObserver.observe(container);
 
     return () => {
       observer.disconnect();
       resizeObserver.disconnect();
     };
-  }, [config, density, previewOpen, resolvedScheme, screenHeightPx, screenWidthPx]);
+  }, []);
 
   const hasDims =
     typeof screenWidthPx === 'number' &&

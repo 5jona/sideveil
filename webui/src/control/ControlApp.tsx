@@ -1,12 +1,12 @@
-import { type BridgeOptions, BridgeProvider } from '@gojona/bridge';
+import { type BridgeOptions, BridgeProvider, type MockExecHandler } from '@gojona/bridge';
 import {
   AppShell,
   Badge,
+  BottomNav,
   Button,
   ErrorBoundary,
   Tabs,
   TabsContent,
-  TabsList,
   TabsTrigger,
   ThemeProvider,
   ToastProvider,
@@ -15,26 +15,51 @@ import {
 import {
   AlertCircle,
   AlertTriangle,
+  Boxes,
+  Palette,
   PanelRightClose,
   PanelRightOpen,
   SlidersHorizontal,
+  Terminal,
 } from 'lucide-react';
-import { useMemo } from 'react';
-import { CONFIG_PATH } from '../shared/types.ts';
-import { AppearanceScopeTab } from './components/AppearanceScopeTab.tsx';
-import { DiagnosticsTab } from './components/DiagnosticsTab.tsx';
+import { lazy, Suspense, useCallback, useMemo, useState } from 'react';
 import { OverviewEdgeTab } from './components/OverviewEdgeTab.tsx';
-import { PluginsTab } from './components/PluginsTab.tsx';
 import { useDebugControl } from './hooks/useDebugControl.ts';
 import { useNetworkContextControl } from './hooks/useNetworkContextControl.ts';
 import { useSideVeilControl } from './hooks/useSideVeilControl.ts';
-import { handleMockControlExec } from './mockControlBridge.ts';
+
+const AppearanceScopeTab = lazy(() =>
+  import('./components/AppearanceScopeTab.tsx').then((m) => ({ default: m.AppearanceScopeTab })),
+);
+const PluginsTab = lazy(() =>
+  import('./components/PluginsTab.tsx').then((m) => ({ default: m.PluginsTab })),
+);
+const DiagnosticsTab = lazy(() =>
+  import('./components/DiagnosticsTab.tsx').then((m) => ({ default: m.DiagnosticsTab })),
+);
+
+const handleLazyMockControlExec: MockExecHandler = async (cmd) => {
+  const { handleMockControlExec } = await import('./mockControlBridge.ts');
+  return handleMockControlExec(cmd);
+};
 
 const CONTROL_TAB_ORDER = ['overview', 'appearance', 'plugins', 'diagnostics'] as const;
+type ControlTab = (typeof CONTROL_TAB_ORDER)[number];
+
+function TabLoadingFallback() {
+  return (
+    <div className="flex flex-1 items-center justify-center py-12 text-xs text-[var(--text-secondary)]">
+      正在加载模块...
+    </div>
+  );
+}
 
 function ControlWorkbench() {
   const { pushToast } = useToast();
-  const control = useSideVeilControl();
+  const [activeTab, setActiveTab] = useState<ControlTab>('overview');
+  const [visitedTabs, setVisitedTabs] = useState<Set<ControlTab>>(() => new Set(['overview']));
+
+  const control = useSideVeilControl({ logsEnabled: visitedTabs.has('diagnostics') });
   const { bridge, config, status, busyAction, saving, configLoadError, daemonOfflineError } =
     control;
 
@@ -54,6 +79,23 @@ function ControlWorkbench() {
     onRefreshLogs: control.refreshLogs,
   });
 
+  const handleTabChange = useCallback(
+    (nextValue: string) => {
+      const nextTab = nextValue as ControlTab;
+      setActiveTab(nextTab);
+      if (!visitedTabs.has(nextTab)) {
+        setVisitedTabs((prev) => new Set(prev).add(nextTab));
+        if (nextTab === 'diagnostics') {
+          void control.refreshLogs();
+        }
+      }
+      if (nextTab === 'plugins' && !networkLoading) {
+        void refreshNetworkContext();
+      }
+    },
+    [control, networkLoading, refreshNetworkContext, visitedTabs],
+  );
+
   const isPanelOpen = status?.panelState === 'open';
   const envLabel =
     bridge.env === 'ksu'
@@ -63,109 +105,113 @@ function ControlWorkbench() {
         : 'Browser 预览';
 
   return (
-    <AppShell
-      variant="page"
-      maxWidthClassName="max-w-none"
-      title="SideVeil 控制台"
-      subtitle="全局边缘手势与悬浮窗宿主"
-      headerLeading={
-        <div className="flex size-9 items-center justify-center rounded-[var(--radius-control)] bg-[var(--accent-soft)] text-[var(--accent)]">
-          <SlidersHorizontal className="size-4" />
-        </div>
-      }
-      headerTrailing={
-        <>
-          <Badge
-            variant={status?.hostConnected ? 'success' : daemonOfflineError ? 'danger' : 'warning'}
-            dot
-            pulse={status?.hostConnected}
-          >
-            {status?.hostConnected
-              ? 'Host 已连接'
-              : daemonOfflineError
-                ? 'Daemon 离线'
-                : '等待 Host'}
-          </Badge>
-          <Badge variant="neutral">{saving ? '正在写入...' : envLabel}</Badge>
-          <Button
-            size="sm"
-            variant={isPanelOpen ? 'secondary' : 'primary'}
-            disabled={busyAction !== null}
-            onClick={() =>
-              control.runCtl(
-                isPanelOpen ? 'close' : 'open',
-                isPanelOpen ? '收起侧边栏' : '弹出侧边栏',
-              )
-            }
-          >
-            {isPanelOpen ? (
-              <>
-                <PanelRightClose className="size-3.5" />
-                收起侧边栏
-              </>
-            ) : (
-              <>
-                <PanelRightOpen className="size-3.5" />
-                弹出侧边栏
-              </>
-            )}
-          </Button>
-        </>
-      }
-      bodyClassName="flex max-w-none flex-col px-0"
-      footer={
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <span>配置：{CONFIG_PATH}</span>
-          <span>当前前台：{status?.foregroundPackage || '未知'}</span>
-        </div>
-      }
+    <Tabs
+      value={activeTab}
+      onValueChange={handleTabChange}
+      tabOrder={CONTROL_TAB_ORDER}
+      className="h-dvh min-h-0"
     >
-      {configLoadError ? (
-        <div className="mb-3 w-full px-3 sm:px-5">
-          <div className="flex items-center justify-between gap-3 rounded-[var(--radius-control)] border border-[color-mix(in_oklab,var(--warning)_35%,transparent)] bg-[color-mix(in_oklab,var(--warning)_12%,transparent)] p-3 text-xs text-[var(--text-primary)]">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="size-4 shrink-0 text-[var(--warning)]" />
-              <span>{configLoadError}</span>
-            </div>
-            <Button size="sm" variant="secondary" onClick={() => void control.loadConfigFromDisk()}>
-              重试加载
-            </Button>
+      <AppShell
+        variant="page"
+        viewportMode="fill"
+        fullBleed
+        headerMode="compact"
+        title="SideVeil 控制台"
+        headerLeading={
+          <div className="flex size-8 items-center justify-center rounded-[var(--radius-control)] bg-[var(--accent-soft)] text-[var(--accent)]">
+            <SlidersHorizontal className="size-4" />
           </div>
-        </div>
-      ) : null}
-
-      {daemonOfflineError ? (
-        <div className="mb-3 w-full px-3 sm:px-5">
-          <div className="flex items-center justify-between gap-3 rounded-[var(--radius-control)] border border-[color-mix(in_oklab,var(--danger)_35%,transparent)] bg-[color-mix(in_oklab,var(--danger)_12%,transparent)] p-3 text-xs text-[var(--text-primary)]">
-            <div className="flex items-center gap-2">
-              <AlertCircle className="size-4 shrink-0 text-[var(--danger)]" />
-              <span>SideVeil 守护进程未运行：{daemonOfflineError}</span>
-            </div>
-            <Button size="sm" variant="secondary" onClick={() => void control.refreshStatus()}>
-              重试连接
+        }
+        headerTrailing={
+          <>
+            <Badge
+              variant={
+                status?.hostConnected ? 'success' : daemonOfflineError ? 'danger' : 'warning'
+              }
+              dot
+              pulse={status?.hostConnected}
+            >
+              {status?.hostConnected
+                ? 'Host 已连接'
+                : daemonOfflineError
+                  ? 'Daemon 离线'
+                  : '等待 Host'}
+            </Badge>
+            <Badge variant="neutral">{saving ? '正在写入...' : envLabel}</Badge>
+            <Button
+              size="sm"
+              variant={isPanelOpen ? 'secondary' : 'primary'}
+              disabled={busyAction !== null}
+              onClick={() =>
+                control.runCtl(
+                  isPanelOpen ? 'close' : 'open',
+                  isPanelOpen ? '收起侧边栏' : '弹出侧边栏',
+                )
+              }
+            >
+              {isPanelOpen ? (
+                <>
+                  <PanelRightClose className="size-3.5" />
+                  收起侧边栏
+                </>
+              ) : (
+                <>
+                  <PanelRightOpen className="size-3.5" />
+                  弹出侧边栏
+                </>
+              )}
             </Button>
-          </div>
-        </div>
-      ) : null}
-
-      <Tabs
-        defaultValue="overview"
-        tabOrder={CONTROL_TAB_ORDER}
-        onValueChange={(nextTab) => {
-          if (nextTab === 'plugins' && !networkLoading) {
-            void refreshNetworkContext();
-          }
-        }}
-        className="flex w-full flex-1 flex-col"
+          </>
+        }
+        bodyClassName="flex max-w-none flex-col px-0"
+        bottomSlot={
+          <BottomNav aria-label="主导航">
+            <TabsTrigger value="overview" icon={<SlidersHorizontal className="size-4" />}>
+              概览与手势
+            </TabsTrigger>
+            <TabsTrigger value="appearance" icon={<Palette className="size-4" />}>
+              外观与范围
+            </TabsTrigger>
+            <TabsTrigger value="plugins" icon={<Boxes className="size-4" />}>
+              插件管理
+            </TabsTrigger>
+            <TabsTrigger value="diagnostics" icon={<Terminal className="size-4" />}>
+              诊断与日志
+            </TabsTrigger>
+          </BottomNav>
+        }
       >
-        <div className="w-full shrink-0 px-3 sm:px-5">
-          <TabsList className="shrink-0">
-            <TabsTrigger value="overview">概览与手势</TabsTrigger>
-            <TabsTrigger value="appearance">外观与范围</TabsTrigger>
-            <TabsTrigger value="plugins">插件管理</TabsTrigger>
-            <TabsTrigger value="diagnostics">诊断与日志</TabsTrigger>
-          </TabsList>
-        </div>
+        {configLoadError ? (
+          <div className="mb-3 w-full px-3 sm:px-5">
+            <div className="flex items-center justify-between gap-3 rounded-[var(--radius-control)] border border-[color-mix(in_oklab,var(--warning)_35%,transparent)] bg-[color-mix(in_oklab,var(--warning)_12%,transparent)] p-3 text-xs text-[var(--text-primary)]">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="size-4 shrink-0 text-[var(--warning)]" />
+                <span>{configLoadError}</span>
+              </div>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => void control.loadConfigFromDisk()}
+              >
+                重试加载
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
+        {daemonOfflineError ? (
+          <div className="mb-3 w-full px-3 sm:px-5">
+            <div className="flex items-center justify-between gap-3 rounded-[var(--radius-control)] border border-[color-mix(in_oklab,var(--danger)_35%,transparent)] bg-[color-mix(in_oklab,var(--danger)_12%,transparent)] p-3 text-xs text-[var(--text-primary)]">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="size-4 shrink-0 text-[var(--danger)]" />
+                <span>SideVeil 守护进程未运行：{daemonOfflineError}</span>
+              </div>
+              <Button size="sm" variant="secondary" onClick={() => void control.refreshStatus()}>
+                重试连接
+              </Button>
+            </div>
+          </div>
+        ) : null}
 
         <TabsContent value="overview" className="flex flex-1 flex-col">
           <div className="w-full flex-1 px-3 sm:px-5">
@@ -175,77 +221,89 @@ function ControlWorkbench() {
 
         <TabsContent value="appearance" className="flex flex-1 flex-col">
           <div className="w-full flex-1 px-3 sm:px-5">
-            <AppearanceScopeTab
-              config={config}
-              foregroundPackage={status?.foregroundPackage ?? ''}
-              crossWindowBlurSupported={status?.crossWindowBlurSupported ?? null}
-              onChange={control.updateConfig}
-            />
+            {visitedTabs.has('appearance') ? (
+              <Suspense fallback={<TabLoadingFallback />}>
+                <AppearanceScopeTab
+                  config={config}
+                  foregroundPackage={status?.foregroundPackage ?? ''}
+                  crossWindowBlurSupported={status?.crossWindowBlurSupported ?? null}
+                  onChange={control.updateConfig}
+                />
+              </Suspense>
+            ) : null}
           </div>
         </TabsContent>
 
         <TabsContent value="plugins" className="flex flex-1 flex-col">
           <div className="flex w-full flex-1 flex-col px-3 sm:px-5">
-            <PluginsTab
-              snapshot={control.pluginsSnapshot}
-              loadError={control.pluginsLoadError}
-              busyAction={busyAction}
-              foregroundPackage={status?.foregroundPackage ?? ''}
-              currentWifiSsid={currentWifiSsid}
-              networkLoaded={networkContext !== null}
-              networkLoading={networkLoading}
-              onDetectWifiSsid={detectWifiSsid}
-              onReload={control.reloadPlugins}
-              onSetEnabled={control.setPluginEnabled}
-              onSetPriority={control.setPluginPriority}
-              onSetScopeOverride={control.setPluginScopeOverride}
-              onSetDevUrl={control.setPluginDevUrl}
-              onGrantCapabilities={control.grantPluginCapabilities}
-              onInspectArchive={control.inspectPluginArchive}
-              onInstallPlugin={control.installPlugin}
-              onFetchDaemonLogs={control.fetchPluginDaemonLogs}
-              onReloadWebView={control.reloadPluginWebView}
-              onCreateWebEmbed={control.createWebEmbed}
-              onSetEmbedConfig={control.setEmbedConfig}
-              onUninstallPlugin={control.uninstallPlugin}
-              onSelectPlugin={control.selectPlugin}
-            />
+            {visitedTabs.has('plugins') ? (
+              <Suspense fallback={<TabLoadingFallback />}>
+                <PluginsTab
+                  snapshot={control.pluginsSnapshot}
+                  loadError={control.pluginsLoadError}
+                  busyAction={busyAction}
+                  foregroundPackage={status?.foregroundPackage ?? ''}
+                  currentWifiSsid={currentWifiSsid}
+                  networkLoaded={networkContext !== null}
+                  networkLoading={networkLoading}
+                  onDetectWifiSsid={detectWifiSsid}
+                  onReload={control.reloadPlugins}
+                  onSetEnabled={control.setPluginEnabled}
+                  onSetPriority={control.setPluginPriority}
+                  onSetScopeOverride={control.setPluginScopeOverride}
+                  onSetDevUrl={control.setPluginDevUrl}
+                  onGrantCapabilities={control.grantPluginCapabilities}
+                  onInspectArchive={control.inspectPluginArchive}
+                  onInstallPlugin={control.installPlugin}
+                  onFetchDaemonLogs={control.fetchPluginDaemonLogs}
+                  onReloadWebView={control.reloadPluginWebView}
+                  onCreateWebEmbed={control.createWebEmbed}
+                  onSetEmbedConfig={control.setEmbedConfig}
+                  onUninstallPlugin={control.uninstallPlugin}
+                  onSelectPlugin={control.selectPlugin}
+                />
+              </Suspense>
+            ) : null}
           </div>
         </TabsContent>
 
         <TabsContent value="diagnostics" className="flex flex-1 flex-col">
           <div className="w-full flex-1 px-3 sm:px-5">
-            <DiagnosticsTab
-              bridge={bridge}
-              config={config}
-              status={status}
-              logs={control.logs}
-              auditReport={control.auditReport}
-              busyAction={busyAction}
-              lastPingMs={control.lastPingMs}
-              cdpStatus={debug.cdpStatus}
-              uiSnapshot={debug.uiSnapshot}
-              inspectCapturedAt={debug.inspectCapturedAt}
-              debugBusy={debug.debugBusy}
-              debugError={debug.debugError}
-              networkContext={networkContext}
-              networkLoading={networkLoading}
-              networkError={networkError}
-              onPing={() => void control.runCtl('ping', 'Daemon Ping')}
-              onReloadConfig={() => void control.runCtl('reload', '重载配置')}
-              onRestartHost={() => void control.runCtl('restart-host', '重启 Host 服务')}
-              onRefreshLogs={() => void control.refreshLogs()}
-              onClearLogs={() => void control.clearLogs()}
-              onRefreshAudit={control.refreshPluginAudit}
-              onSetWebViewDebugging={(enabled) => void debug.setWebViewDebugging(enabled)}
-              onInspectUi={() => void debug.inspectUi()}
-              onResetFrameMetrics={() => void debug.resetFrameMetrics()}
-              onRefreshNetwork={() => void refreshNetworkContext()}
-            />
+            {visitedTabs.has('diagnostics') ? (
+              <Suspense fallback={<TabLoadingFallback />}>
+                <DiagnosticsTab
+                  bridge={bridge}
+                  config={config}
+                  status={status}
+                  logs={control.logs}
+                  auditReport={control.auditReport}
+                  busyAction={busyAction}
+                  lastPingMs={control.lastPingMs}
+                  cdpStatus={debug.cdpStatus}
+                  uiSnapshot={debug.uiSnapshot}
+                  inspectCapturedAt={debug.inspectCapturedAt}
+                  debugBusy={debug.debugBusy}
+                  debugError={debug.debugError}
+                  networkContext={networkContext}
+                  networkLoading={networkLoading}
+                  networkError={networkError}
+                  onPing={() => void control.runCtl('ping', 'Daemon Ping')}
+                  onReloadConfig={() => void control.runCtl('reload', '重载配置')}
+                  onRestartHost={() => void control.runCtl('restart-host', '重启 Host 服务')}
+                  onRefreshLogs={() => void control.refreshLogs()}
+                  onClearLogs={() => void control.clearLogs()}
+                  onRefreshAudit={control.refreshPluginAudit}
+                  onSetWebViewDebugging={(enabled) => void debug.setWebViewDebugging(enabled)}
+                  onInspectUi={() => void debug.inspectUi()}
+                  onResetFrameMetrics={() => void debug.resetFrameMetrics()}
+                  onRefreshNetwork={() => void refreshNetworkContext()}
+                />
+              </Suspense>
+            ) : null}
           </div>
         </TabsContent>
-      </Tabs>
-    </AppShell>
+      </AppShell>
+    </Tabs>
   );
 }
 
@@ -254,7 +312,7 @@ export function ControlApp() {
     () => ({
       allowUrlOverride: false,
       mockNamespace: 'sideveil-control',
-      onMockExec: handleMockControlExec,
+      onMockExec: handleLazyMockControlExec,
     }),
     [],
   );

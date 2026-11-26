@@ -97,11 +97,11 @@ async fn dispatch_inner(
         }
         methods::CONFIG_PATCH_APPEARANCE => {
             require_role(is_diag_or_ctl, &req.method, "host diagnostic/control plane")?;
-            control::handle_patch_appearance(state, req.params)
+            control::handle_patch_appearance(state, req.params).await
         }
         methods::CONFIG_PATCH_EDGE => {
             require_role(is_ctl, &req.method, "root control plane")?;
-            control::handle_patch_edge(state, req.params)
+            control::handle_patch_edge(state, req.params).await
         }
         methods::PANEL_OPEN => {
             require_role(is_ctl, &req.method, "root control plane")?;
@@ -220,7 +220,7 @@ async fn dispatch_inner(
         }
         methods::DEBUG_SET_WEBVIEW_DEBUGGING => {
             require_role(is_ctl, &req.method, "root control plane")?;
-            debug::handle_set_webview_debugging(state, req.params)
+            debug::handle_set_webview_debugging(state, req.params).await
         }
         methods::DEBUG_RESET_FRAME_METRICS => {
             require_role(is_diag_or_ctl, &req.method, "host diagnostic/control plane")?;

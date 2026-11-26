@@ -56,7 +56,7 @@ class ForegroundMonitor(
             override fun run() {
                 if (!running) return
                 refreshNow()
-                handler.postDelayed(this, POLL_INTERVAL_MS)
+                handler.postDelayed(this, resolvePollIntervalMs(taskListenerActive))
             }
         }
 
@@ -65,7 +65,7 @@ class ForegroundMonitor(
         running = true
         registerTaskListener()
         refreshNow()
-        handler.postDelayed(periodicPoll, POLL_INTERVAL_MS)
+        handler.postDelayed(periodicPoll, resolvePollIntervalMs(taskListenerActive))
     }
 
     /** Stops task stack listening and cancels pending callbacks. */
@@ -227,8 +227,12 @@ class ForegroundMonitor(
 
     companion object {
         private const val DEBOUNCE_MS = 50L
-        private const val POLL_INTERVAL_MS = 2_000L
+        internal const val LISTENER_ACTIVE_POLL_INTERVAL_MS = 15_000L
+        internal const val FALLBACK_POLL_INTERVAL_MS = 2_000L
         private val PACKAGE_NAME_REGEX = Regex("^[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z0-9_]+)+$")
+
+        internal fun resolvePollIntervalMs(taskListenerActive: Boolean): Long =
+            if (taskListenerActive) LISTENER_ACTIVE_POLL_INTERVAL_MS else FALLBACK_POLL_INTERVAL_MS
 
         internal fun extractValidComponent(
             rawFocus: String?,

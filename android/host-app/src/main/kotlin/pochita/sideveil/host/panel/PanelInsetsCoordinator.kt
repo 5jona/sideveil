@@ -64,6 +64,20 @@ object PanelInsetsCoordinator {
     private const val WIDE_MAX_WIDTH_DP = 680
     private const val PEEK_HEIGHT_FRACTION = 0.44f
 
+    @Volatile
+    private var cachedDefaultBounds: PanelSafeBounds? = null
+
+    /** Invalidates the cached default [PanelSafeBounds] snapshot on display or configuration changes. */
+    fun invalidateCachedBounds() {
+        cachedDefaultBounds = null
+    }
+
+    /** Returns cached default display bounds and safe areas, querying [WindowManager] only when invalidated. */
+    fun resolveCachedBounds(
+        context: Context,
+        windowManager: WindowManager,
+    ): PanelSafeBounds = cachedDefaultBounds ?: resolveBounds(context, windowManager).also { cachedDefaultBounds = it }
+
     /** Resolves responsive rail and horizontal margin metrics for [screenWidthPx] and [density]. */
     fun resolveHorizontalMetrics(
         screenWidthPx: Int,

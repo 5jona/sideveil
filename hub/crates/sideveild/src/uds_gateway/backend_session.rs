@@ -12,7 +12,7 @@ use sideveil_protocol::rpc::{RpcResponse, events, methods};
 use sideveil_protocol::sensor::NetworkTransportKind;
 use tokio::io::{AsyncRead, BufReader};
 
-use super::{DEFAULT_MAX_LINE_BYTES, read_bounded_line, write_json_line};
+use super::{DEFAULT_MAX_LINE_BYTES, LineFrameBuf, read_bounded_line, write_json_line_with_buf};
 use crate::peercred::PeerCred;
 use crate::rate_limiter::RateLimitBucket;
 use crate::state::HubState;
@@ -68,7 +68,7 @@ impl PluginEventRateLimiter {
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn handle_plugin_backend_session<R: AsyncRead + Unpin>(
     mut reader: BufReader<R>,
-    mut line_buf: Vec<u8>,
+    mut line_buf: LineFrameBuf,
     mut write_half: tokio::net::unix::OwnedWriteHalf,
     cred: PeerCred,
     plugin_id: String,
@@ -113,8 +113,12 @@ pub(super) async fn handle_plugin_backend_session<R: AsyncRead + Unpin>(
     }
 
     let writer_task = tokio::spawn(async move {
+        let mut write_buf = Vec::with_capacity(512);
         while let Some(frame) = out_rx.recv().await {
-            if write_json_line(&mut write_half, &frame).await.is_err() {
+            if write_json_line_with_buf(&mut write_half, &frame, &mut write_buf)
+                .await
+                .is_err()
+            {
                 break;
             }
         }

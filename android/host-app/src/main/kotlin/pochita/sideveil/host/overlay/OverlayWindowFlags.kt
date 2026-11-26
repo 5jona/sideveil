@@ -2,9 +2,11 @@ package pochita.sideveil.host.overlay
 
 import android.content.Context
 import android.hardware.display.DisplayManager
+import android.os.Handler
 import android.view.Display
 import android.view.View
 import android.view.WindowManager
+import pochita.sideveil.host.panel.PanelInsetsCoordinator
 
 /**
  * Shared overlay window utilities: hidden `WindowManager.LayoutParams` private flags,
@@ -58,24 +60,86 @@ object OverlayWindowFlags {
         }
     }
 
+    @Volatile
+    private var cachedDisplayId: Int = Display.INVALID_DISPLAY
+
+    @Volatile
+    private var cachedMaxMode: Display.Mode? = null
+
+    private var registeredDisplayListener: DisplayManager.DisplayListener? = null
+
+    /** Registers a DisplayListener that invalidates cached refresh modes and safe bounds on display changes. */
+    fun registerDisplayCacheInvalidator(
+        context: Context,
+        handler: Handler,
+    ) {
+        if (registeredDisplayListener != null) return
+        val dm = context.getSystemService(DisplayManager::class.java) ?: return
+        val listener =
+            object : DisplayManager.DisplayListener {
+                override fun onDisplayAdded(displayId: Int) = invalidateDisplayCaches()
+
+                override fun onDisplayRemoved(displayId: Int) = invalidateDisplayCaches()
+
+                override fun onDisplayChanged(displayId: Int) = invalidateDisplayCaches()
+            }
+        runCatching {
+            dm.registerDisplayListener(listener, handler)
+            registeredDisplayListener = listener
+        }
+    }
+
+    /** Unregisters the DisplayListener registered by [registerDisplayCacheInvalidator]. */
+    fun unregisterDisplayCacheInvalidator(context: Context) {
+        val listener = registeredDisplayListener ?: return
+        registeredDisplayListener = null
+        runCatching {
+            context.getSystemService(DisplayManager::class.java)?.unregisterDisplayListener(listener)
+        }
+        invalidateDisplayCaches()
+    }
+
+    /** Clears cached max refresh mode and default window bounds (call on Display or Configuration changes). */
+    fun invalidateDisplayCaches() {
+        cachedDisplayId = Display.INVALID_DISPLAY
+        cachedMaxMode = null
+        PanelInsetsCoordinator.invalidateCachedBounds()
+    }
+
     /**
      * Resolves the highest supported [Display.Mode] matching the active physical display
-     * resolution without imposing any hardcoded refresh-rate ceiling.
+     * resolution without imposing any hardcoded refresh-rate ceiling. Cached until display
+     * or configuration changes invalidate it.
      */
     fun resolveMaxRefreshMode(
         context: Context,
         preferredDisplay: Display? = null,
     ): Display.Mode? {
+        val requestedId = preferredDisplay?.displayId ?: Display.DEFAULT_DISPLAY
+        val cached = cachedMaxMode
+        if (cached != null && cachedDisplayId == requestedId) {
+            return cached
+        }
         val display =
             preferredDisplay
                 ?: runCatching { context.display }.getOrNull()
                 ?: context.getSystemService(DisplayManager::class.java)?.getDisplay(Display.DEFAULT_DISPLAY)
                 ?: return null
         val active = display.mode
-        return display.supportedModes
-            .filter { mode ->
-                mode.physicalWidth == active.physicalWidth && mode.physicalHeight == active.physicalHeight
-            }.maxByOrNull { it.refreshRate } ?: active
+        var best = active
+        val modes = display.supportedModes
+        for (i in modes.indices) {
+            val mode = modes[i]
+            if (mode.physicalWidth == active.physicalWidth &&
+                mode.physicalHeight == active.physicalHeight &&
+                mode.refreshRate > best.refreshRate
+            ) {
+                best = mode
+            }
+        }
+        cachedDisplayId = display.displayId
+        cachedMaxMode = best
+        return best
     }
 
     /**

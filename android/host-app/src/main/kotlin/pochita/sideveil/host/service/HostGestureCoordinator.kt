@@ -8,6 +8,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import pochita.sideveil.host.edge.EdgeIndicatorWindow
 import pochita.sideveil.host.overlay.EdgeHapticsController
+import pochita.sideveil.host.panel.PanelInsetsCoordinator
 import pochita.sideveil.host.panel.SidebarPanelWindow
 import pochita.sideveil.host.plugin.PluginWebViewManager
 import pochita.sideveil.host.rail.PluginRailWindow
@@ -65,10 +66,15 @@ class HostGestureCoordinator(
         edgeIndicator.setDragPulse(decoded.progress)
         panelWindow.onGestureMove(decoded.progress)
 
-        val bounds = runCatching { windowManager.currentWindowMetrics.bounds }.getOrNull()
-        val screenW = bounds?.width() ?: context.resources.displayMetrics.widthPixels
-        val screenH = bounds?.height() ?: context.resources.displayMetrics.heightPixels
-        val hovered = pluginRail.updateScrubHighlight(decoded.rawX, decoded.rawY, decoded.progress, screenW, screenH)
+        val safe = PanelInsetsCoordinator.resolveCachedBounds(context, windowManager)
+        val hovered =
+            pluginRail.updateScrubHighlight(
+                decoded.rawX,
+                decoded.rawY,
+                decoded.progress,
+                safe.screenWidthPx,
+                safe.screenHeightPx,
+            )
         if (hovered != null) {
             haptics.onRailSwitch()
         }

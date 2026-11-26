@@ -60,6 +60,7 @@ class NativeHudWindow(
 
     private var attached = false
     private var visible = false
+    private var highFrameRateApplied = false
 
     /** Currently rendered HUD plugin ID, or `null` when dismissed. */
     var activePluginId: String? = null
@@ -167,10 +168,11 @@ class NativeHudWindow(
         }
     }
 
-    /** Releases HUD bitmaps, unregisters the blur listener, and dismisses the dialog. */
+    /** Releases HUD bitmaps, shuts down the render worker, unregisters the blur listener, and dismisses the dialog. */
     fun detach() {
         visible = false
-        hudView.release()
+        highFrameRateApplied = false
+        hudView.shutdown()
         backdropController.unregisterBlurListener()
         if (attached) {
             runCatching { dialog.dismiss() }
@@ -193,7 +195,7 @@ class NativeHudWindow(
 
             MotionEvent.ACTION_MOVE -> {
                 userDragged = true
-                val safe = PanelInsetsCoordinator.resolveBounds(context, windowManager)
+                val safe = PanelInsetsCoordinator.resolveCachedBounds(context, windowManager)
                 val maxX = (safe.screenWidthPx - lp.width).coerceAtLeast(0)
                 val maxY = (safe.screenHeightPx - safe.safeBottomPx - lp.height).coerceAtLeast(safe.safeTopPx)
                 lp.x = (dragStartWinX + (event.rawX - dragStartRawX).roundToInt()).coerceIn(0, maxX)
@@ -211,7 +213,7 @@ class NativeHudWindow(
 
     private fun applyLayoutAndBackdrop() {
         val window = dialog.window ?: return
-        val safe = PanelInsetsCoordinator.resolveBounds(context, windowManager)
+        val safe = PanelInsetsCoordinator.resolveCachedBounds(context, windowManager)
         val widthPx = dp(currentHeader.widthDp.coerceIn(48f, 420f))
         val heightPx = dp(currentHeader.heightDp.coerceIn(28f, 320f))
         val lp = window.attributes
@@ -246,12 +248,18 @@ class NativeHudWindow(
             OverlayWindowFlags.disableMoveAnimation(lp)
             window.attributes = lp
         }
-        window.decorView.visibility = View.VISIBLE
-        OverlayWindowFlags.applyHighFrameRate(hudView, context, window.decorView.display)
+        if (window.decorView.visibility != View.VISIBLE) {
+            window.decorView.visibility = View.VISIBLE
+        }
+        if (!highFrameRateApplied) {
+            OverlayWindowFlags.applyHighFrameRate(hudView, context, window.decorView.display)
+            highFrameRateApplied = true
+        }
         backdropController.apply(window, container, currentHeader.backdrop, cornerPx())
     }
 
     private fun collapseHidden() {
+        highFrameRateApplied = false
         val window = dialog.window ?: return
         backdropController.collapseWindow(window, hudView)
     }

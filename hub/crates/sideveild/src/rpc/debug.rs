@@ -68,7 +68,7 @@ pub(super) fn handle_cdp_status(state: &Arc<HubState>) -> Result<Value, (i32, St
     serialize_result(&status)
 }
 
-pub(super) fn handle_set_webview_debugging(
+pub(super) async fn handle_set_webview_debugging(
     state: &Arc<HubState>,
     params: Option<Value>,
 ) -> Result<Value, (i32, String)> {
@@ -76,6 +76,7 @@ pub(super) fn handle_set_webview_debugging(
     let (prev_enabled, updated) = state
         .config_store()
         .set_webview_debugging(parsed.enabled)
+        .await
         .map_err(|err| {
             (
                 error_codes::INTERNAL_ERROR,

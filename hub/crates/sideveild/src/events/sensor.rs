@@ -1,6 +1,6 @@
 //! Inbound `:sensor` UDS telemetry and gesture message routing for `HubState`.
 
-use std::sync::PoisonError;
+use std::sync::{Arc, PoisonError};
 
 use sideveil_protocol::PROTOCOL_VERSION;
 use sideveil_protocol::config::{EdgePatchParams, PanelState};
@@ -15,7 +15,7 @@ use sideveil_protocol::sensor::SensorToHub;
 use crate::state::HubState;
 
 impl HubState {
-    pub fn on_sensor_message(&self, msg: SensorToHub) {
+    pub fn on_sensor_message(self: &Arc<Self>, msg: SensorToHub) {
         match msg {
             SensorToHub::Hello {
                 protocol_version,
@@ -183,22 +183,27 @@ impl HubState {
                     },
                 );
                 if committed {
-                    match self.config_store().patch_edge(&EdgePatchParams {
+                    let state = Arc::clone(self);
+                    let patch = EdgePatchParams {
                         side: Some(side),
                         top_percent: Some(top_percent),
-                    }) {
-                        Ok(updated) => {
-                            self.logs().info(format!(
-                                "Persisted repositioned edge handle: side={side:?} topPercent={}",
-                                updated.edge.top_percent
-                            ));
-                            self.on_config_changed(&updated);
+                    };
+                    tokio::spawn(async move {
+                        match state.config_store().patch_edge(&patch).await {
+                            Ok(updated) => {
+                                state.logs().info(format!(
+                                    "Persisted repositioned edge handle: side={side:?} topPercent={}",
+                                    updated.edge.top_percent
+                                ));
+                                state.on_config_changed(&updated);
+                            }
+                            Err(err) => {
+                                state.logs().warn(format!(
+                                    "Failed to persist repositioned edge handle: {err}"
+                                ));
+                            }
                         }
-                        Err(err) => {
-                            self.logs()
-                                .warn(format!("Failed to persist repositioned edge handle: {err}"));
-                        }
-                    }
+                    });
                 }
             }
             SensorToHub::NetworkContextChanged { context } => {

@@ -16,7 +16,8 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{Semaphore, mpsc};
 
 use self::framing::{
-    CTL_MAX_LINE_BYTES, DEFAULT_MAX_LINE_BYTES, bind_socket, read_bounded_line, write_json_line,
+    CTL_MAX_LINE_BYTES, DEFAULT_MAX_LINE_BYTES, LineFrameBuf, bind_socket, read_bounded_line,
+    write_json_line, write_json_line_with_buf,
 };
 use crate::peercred::{PeerAuthConfig, SocketChannel, authorize_peer, read_peer_cred};
 use crate::rpc::{self, RpcCaller};
@@ -141,26 +142,28 @@ async fn handle_peer(
 
     let (read_half, mut write_half) = stream.into_split();
     let mut reader = BufReader::new(read_half);
-    let mut line_buf = Vec::new();
+    let mut line_buf = LineFrameBuf::with_capacity(512);
 
-    let Ok(Ok(Some(hello_line))) = tokio::time::timeout(
-        HANDSHAKE_TIMEOUT,
-        read_bounded_line(&mut reader, &mut line_buf, DEFAULT_MAX_LINE_BYTES),
-    )
-    .await
-    else {
-        return;
-    };
-
-    let hello: UdsClientHello = match serde_json::from_str(&hello_line) {
-        Ok(parsed) => parsed,
-        Err(err) => {
-            let _ = write_json_line(
-                &mut write_half,
-                &UdsHandshakeAck::rejected(format!("Invalid handshake JSON: {err}")),
-            )
-            .await;
+    let hello: UdsClientHello = {
+        let Ok(Ok(Some(hello_line))) = tokio::time::timeout(
+            HANDSHAKE_TIMEOUT,
+            read_bounded_line(&mut reader, &mut line_buf, DEFAULT_MAX_LINE_BYTES),
+        )
+        .await
+        else {
             return;
+        };
+
+        match serde_json::from_str(hello_line) {
+            Ok(parsed) => parsed,
+            Err(err) => {
+                let _ = write_json_line(
+                    &mut write_half,
+                    &UdsHandshakeAck::rejected(format!("Invalid handshake JSON: {err}")),
+                )
+                .await;
+                return;
+            }
         }
     };
 
@@ -266,10 +269,11 @@ async fn handle_peer(
 
 async fn handle_ctl_session<R: AsyncRead + Unpin>(
     mut reader: BufReader<R>,
-    mut line_buf: Vec<u8>,
+    mut line_buf: LineFrameBuf,
     mut write_half: tokio::net::unix::OwnedWriteHalf,
     state: Arc<HubState>,
 ) {
+    let mut write_buf = Vec::with_capacity(512);
     while let Ok(Some(line)) =
         read_bounded_line(&mut reader, &mut line_buf, CTL_MAX_LINE_BYTES).await
     {
@@ -278,7 +282,10 @@ async fn handle_ctl_session<R: AsyncRead + Unpin>(
             continue;
         }
         let resp = rpc::dispatch_rpc_text(&state, trimmed, RpcCaller::Ctl).await;
-        if write_json_line(&mut write_half, &resp).await.is_err() {
+        if write_json_line_with_buf(&mut write_half, &resp, &mut write_buf)
+            .await
+            .is_err()
+        {
             break;
         }
     }
@@ -286,7 +293,7 @@ async fn handle_ctl_session<R: AsyncRead + Unpin>(
 
 async fn handle_sensor_session<R: AsyncRead + Unpin>(
     mut reader: BufReader<R>,
-    mut line_buf: Vec<u8>,
+    mut line_buf: LineFrameBuf,
     mut write_half: tokio::net::unix::OwnedWriteHalf,
     state: Arc<HubState>,
 ) {
@@ -294,8 +301,12 @@ async fn handle_sensor_session<R: AsyncRead + Unpin>(
     let session_id = state.register_sensor_session(tx);
 
     let writer_task = tokio::spawn(async move {
+        let mut write_buf = Vec::with_capacity(512);
         while let Some(msg) = rx.recv().await {
-            if write_json_line(&mut write_half, &msg).await.is_err() {
+            if write_json_line_with_buf(&mut write_half, &msg, &mut write_buf)
+                .await
+                .is_err()
+            {
                 break;
             }
         }

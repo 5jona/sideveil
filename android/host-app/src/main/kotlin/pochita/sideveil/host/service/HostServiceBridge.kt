@@ -9,6 +9,7 @@ import pochita.sideveil.host.BuildConfig
 import pochita.sideveil.host.edge.EdgeIndicatorWindow
 import pochita.sideveil.host.overlay.DynamicThemeExtractor
 import pochita.sideveil.host.overlay.EdgeHapticsController
+import pochita.sideveil.host.overlay.OverlayWindowFlags
 import pochita.sideveil.host.panel.SidebarPanelWindow
 import pochita.sideveil.host.plugin.PluginWebViewManager
 import pochita.sideveil.host.rail.PluginRailWindow
@@ -69,6 +70,7 @@ class HostServiceBridge(
 
     /** Handles Android configuration changes (rotation, density, night mode). */
     fun onConfigurationChanged(newConfig: Configuration) {
+        OverlayWindowFlags.invalidateDisplayCaches()
         latestDarkSurface = HostServiceSupport.resolveDarkSurface(latestConfig, newConfig)
         panelWindow.onSystemConfigurationChanged()
         overlayCoordinator.refreshOverlayStyles()

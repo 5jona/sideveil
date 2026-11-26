@@ -18,6 +18,8 @@ pub(super) struct ParsedHttpRequest {
     pub(super) authorization: Option<String>,
     pub(super) origin: Option<String>,
     pub(super) host: Option<String>,
+    pub(super) if_none_match: Option<String>,
+    pub(super) keep_alive: bool,
 }
 
 /// Reads a single `\n`-terminated HTTP line while enforcing `max_bytes` before allocating.
@@ -82,12 +84,17 @@ pub(super) async fn parse_http_headers<R: AsyncRead + Unpin>(
         .next()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing HTTP target"))?
         .to_owned();
+    let version = parts.next().unwrap_or("HTTP/1.1");
 
     let mut authorization = None;
     let mut origin: Option<String> = None;
     let mut origin_count = 0usize;
     let mut host: Option<String> = None;
     let mut host_count = 0usize;
+    let mut if_none_match: Option<String> = None;
+    let mut conn_close = false;
+    let mut conn_keep_alive = false;
+    let mut has_body_framing = false;
     let mut saw_terminator = false;
     for _ in 0..=MAX_HEADER_LINES {
         let Some(line) = read_bounded_http_line(reader, MAX_HEADER_LINE_BYTES).await? else {
@@ -106,18 +113,32 @@ pub(super) async fn parse_http_headers<R: AsyncRead + Unpin>(
             ));
         }
         if let Some((name, value)) = line.split_once(':') {
-            let lower = name.trim().to_ascii_lowercase();
-            let val = value.trim().to_owned();
-            if lower == "authorization" {
-                authorization = Some(val);
-            } else if lower == "origin" {
+            let trimmed_name = name.trim();
+            let val = value.trim();
+            if trimmed_name.eq_ignore_ascii_case("authorization") {
+                authorization = Some(val.to_owned());
+            } else if trimmed_name.eq_ignore_ascii_case("origin") {
                 origin_count += 1;
                 if origin.is_none() || !val.is_empty() {
-                    origin = Some(val);
+                    origin = Some(val.to_owned());
                 }
-            } else if lower == "host" {
+            } else if trimmed_name.eq_ignore_ascii_case("host") {
                 host_count += 1;
-                host = Some(val);
+                host = Some(val.to_owned());
+            } else if trimmed_name.eq_ignore_ascii_case("if-none-match") {
+                if_none_match = Some(val.to_owned());
+            } else if trimmed_name.eq_ignore_ascii_case("connection") {
+                for token in val.split(',').map(str::trim) {
+                    if token.eq_ignore_ascii_case("close") {
+                        conn_close = true;
+                    } else if token.eq_ignore_ascii_case("keep-alive") {
+                        conn_keep_alive = true;
+                    }
+                }
+            } else if trimmed_name.eq_ignore_ascii_case("content-length")
+                || trimmed_name.eq_ignore_ascii_case("transfer-encoding")
+            {
+                has_body_framing = true;
             }
         }
     }
@@ -136,12 +157,18 @@ pub(super) async fn parse_http_headers<R: AsyncRead + Unpin>(
         host = Some("duplicate-host".to_owned());
     }
 
+    let keep_alive = !has_body_framing
+        && !conn_close
+        && (version.eq_ignore_ascii_case("HTTP/1.1") || conn_keep_alive);
+
     Ok(ParsedHttpRequest {
         method,
         target,
         authorization,
         origin,
         host,
+        if_none_match,
+        keep_alive,
     })
 }
 
@@ -174,8 +201,8 @@ pub(crate) fn mime_type_for(path: &Path) -> &'static str {
     }
 }
 
-/// Returns `Cache-Control` (and weak `ETag` for hashed assets under `/assets/`), keeping HTML `no-store`.
-pub(crate) fn cache_headers_for(raw_rel: &str, path: &Path, meta: &Metadata) -> String {
+/// Computes the weak ETag for hashed plugin assets under `/assets/`, or `None` for non-hashed/HTML files.
+pub(super) fn etag_for(raw_rel: &str, path: &Path, meta: &Metadata) -> Option<String> {
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
@@ -187,28 +214,55 @@ pub(crate) fn cache_headers_for(raw_rel: &str, path: &Path, meta: &Metadata) -> 
         && (normalized.starts_with("web/assets/")
             || normalized.starts_with("assets/")
             || normalized.contains("/assets/"));
-
-    if is_hashed_asset {
-        let (secs, nanos) = meta
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map_or((0, 0), |d| (d.as_secs(), d.subsec_nanos()));
-        format!(
-            "Cache-Control: private, max-age=300, immutable\r\nETag: W/\"{:x}-{:x}-{:x}\"\r\n",
-            meta.len(),
-            secs,
-            nanos
-        )
-    } else {
-        "Cache-Control: no-store\r\n".to_owned()
+    if !is_hashed_asset {
+        return None;
     }
+    let (secs, nanos) = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map_or((0, 0), |d| (d.as_secs(), d.subsec_nanos()));
+    Some(format!("W/\"{:x}-{:x}-{:x}\"", meta.len(), secs, nanos))
+}
+
+/// Evaluates an `If-None-Match` header value against `etag` using RFC 9110 weak comparison.
+pub(super) fn etag_matches(if_none_match: &str, etag: &str) -> bool {
+    let target_opaque = etag.strip_prefix("W/").unwrap_or(etag);
+    if_none_match.split(',').map(str::trim).any(|candidate| {
+        candidate == "*" || candidate.strip_prefix("W/").unwrap_or(candidate) == target_opaque
+    })
+}
+
+/// Returns `Cache-Control` (and weak `ETag` for hashed assets under `/assets/`), keeping HTML `no-store`.
+pub(crate) fn cache_headers_for(raw_rel: &str, path: &Path, meta: &Metadata) -> String {
+    match etag_for(raw_rel, path, meta) {
+        Some(etag) => format!("Cache-Control: private, max-age=300, immutable\r\nETag: {etag}\r\n"),
+        None => "Cache-Control: no-store\r\n".to_owned(),
+    }
+}
+
+pub(super) async fn write_not_modified(
+    writer: &mut tokio::net::tcp::OwnedWriteHalf,
+    cache_headers: &str,
+    coi_headers: &str,
+    keep_alive: bool,
+) -> io::Result<()> {
+    let conn = if keep_alive { "keep-alive" } else { "close" };
+    let resp = format!(
+        "HTTP/1.1 304 Not Modified\r\n{cache_headers}X-Content-Type-Options: nosniff\r\n{coi_headers}Connection: {conn}\r\n\r\n"
+    );
+    writer.write_all(resp.as_bytes()).await?;
+    writer.flush().await
 }
 
 pub(super) async fn write_no_content(
     writer: &mut tokio::net::tcp::OwnedWriteHalf,
+    keep_alive: bool,
 ) -> io::Result<()> {
-    let resp = "HTTP/1.1 204 No Content\r\nCache-Control: private, max-age=300\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n";
+    let conn = if keep_alive { "keep-alive" } else { "close" };
+    let resp = format!(
+        "HTTP/1.1 204 No Content\r\nCache-Control: private, max-age=300\r\nX-Content-Type-Options: nosniff\r\nConnection: {conn}\r\n\r\n"
+    );
     writer.write_all(resp.as_bytes()).await?;
     writer.flush().await
 }

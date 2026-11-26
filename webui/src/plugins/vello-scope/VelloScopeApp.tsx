@@ -1,4 +1,4 @@
-import type { BridgeOptions, ContainerBackdrop } from '@gojona/bridge';
+import type { BridgeOptions, ContainerBackdrop, MockRpcHandler } from '@gojona/bridge';
 import {
   SideVeilPluginProvider,
   useContainerAction,
@@ -21,7 +21,14 @@ import { Activity, Cpu, Thermometer, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSyncedPluginTheme } from '../../shared/useSyncedPluginTheme.ts';
 import { VELLO_SCOPE_MANIFEST, VELLO_SCOPE_PLUGIN_ID } from './manifest.ts';
-import { createMockVelloRpcHandler } from './mockVelloBridge.ts';
+
+let mockVelloRpcPromise: Promise<MockRpcHandler> | null = null;
+const handleLazyMockVelloRpc: MockRpcHandler = async (method, params) => {
+  mockVelloRpcPromise ??= import('./mockVelloBridge.ts').then((m) => m.createMockVelloRpcHandler());
+  const handler = await mockVelloRpcPromise;
+  return handler(method, params);
+};
+
 import {
   type ScopePipelineKind,
   type ScopeRendererController,
@@ -219,7 +226,7 @@ export function VelloScopeApp() {
       allowUrlOverride: false,
       allowedOrigins: [`https://${VELLO_SCOPE_PLUGIN_ID}.plugins.sideveil.local`],
       mockNamespace: 'sideveil-vello-scope',
-      onMockRpc: createMockVelloRpcHandler(),
+      onMockRpc: handleLazyMockVelloRpc,
     }),
     [],
   );

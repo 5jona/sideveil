@@ -21,7 +21,9 @@ export function PluginCategoryContent({
 }: PluginCategoryContentProps) {
   if (category === 'web-embed') {
     return grouped.webEmbeds.length > 0 ? (
-      <div className="flex flex-col gap-2.5">{grouped.webEmbeds.map(renderCard)}</div>
+      <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2 xl:grid-cols-3">
+        {grouped.webEmbeds.map(renderCard)}
+      </div>
     ) : (
       <EmptyState
         icon={<GlobeLock className="size-5" />}
@@ -39,7 +41,9 @@ export function PluginCategoryContent({
 
   if (category === 'installed') {
     return grouped.installed.length > 0 ? (
-      <div className="flex flex-col gap-2.5">{grouped.installed.map(renderCard)}</div>
+      <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2 xl:grid-cols-3">
+        {grouped.installed.map(renderCard)}
+      </div>
     ) : (
       <EmptyState
         icon={<Boxes className="size-5" />}
@@ -63,7 +67,9 @@ export function PluginCategoryContent({
             <h3 className="text-xs font-semibold text-[var(--text-secondary)]">系统内置</h3>
             <span className="text-[11px] text-[var(--text-secondary)]">随宿主内置，按需启停</span>
           </div>
-          {grouped.systemBuiltins.map(renderCard)}
+          <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2 xl:grid-cols-3">
+            {grouped.systemBuiltins.map(renderCard)}
+          </div>
         </section>
       ) : null}
       {grouped.bundledExamples.length > 0 ? (
@@ -72,7 +78,9 @@ export function PluginCategoryContent({
             <h3 className="text-xs font-semibold text-[var(--text-secondary)]">官方示例</h3>
             <span className="text-[11px] text-[var(--text-secondary)]">默认停用，按需启用体验</span>
           </div>
-          {grouped.bundledExamples.map(renderCard)}
+          <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2 xl:grid-cols-3">
+            {grouped.bundledExamples.map(renderCard)}
+          </div>
         </section>
       ) : null}
       {grouped.builtins.length === 0 ? (

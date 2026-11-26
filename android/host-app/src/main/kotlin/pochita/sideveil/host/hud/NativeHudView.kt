@@ -5,6 +5,10 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Typeface
+import android.os.Handler
+import android.os.HandlerThread
+import android.os.Looper
+import android.os.Process
 import android.text.TextPaint
 import android.text.TextUtils
 import android.view.View
@@ -18,20 +22,33 @@ import kotlin.math.roundToInt
 
 /**
  * Hybrid `vello_cpu` NEON + Android HWUI view for zero-WebView native HUD overlays.
- * Double-buffers reusable `ARGB_8888` Bitmaps for vector paths/sparklines/gauges and composites
- * crisp system CJK/Emoji/tabular text (`tnum`) directly via HWUI [Canvas.drawText].
+ * Double-buffers reusable `ARGB_8888` Bitmaps on a dedicated single-thread worker for vector
+ * paths/sparklines/gauges with frame coalescing, and composites crisp system CJK/Emoji/tabular
+ * text (`tnum`) directly via HWUI [Canvas.drawText] on the main thread.
  */
 internal class NativeHudView(
     context: Context,
 ) : View(context) {
+    private data class PendingHudFrame(
+        val rawSceneJson: String,
+        val header: NativeHudSceneHeader,
+        val density: Float,
+    )
+
+    private val mainHandler = Handler(Looper.getMainLooper())
     private val textPaint =
         TextPaint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
             isLinearText = true
         }
     private val bitmapPaint = Paint(Paint.FILTER_BITMAP_FLAG)
 
+    private var renderThread: HandlerThread? = null
+    private var renderHandler: Handler? = null
     private var frontBitmap: Bitmap? = null
     private var backBitmap: Bitmap? = null
+    private var pendingFrame: PendingHudFrame? = null
+    private var renderInFlight = false
+    private var generation = 0L
     private var currentTexts: List<HudTextOverlay> = emptyList()
     private var currentDensity: Float = 1f
 
@@ -39,31 +56,86 @@ internal class NativeHudView(
         rawSceneJson: String,
         header: NativeHudSceneHeader,
         density: Float,
-    ): Boolean {
-        val safeDensity = density.coerceIn(0.5f, 8f)
-        currentDensity = safeDensity
-        val targetW = (header.widthDp.coerceIn(48f, 420f) * safeDensity).roundToInt().coerceIn(32, 2048)
-        val targetH = (header.heightDp.coerceIn(28f, 320f) * safeDensity).roundToInt().coerceIn(24, 2048)
-
-        val dst = ensureBackBuffer(targetW, targetH)
-        val rendered = NativeHudRenderer.renderInto(rawSceneJson, dst, safeDensity)
-        if (rendered) {
-            val prevFront = frontBitmap
-            frontBitmap = dst
-            backBitmap = prevFront
+    ) {
+        pendingFrame = PendingHudFrame(rawSceneJson, header, density.coerceIn(0.5f, 8f))
+        if (!renderInFlight) {
+            dispatchNextRender()
         }
-        currentTexts = header.texts.take(SideVeilHudDefaults.MAX_TEXTS.toInt())
-        invalidate()
-        return rendered
     }
 
     fun release() {
+        generation++
+        pendingFrame = null
         frontBitmap?.recycle()
         backBitmap?.recycle()
         frontBitmap = null
         backBitmap = null
         currentTexts = emptyList()
-        NativeHudRenderer.resetCache()
+        renderHandler?.post { NativeHudRenderer.resetCache() }
+    }
+
+    fun shutdown() {
+        release()
+        val thread = renderThread
+        renderThread = null
+        renderHandler = null
+        thread?.quitSafely()
+    }
+
+    private fun ensureRenderHandler(): Handler {
+        renderHandler?.let { return it }
+        val thread =
+            HandlerThread("SideVeilHudRender", Process.THREAD_PRIORITY_DISPLAY).apply {
+                start()
+            }
+        renderThread = thread
+        return Handler(thread.looper).also { renderHandler = it }
+    }
+
+    private fun dispatchNextRender() {
+        val frame = pendingFrame ?: return
+        pendingFrame = null
+        val targetW = (frame.header.widthDp.coerceIn(48f, 420f) * frame.density).roundToInt().coerceIn(32, 2048)
+        val targetH = (frame.header.heightDp.coerceIn(28f, 320f) * frame.density).roundToInt().coerceIn(24, 2048)
+
+        val dst = acquireBackBuffer(targetW, targetH)
+        renderInFlight = true
+        val capturedGen = generation
+        val worker = ensureRenderHandler()
+        val posted =
+            worker.post {
+                val rendered = NativeHudRenderer.renderInto(frame.rawSceneJson, dst, frame.density)
+                mainHandler.post { onRenderComplete(capturedGen, frame, dst, rendered) }
+            }
+        if (!posted) {
+            onRenderComplete(capturedGen, frame, dst, rendered = false)
+        }
+    }
+
+    private fun onRenderComplete(
+        capturedGen: Long,
+        frame: PendingHudFrame,
+        dst: Bitmap,
+        rendered: Boolean,
+    ) {
+        renderInFlight = false
+        if (capturedGen != generation) {
+            dst.recycle()
+            return
+        }
+        if (rendered) {
+            val prevFront = frontBitmap
+            frontBitmap = dst
+            backBitmap = prevFront
+        } else {
+            backBitmap = dst
+        }
+        currentDensity = frame.density
+        currentTexts = frame.header.texts.take(SideVeilHudDefaults.MAX_TEXTS.toInt())
+        invalidate()
+        if (pendingFrame != null) {
+            dispatchNextRender()
+        }
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -101,18 +173,17 @@ internal class NativeHudView(
         const val MAX_TEXT_CHARS = 128
     }
 
-    private fun ensureBackBuffer(
+    private fun acquireBackBuffer(
         widthPx: Int,
         heightPx: Int,
     ): Bitmap {
         val existing = backBitmap
+        backBitmap = null
         val reusable = existing != null && !existing.isRecycled
         if (reusable && existing.width == widthPx && existing.height == heightPx) {
             return existing
         }
         existing?.recycle()
-        return createBitmap(widthPx, heightPx).also {
-            backBitmap = it
-        }
+        return createBitmap(widthPx, heightPx)
     }
 }

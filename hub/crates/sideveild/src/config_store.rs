@@ -9,7 +9,7 @@ use std::sync::{Arc, PoisonError, RwLock};
 use std::time::Duration;
 
 use sideveil_protocol::config::{AppearancePatchParams, EdgePatchParams, SideVeilConfig};
-use tokio::sync::broadcast;
+use tokio::sync::{Mutex as AsyncMutex, broadcast};
 
 use crate::fs_util::write_file_atomic;
 use crate::inotify::{DIR_CHANGE_MASK, InotifyDirWatcher};
@@ -20,6 +20,7 @@ use crate::log_ring::LogRing;
 pub struct ConfigStore {
     path: PathBuf,
     current: RwLock<SideVeilConfig>,
+    persist_lock: AsyncMutex<()>,
     updates_tx: broadcast::Sender<SideVeilConfig>,
     logs: Arc<LogRing>,
 }
@@ -32,11 +33,12 @@ impl ConfigStore {
         let store = Arc::new(Self {
             path,
             current: RwLock::new(initial.clone()),
+            persist_lock: AsyncMutex::new(()),
             updates_tx,
             logs,
         });
         if !store.path.exists()
-            && let Err(err) = store.persist_config(&initial)
+            && let Err(err) = persist_config_sync(&store.path, &initial)
         {
             store
                 .logs
@@ -82,47 +84,67 @@ impl ConfigStore {
         next
     }
 
-    /// Applies a partial appearance patch, atomically persists it, and notifies subscribers.
-    pub fn patch_appearance(&self, patch: &AppearancePatchParams) -> io::Result<SideVeilConfig> {
-        let next = {
-            let mut guard = self.current.write().unwrap_or_else(PoisonError::into_inner);
-            let updated = guard.apply_appearance_patch(patch);
-            self.persist_config(&updated)?;
-            *guard = updated.clone();
-            updated
-        };
-        let _ = self.updates_tx.send(next.clone());
-        Ok(next)
+    /// Applies a partial appearance patch, atomically persists it off-worker, and notifies subscribers.
+    pub async fn patch_appearance(
+        &self,
+        patch: &AppearancePatchParams,
+    ) -> io::Result<SideVeilConfig> {
+        self.apply_and_persist(|cur| cur.apply_appearance_patch(patch))
+            .await
     }
 
-    /// Applies an edge handle position patch (side/topPercent), atomically persists it, and notifies subscribers.
-    pub fn patch_edge(&self, patch: &EdgePatchParams) -> io::Result<SideVeilConfig> {
-        let next = {
-            let mut guard = self.current.write().unwrap_or_else(PoisonError::into_inner);
-            let updated = guard.apply_edge_patch(patch);
-            self.persist_config(&updated)?;
-            *guard = updated.clone();
-            updated
-        };
-        let _ = self.updates_tx.send(next.clone());
-        Ok(next)
+    /// Applies an edge handle position patch (side/topPercent), atomically persists it off-worker, and notifies subscribers.
+    pub async fn patch_edge(&self, patch: &EdgePatchParams) -> io::Result<SideVeilConfig> {
+        self.apply_and_persist(|cur| cur.apply_edge_patch(patch))
+            .await
     }
 
-    /// Updates `debug.webview_debugging_enabled`, atomically persists it, and notifies subscribers.
+    /// Updates `debug.webview_debugging_enabled`, atomically persists it off-worker, and notifies subscribers.
     /// Returns `(previous_enabled, updated_config)`.
-    pub fn set_webview_debugging(&self, enabled: bool) -> io::Result<(bool, SideVeilConfig)> {
-        let (prev, next) = {
-            let mut guard = self.current.write().unwrap_or_else(PoisonError::into_inner);
+    pub async fn set_webview_debugging(&self, enabled: bool) -> io::Result<(bool, SideVeilConfig)> {
+        let _persist_guard = self.persist_lock.lock().await;
+        let (prev, updated) = {
+            let guard = self.current.read().unwrap_or_else(PoisonError::into_inner);
             let prev = guard.debug.webview_debugging_enabled;
-            let mut updated = guard.clone();
-            updated.debug.webview_debugging_enabled = enabled;
-            let updated = updated.sanitized();
-            self.persist_config(&updated)?;
-            *guard = updated.clone();
-            (prev, updated)
+            let mut next = guard.clone();
+            next.debug.webview_debugging_enabled = enabled;
+            (prev, next.sanitized())
         };
-        let _ = self.updates_tx.send(next.clone());
-        Ok((prev, next))
+        let path = self.path.clone();
+        let disk_cfg = updated.clone();
+        tokio::task::spawn_blocking(move || persist_config_sync(&path, &disk_cfg))
+            .await
+            .map_err(|err| io::Error::other(format!("config persist task failed: {err}")))??;
+        {
+            let mut guard = self.current.write().unwrap_or_else(PoisonError::into_inner);
+            *guard = updated.clone();
+        }
+        drop(_persist_guard);
+        let _ = self.updates_tx.send(updated.clone());
+        Ok((prev, updated))
+    }
+
+    async fn apply_and_persist<F>(&self, compute: F) -> io::Result<SideVeilConfig>
+    where
+        F: FnOnce(&SideVeilConfig) -> SideVeilConfig,
+    {
+        let _persist_guard = self.persist_lock.lock().await;
+        let updated = {
+            let guard = self.current.read().unwrap_or_else(PoisonError::into_inner);
+            compute(&guard)
+        };
+        let path = self.path.clone();
+        let disk_cfg = updated.clone();
+        tokio::task::spawn_blocking(move || persist_config_sync(&path, &disk_cfg))
+            .await
+            .map_err(|err| io::Error::other(format!("config persist task failed: {err}")))??;
+        {
+            let mut guard = self.current.write().unwrap_or_else(PoisonError::into_inner);
+            *guard = updated.clone();
+        }
+        drop(_persist_guard);
+        let _ = self.updates_tx.send(updated.clone());
+        Ok(updated)
     }
 
     /// Spawns a Linux `inotify` async watcher on the config parent directory for zero-poll reload.
@@ -157,20 +179,14 @@ impl ConfigStore {
             }
         }))
     }
+}
 
-    fn persist_config(&self, config: &SideVeilConfig) -> io::Result<()> {
-        let existing_owner = fs::metadata(&self.path).ok().map(|m| (m.uid(), m.gid()));
-        let mut serialized = serde_json::to_string_pretty(config)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        serialized.push('\n');
-        write_file_atomic(
-            &self.path,
-            serialized.as_bytes(),
-            0o644,
-            existing_owner,
-            true,
-        )
-    }
+fn persist_config_sync(path: &Path, config: &SideVeilConfig) -> io::Result<()> {
+    let existing_owner = fs::metadata(path).ok().map(|m| (m.uid(), m.gid()));
+    let mut serialized = serde_json::to_string_pretty(config)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    serialized.push('\n');
+    write_file_atomic(path, serialized.as_bytes(), 0o644, existing_owner, true)
 }
 
 fn load_from_disk(path: &Path, logs: &LogRing) -> Option<SideVeilConfig> {
@@ -198,8 +214,8 @@ fn load_from_disk(path: &Path, logs: &LogRing) -> Option<SideVeilConfig> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn failed_persist_does_not_mutate_in_memory_config() {
+    #[tokio::test]
+    async fn failed_persist_does_not_mutate_in_memory_config() {
         let dir = std::env::temp_dir().join(format!(
             "sideveil-cfg-fail-{}-{}",
             std::process::id(),
@@ -216,10 +232,12 @@ mod tests {
         let store = ConfigStore::open(bad_target, logs);
         let before = store.current();
 
-        let err = store.patch_appearance(&AppearancePatchParams {
-            color_mode: Some("light".to_owned()),
-            ..Default::default()
-        });
+        let err = store
+            .patch_appearance(&AppearancePatchParams {
+                color_mode: Some("light".to_owned()),
+                ..Default::default()
+            })
+            .await;
         assert!(err.is_err());
         assert_eq!(store.current(), before);
 
@@ -268,6 +286,7 @@ mod tests {
                 color_mode: Some("light".to_owned()),
                 ..Default::default()
             })
+            .await
             .expect("patch appearance");
         assert_eq!(patched.panel.color_mode, "light");
         assert_eq!(patched.panel.theme_id, "modern-saas-dark");

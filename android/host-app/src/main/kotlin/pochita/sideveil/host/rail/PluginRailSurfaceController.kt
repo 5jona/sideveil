@@ -66,6 +66,7 @@ internal class PluginRailSurfaceController(
     private var dynamicTint: GlassTintOverride? = null
     private var systemBlurSupported = runCatching { windowManager.isCrossWindowBlurEnabled }.getOrDefault(false)
     private var lastAppliedBlurRadius = -1
+    private var highFrameRateApplied = false
     private val layoutCommitTracker = WindowLayoutCommitTracker()
 
     fun resetAppliedLayoutSnapshot() = layoutCommitTracker.reset()
@@ -131,7 +132,7 @@ internal class PluginRailSurfaceController(
     }
 
     fun currentHorizontalMetrics(): OverlayHorizontalMetrics {
-        val safe = PanelInsetsCoordinator.resolveBounds(context, windowManager)
+        val safe = PanelInsetsCoordinator.resolveCachedBounds(context, windowManager)
         return PanelInsetsCoordinator.resolveHorizontalMetrics(safe.screenWidthPx, densityProvider()).also {
             lastHorizontalMetrics = it
         }
@@ -186,7 +187,7 @@ internal class PluginRailSurfaceController(
         motionProgress: Float,
         pluginCount: Int,
     ) {
-        val safe = PanelInsetsCoordinator.resolveBounds(context, windowManager)
+        val safe = PanelInsetsCoordinator.resolveCachedBounds(context, windowManager)
         val metrics = PanelInsetsCoordinator.resolveHorizontalMetrics(safe.screenWidthPx, densityProvider())
         lastHorizontalMetrics = metrics
         val maxHeight = (safe.screenHeightPx * 0.65f).toInt().coerceAtLeast(dp(120f))
@@ -212,7 +213,10 @@ internal class PluginRailSurfaceController(
         if (window.decorView.visibility != View.VISIBLE) {
             window.decorView.visibility = View.VISIBLE
         }
-        OverlayWindowFlags.applyHighFrameRate(railContainer, context, window.decorView.display)
+        if (!highFrameRateApplied) {
+            OverlayWindowFlags.applyHighFrameRate(railContainer, context, window.decorView.display)
+            highFrameRateApplied = true
+        }
         railContainer.alpha = motionProgress
         applyBackdrop(window, progress = motionProgress)
     }
@@ -222,7 +226,10 @@ internal class PluginRailSurfaceController(
         railContainer: View,
     ) {
         applyBackdrop(window, progress = 0f)
-        OverlayWindowFlags.clearHighFrameRate(railContainer)
+        if (highFrameRateApplied) {
+            OverlayWindowFlags.clearHighFrameRate(railContainer)
+            highFrameRateApplied = false
+        }
         if (window.decorView.visibility != View.INVISIBLE) {
             window.decorView.visibility = View.INVISIBLE
         }

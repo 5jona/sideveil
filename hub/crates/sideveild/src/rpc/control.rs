@@ -49,7 +49,7 @@ pub(super) fn handle_panel_open(
     }))
 }
 
-pub(super) fn handle_patch_appearance(
+pub(super) async fn handle_patch_appearance(
     state: &Arc<HubState>,
     params: Option<Value>,
 ) -> Result<Value, (i32, String)> {
@@ -65,6 +65,7 @@ pub(super) fn handle_patch_appearance(
     let updated = state
         .config_store()
         .patch_appearance(&patch)
+        .await
         .map_err(|err| {
             (
                 error_codes::INTERNAL_ERROR,
@@ -75,7 +76,7 @@ pub(super) fn handle_patch_appearance(
     serialize_result(&updated)
 }
 
-pub(super) fn handle_patch_edge(
+pub(super) async fn handle_patch_edge(
     state: &Arc<HubState>,
     params: Option<Value>,
 ) -> Result<Value, (i32, String)> {
@@ -88,12 +89,16 @@ pub(super) fn handle_patch_edge(
         })?,
         None => EdgePatchParams::default(),
     };
-    let updated = state.config_store().patch_edge(&patch).map_err(|err| {
-        (
-            error_codes::INTERNAL_ERROR,
-            format!("Failed to persist edge patch: {err}"),
-        )
-    })?;
+    let updated = state
+        .config_store()
+        .patch_edge(&patch)
+        .await
+        .map_err(|err| {
+            (
+                error_codes::INTERNAL_ERROR,
+                format!("Failed to persist edge patch: {err}"),
+            )
+        })?;
     state.on_config_changed(&updated);
     serialize_result(&updated)
 }

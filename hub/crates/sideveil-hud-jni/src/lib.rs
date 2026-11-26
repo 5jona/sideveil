@@ -11,8 +11,14 @@ use sideveil_protocol::hud::NativeHudScene;
 #[cfg(target_os = "android")]
 const MAX_HUD_SCENE_JSON_UTF16: usize = 2 * 1024 * 1024;
 
+#[derive(Default)]
+struct HudCanvasState {
+    canvas: HudCanvas,
+    packed_scratch: Vec<u8>,
+}
+
 thread_local! {
-    static HUD_CANVAS: RefCell<HudCanvas> = RefCell::new(HudCanvas::default());
+    static HUD_CANVAS: RefCell<HudCanvasState> = RefCell::new(HudCanvasState::default());
 }
 
 /// Decodes a JNI UTF-16 code-unit slice into standard Rust UTF-8, preserving
@@ -52,15 +58,27 @@ pub fn render_scene_json_into(
     }
 
     HUD_CANVAS.with(|cell| {
-        let mut canvas = cell.borrow_mut();
+        let mut state = cell.borrow_mut();
         if stride_bytes == row_bytes {
-            canvas
+            state
+                .canvas
                 .render_into(&scene, density, width_px, height_px, &mut pixels[..min_buf])
                 .is_ok()
         } else {
-            let mut packed = vec![0u8; row_bytes * total_rows];
+            let packed_len = row_bytes * total_rows;
+            state.packed_scratch.resize(packed_len, 0);
+            let HudCanvasState {
+                canvas,
+                packed_scratch,
+            } = &mut *state;
             if canvas
-                .render_into(&scene, density, width_px, height_px, &mut packed)
+                .render_into(
+                    &scene,
+                    density,
+                    width_px,
+                    height_px,
+                    &mut packed_scratch[..packed_len],
+                )
                 .is_err()
             {
                 return false;
@@ -69,7 +87,7 @@ pub fn render_scene_json_into(
                 let src_off = row * row_bytes;
                 let dst_off = row * stride_bytes;
                 pixels[dst_off..dst_off + row_bytes]
-                    .copy_from_slice(&packed[src_off..src_off + row_bytes]);
+                    .copy_from_slice(&packed_scratch[src_off..src_off + row_bytes]);
             }
             true
         }
@@ -84,8 +102,7 @@ mod android_jni {
 
     use jni_sys::{JNI_FALSE, JNI_TRUE, JNIEnv, jboolean, jclass, jfloat, jobject, jstring};
 
-    use super::{HUD_CANVAS, decode_jni_utf16, render_scene_json_into};
-    use sideveil_gfx::hud_renderer::HudCanvas;
+    use super::{HUD_CANVAS, HudCanvasState, decode_jni_utf16, render_scene_json_into};
 
     const ANDROID_BITMAP_RESULT_SUCCESS: i32 = 0;
     const ANDROID_BITMAP_FORMAT_RGBA_8888: i32 = 1;
@@ -217,7 +234,7 @@ mod android_jni {
     ) {
         let _ = std::panic::catch_unwind(|| {
             HUD_CANVAS.with(|cell| {
-                *cell.borrow_mut() = HudCanvas::default();
+                *cell.borrow_mut() = HudCanvasState::default();
             });
         });
     }

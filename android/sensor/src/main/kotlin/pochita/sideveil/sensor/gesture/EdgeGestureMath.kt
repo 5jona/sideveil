@@ -11,23 +11,48 @@ import kotlin.math.min
 
 /**
  * Snapshot of active environment inputs passed to [EdgeGestureStateMachine].
+ * Mutable fields allow [EdgeGestureMonitor] to reuse a single instance on the input thread
+ * without per-event heap allocations.
  */
 data class EdgeGestureEnv(
-    val config: SideVeilConfig,
-    val geometry: DisplayGeometry,
-    val scopeActive: Boolean = true,
-    val panelState: PanelState = PanelState.CLOSED,
-    val fullscreenActive: Boolean = false,
-)
+    var config: SideVeilConfig,
+    var geometry: DisplayGeometry,
+    var scopeActive: Boolean = true,
+    var panelState: PanelState = PanelState.CLOSED,
+    var fullscreenActive: Boolean = false,
+) {
+    /** Updates all fields in place to avoid allocating on high-frequency `MotionEvent` paths. */
+    fun update(
+        config: SideVeilConfig,
+        geometry: DisplayGeometry,
+        scopeActive: Boolean,
+        panelState: PanelState,
+        fullscreenActive: Boolean,
+    ): EdgeGestureEnv {
+        this.config = config
+        this.geometry = geometry
+        this.scopeActive = scopeActive
+        this.panelState = panelState
+        this.fullscreenActive = fullscreenActive
+        return this
+    }
+}
 
 /**
- * Updated velocity state after processing one horizontal move sample.
+ * Reusable mutable velocity state updated in place by [EdgeGestureMath.stepVelocity]
+ * to eliminate per-move heap allocations.
  */
-internal data class VelocityStepResult(
-    val velocityPxPerSec: Float,
-    val eventTimeMs: Long,
-    val significantMoveTimeMs: Long,
-)
+internal class VelocityState {
+    var velocityPxPerSec: Float = 0f
+    var eventTimeMs: Long = 0L
+    var significantMoveTimeMs: Long = 0L
+
+    fun reset(initialEventTimeMs: Long = 0L) {
+        velocityPxPerSec = 0f
+        eventTimeMs = initialEventTimeMs
+        significantMoveTimeMs = initialEventTimeMs
+    }
+}
 
 /**
  * Computed release outcome when a pilfered edge drag ends or is canceled.
@@ -135,26 +160,22 @@ object EdgeGestureMath {
         rawX: Float,
         lastX: Float,
         eventTimeMs: Long,
-        lastEventTimeMs: Long,
-        lastSignificantMoveTimeMs: Long,
-        lastVelocityPxPerSec: Float,
-    ): VelocityStepResult {
-        val rawDtMs = eventTimeMs - lastEventTimeMs
+        state: VelocityState,
+    ) {
+        val rawDtMs = eventTimeMs - state.eventTimeMs
         val stepInward = inwardDelta(side, rawX - lastX)
-        var nextVelocity = lastVelocityPxPerSec
-        var nextEventTime = lastEventTimeMs
         if (rawDtMs > 0L) {
             val dtMs = rawDtMs.coerceAtLeast(MIN_VELOCITY_DT_MS)
             val instantVelocity =
                 ((stepInward * 1000f) / dtMs.toFloat()).coerceIn(-MAX_VELOCITY_PX_PER_SEC, MAX_VELOCITY_PX_PER_SEC)
             val baseVelocity =
-                if (eventTimeMs - lastSignificantMoveTimeMs > STALE_VELOCITY_WINDOW_MS) 0f else lastVelocityPxPerSec
-            nextVelocity = baseVelocity * 0.4f + instantVelocity * 0.6f
-            nextEventTime = eventTimeMs
+                if (eventTimeMs - state.significantMoveTimeMs > STALE_VELOCITY_WINDOW_MS) 0f else state.velocityPxPerSec
+            state.velocityPxPerSec = baseVelocity * 0.4f + instantVelocity * 0.6f
+            state.eventTimeMs = eventTimeMs
         }
-        val nextSigTime =
-            if (abs(stepInward) >= SIGNIFICANT_MOVE_PX) eventTimeMs else lastSignificantMoveTimeMs
-        return VelocityStepResult(nextVelocity, nextEventTime, nextSigTime)
+        if (abs(stepInward) >= SIGNIFICANT_MOVE_PX) {
+            state.significantMoveTimeMs = eventTimeMs
+        }
     }
 
     /** Decay-checks [trackedVelocityPxPerSec] against [staleWindowMs] at release time. */

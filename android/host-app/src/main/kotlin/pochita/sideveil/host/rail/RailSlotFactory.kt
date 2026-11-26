@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.util.TypedValue
 import android.view.Gravity
@@ -25,6 +26,18 @@ import pochita.sideveil.protocol.PluginBackendState
 import pochita.sideveil.protocol.PluginDescriptor
 
 /**
+ * References to a single rendered Rail plugin slot for zero-rebuild in-place highlight updates.
+ */
+internal data class RailSlotHolder(
+    val pluginId: String,
+    val root: View,
+    val pill: FrameLayout,
+    val pillBackground: GradientDrawable,
+    val glyph: TextView,
+    val tintedIcon: Drawable?,
+)
+
+/**
  * Constructs individual plugin slot views, async SVG/raster icon overlays, backend status dots,
  * and long-press quick menus for [PluginRailWindow].
  */
@@ -36,18 +49,23 @@ internal class RailSlotFactory(
     private val onSelectPlugin: (String) -> Unit,
     private val onQuickAction: (String, RailQuickAction) -> Unit,
 ) {
-    fun createButton(
+    fun createSlot(
         plugin: PluginDescriptor,
         active: Boolean,
         scrubbed: Boolean,
         isDark: Boolean,
         metrics: OverlayHorizontalMetrics,
-    ): View {
+    ): RailSlotHolder {
+        val pillBackground = GradientDrawable()
+        applySlotBackground(pillBackground, active, scrubbed, isDark, metrics.compact)
         val pill =
             FrameLayout(themedContext).apply {
-                background = createSlotBackground(active, scrubbed, isDark, metrics.compact)
+                background = pillBackground
                 isClickable = false
                 isFocusable = false
+                val scale = if (scrubbed) SCRUB_HIGHLIGHT_SCALE else 1f
+                scaleX = scale
+                scaleY = scale
             }
 
         val glyphColor = resolveGlyphColor(active, isDark)
@@ -65,7 +83,7 @@ internal class RailSlotFactory(
         )
 
         val iconSizePx = dp(metrics.railIconSizeDp.toFloat())
-        attachSlotIcon(pill, glyph, plugin, iconSizePx, glyphColor, isDark)
+        val tintedIcon = attachSlotIcon(pill, glyph, plugin, iconSizePx, glyphColor, isDark)
 
         if (plugin.backend != PluginBackendKind.NONE) {
             pill.addView(createBackendDot(plugin.backendState), createBackendDotLayout())
@@ -76,6 +94,7 @@ internal class RailSlotFactory(
                 contentDescription = plugin.name
                 isClickable = true
                 isFocusable = true
+                isSelected = active || scrubbed
                 setOnClickListener { onSelectPlugin(plugin.id) }
                 setOnLongClickListener {
                     showQuickMenu(pill, plugin)
@@ -111,7 +130,34 @@ internal class RailSlotFactory(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 dp(metrics.railSlotPitchDp.toFloat()),
             )
-        return slot
+        return RailSlotHolder(
+            pluginId = plugin.id,
+            root = slot,
+            pill = pill,
+            pillBackground = pillBackground,
+            glyph = glyph,
+            tintedIcon = tintedIcon,
+        )
+    }
+
+    /** Updates slot background, glyph/icon tint, selection state, and scrub scale in place. */
+    fun updateSlotVisualState(
+        holder: RailSlotHolder,
+        active: Boolean,
+        scrubbed: Boolean,
+        isDark: Boolean,
+        compact: Boolean,
+    ) {
+        applySlotBackground(holder.pillBackground, active, scrubbed, isDark, compact)
+        val glyphColor = resolveGlyphColor(active, isDark)
+        holder.glyph.setTextColor(glyphColor)
+        holder.tintedIcon?.setTint(glyphColor)
+        holder.root.isSelected = active || scrubbed
+        val targetScale = if (scrubbed) SCRUB_HIGHLIGHT_SCALE else 1f
+        if (holder.pill.scaleX != targetScale) {
+            holder.pill.scaleX = targetScale
+            holder.pill.scaleY = targetScale
+        }
     }
 
     private fun attachSlotIcon(
@@ -121,7 +167,7 @@ internal class RailSlotFactory(
         iconSizePx: Int,
         glyphColor: Int,
         isDark: Boolean,
-    ) {
+    ): Drawable? {
         if (plugin.id == BUILTIN_DIAG_PLUGIN_ID) {
             val diagDrawable =
                 themedContext
@@ -137,7 +183,7 @@ internal class RailSlotFactory(
                 pill.addView(diagIcon, FrameLayout.LayoutParams(iconSizePx, iconSizePx, Gravity.CENTER))
                 glyph.visibility = View.GONE
             }
-            return
+            return diagDrawable
         }
         if (!plugin.builtin && !plugin.icon.isNullOrBlank()) {
             val iconView =
@@ -154,33 +200,35 @@ internal class RailSlotFactory(
                 }
             }
         }
+        return null
     }
 
-    private fun createSlotBackground(
+    private fun applySlotBackground(
+        drawable: GradientDrawable,
         active: Boolean,
         scrubbed: Boolean,
         isDark: Boolean,
         compact: Boolean,
-    ): GradientDrawable =
-        GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = dp(if (compact) 10f else 12f).toFloat()
-            when {
-                scrubbed -> {
-                    setColor(if (isDark) Color.argb(145, 56, 189, 248) else Color.argb(110, 37, 99, 235))
-                    setStroke(dp(1.6f), if (isDark) Color.WHITE else Color.rgb(37, 99, 235))
-                }
+    ) {
+        drawable.shape = GradientDrawable.RECTANGLE
+        drawable.cornerRadius = dp(if (compact) 10f else 12f).toFloat()
+        when {
+            scrubbed -> {
+                drawable.setColor(if (isDark) Color.argb(145, 56, 189, 248) else Color.argb(110, 37, 99, 235))
+                drawable.setStroke(dp(1.6f), if (isDark) Color.WHITE else Color.rgb(37, 99, 235))
+            }
 
-                active -> {
-                    setColor(if (isDark) Color.argb(90, 96, 165, 250) else Color.argb(65, 37, 99, 235))
-                    setStroke(dp(1.2f), if (isDark) Color.argb(200, 147, 197, 253) else Color.argb(180, 37, 99, 235))
-                }
+            active -> {
+                drawable.setColor(if (isDark) Color.argb(90, 96, 165, 250) else Color.argb(65, 37, 99, 235))
+                drawable.setStroke(dp(1.2f), if (isDark) Color.argb(200, 147, 197, 253) else Color.argb(180, 37, 99, 235))
+            }
 
-                else -> {
-                    setColor(if (isDark) Color.argb(30, 255, 255, 255) else Color.argb(24, 15, 23, 42))
-                }
+            else -> {
+                drawable.setColor(if (isDark) Color.argb(30, 255, 255, 255) else Color.argb(24, 15, 23, 42))
+                drawable.setStroke(0, Color.TRANSPARENT)
             }
         }
+    }
 
     private fun resolveGlyphColor(
         active: Boolean,
@@ -251,6 +299,7 @@ internal class RailSlotFactory(
     private fun dp(value: Float): Int = OverlayWindowFlags.dp(densityProvider(), value)
 
     companion object {
+        private const val SCRUB_HIGHLIGHT_SCALE = 1.08f
         private const val MENU_PIN_TOP = 1
         private const val MENU_DISABLE = 2
         private const val MENU_RELOAD = 3

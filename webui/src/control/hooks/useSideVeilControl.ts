@@ -22,10 +22,12 @@ import { usePluginsControl } from './usePluginsControl.ts';
  * Coordinates KernelSU Control Plane state: authoritative config loading and serialized
  * atomic saves, daemon status/log polling, plugin registry actions, and `sideveil-ctl` commands.
  */
-export function useSideVeilControl() {
+export function useSideVeilControl(options?: { logsEnabled?: boolean }) {
   const bridge = useBridge();
   const { pushToast } = useToast();
   const { setThemeId, setColorMode } = useTheme();
+  const logsEnabledRef = useRef(Boolean(options?.logsEnabled));
+  logsEnabledRef.current = Boolean(options?.logsEnabled);
 
   const [config, setConfigState] = useState<SideVeilConfig>(DEFAULT_CONFIG);
   const [status, setStatus] = useState<DaemonStatus | null>(null);
@@ -191,15 +193,9 @@ export function useSideVeilControl() {
   }, [flushPendingSave]);
 
   useEffect(() => {
-    let active = true;
     const loadInitial = async () => {
-      await loadConfigFromDisk();
-      if (active && mountedRef.current) {
-        lastVisibilityRefreshRef.current = Date.now();
-        await refreshStatus();
-        await refreshLogs();
-        await refreshPlugins();
-      }
+      lastVisibilityRefreshRef.current = Date.now();
+      await Promise.all([loadConfigFromDisk(), refreshStatus(), refreshPlugins()]);
     };
     void loadInitial();
 
@@ -211,7 +207,7 @@ export function useSideVeilControl() {
         if (!shouldRefreshOnVisibility(lastVisibilityRefreshRef.current, now)) return;
         lastVisibilityRefreshRef.current = now;
         void refreshStatus();
-        void refreshLogs();
+        if (logsEnabledRef.current) void refreshLogs();
         void refreshPlugins();
       }
     };
@@ -227,7 +223,6 @@ export function useSideVeilControl() {
       : null;
 
     return () => {
-      active = false;
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (timer !== null) window.clearInterval(timer);
     };
@@ -252,8 +247,10 @@ export function useSideVeilControl() {
           if (action === 'ping') setLastPingMs(dt);
           pushToast(`${label}成功（${dt} ms）`, 'success');
           if (action === 'reload') await loadConfigFromDisk();
-          await refreshStatus();
-          await refreshLogs();
+          await Promise.all([
+            refreshStatus(),
+            logsEnabledRef.current ? refreshLogs() : Promise.resolve(),
+          ]);
         } else {
           pushToast(`${label}失败：${res.stderr || res.stdout}`, 'warning');
         }

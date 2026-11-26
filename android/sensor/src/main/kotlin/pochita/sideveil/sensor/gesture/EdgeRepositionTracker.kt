@@ -167,12 +167,7 @@ internal class EdgeDragKinematics {
     var lastY = 0f
     var maxInwardDx = 0f
         private set
-    var lastEventTimeMs = 0L
-        private set
-    var lastSignificantMoveTimeMs = 0L
-        private set
-    var lastVelocityPxPerSec = 0f
-        private set
+    private val velocityState = VelocityState()
     private var lastMoveEmitMs = 0L
 
     fun begin(
@@ -185,9 +180,7 @@ internal class EdgeDragKinematics {
         lastX = rawX
         lastY = rawY
         maxInwardDx = 0f
-        lastEventTimeMs = eventTimeMs
-        lastSignificantMoveTimeMs = eventTimeMs
-        lastVelocityPxPerSec = 0f
+        velocityState.reset(eventTimeMs)
         lastMoveEmitMs = 0L
     }
 
@@ -198,19 +191,13 @@ internal class EdgeDragKinematics {
         rawX: Float,
         eventTimeMs: Long,
     ) {
-        val step =
-            EdgeGestureMath.stepVelocity(
-                side,
-                rawX,
-                lastX,
-                eventTimeMs,
-                lastEventTimeMs,
-                lastSignificantMoveTimeMs,
-                lastVelocityPxPerSec,
-            )
-        lastVelocityPxPerSec = step.velocityPxPerSec
-        lastEventTimeMs = step.eventTimeMs
-        lastSignificantMoveTimeMs = step.significantMoveTimeMs
+        EdgeGestureMath.stepVelocity(
+            side = side,
+            rawX = rawX,
+            lastX = lastX,
+            eventTimeMs = eventTimeMs,
+            state = velocityState,
+        )
         lastX = rawX
     }
 
@@ -237,8 +224,8 @@ internal class EdgeDragKinematics {
             downX = downX,
             finalX = rawX ?: lastX,
             maxInwardDx = maxInwardDx,
-            trackedVelocityPxPerSec = lastVelocityPxPerSec,
-            lastSignificantMoveTimeMs = lastSignificantMoveTimeMs,
+            trackedVelocityPxPerSec = velocityState.velocityPxPerSec,
+            lastSignificantMoveTimeMs = velocityState.significantMoveTimeMs,
             upEventTimeMs = eventTimeMs,
             canceled = canceled,
             env = env,
@@ -246,7 +233,7 @@ internal class EdgeDragKinematics {
 
     fun reset() {
         maxInwardDx = 0f
-        lastSignificantMoveTimeMs = 0L
-        lastVelocityPxPerSec = 0f
+        velocityState.significantMoveTimeMs = 0L
+        velocityState.velocityPxPerSec = 0f
     }
 }

@@ -1,4 +1,9 @@
-import { type BridgeOptions, type ContainerAction, useContainerThemeSync } from '@gojona/bridge';
+import {
+  type BridgeOptions,
+  type ContainerAction,
+  type MockRpcHandler,
+  useContainerThemeSync,
+} from '@gojona/bridge';
 import { BUILTIN_DIAG_PLUGIN_ID, SideVeilPluginProvider, useClipboard } from '@gojona/sideveil-sdk';
 import {
   AppShell,
@@ -21,7 +26,13 @@ import { Activity, RefreshCw, Sparkles, X, Zap } from 'lucide-react';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useDiagnosticPanel } from './hooks/useDiagnosticPanel.ts';
 import { DIAGNOSTIC_PLUGIN_MANIFEST } from './manifest.ts';
-import { createMockPanelRpcHandler } from './mockPanelBridge.ts';
+
+let mockPanelRpcPromise: Promise<MockRpcHandler> | null = null;
+const handleLazyMockPanelRpc: MockRpcHandler = async (method, params) => {
+  mockPanelRpcPromise ??= import('./mockPanelBridge.ts').then((m) => m.createMockPanelRpcHandler());
+  const handler = await mockPanelRpcPromise;
+  return handler(method, params);
+};
 
 function nowTimeStr(): string {
   const d = new Date();
@@ -274,7 +285,7 @@ export function PanelApp() {
         'https://appassets.androidplatform.net',
       ],
       mockNamespace: 'sideveil-panel',
-      onMockRpc: createMockPanelRpcHandler(),
+      onMockRpc: handleLazyMockPanelRpc,
       onMockContainerAction: (action: ContainerAction) => {
         appendLogRef.current('info', `container.action -> ${action.type}`);
       },

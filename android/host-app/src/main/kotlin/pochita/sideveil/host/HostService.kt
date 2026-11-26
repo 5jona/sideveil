@@ -16,6 +16,7 @@ import pochita.sideveil.host.edge.EdgeIndicatorWindow
 import pochita.sideveil.host.hud.NativeHudWindow
 import pochita.sideveil.host.overlay.DynamicThemeExtractor
 import pochita.sideveil.host.overlay.EdgeHapticsController
+import pochita.sideveil.host.overlay.OverlayWindowFlags
 import pochita.sideveil.host.panel.SidebarPanelWindow
 import pochita.sideveil.host.pinned.PinnedContainerWindow
 import pochita.sideveil.host.plugin.PluginPanelOverlayState
@@ -71,6 +72,7 @@ class HostService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         windowManager = getSystemService(WindowManager::class.java)
+        OverlayWindowFlags.registerDisplayCacheInvalidator(this, mainHandler)
         HostServiceSupport.promoteForeground(this)
         initializeWindows()
         initializeCoordinators()
@@ -114,6 +116,7 @@ class HostService : LifecycleService() {
             HostServiceSupport.unregisterSystemDialogsReceiver(this, systemDialogsReceiver)
         }
         frameMetricsTracker.destroy()
+        OverlayWindowFlags.unregisterDisplayCacheInvalidator(this)
         dynamicThemeExtractor.stop()
         daemonClient.close()
         mainHandler.removeCallbacksAndMessages(null)

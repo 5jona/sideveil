@@ -43,6 +43,7 @@ body {
   gap: 12px;
   height: 100%;
   padding: 14px;
+  overflow-y: auto;
 }
 
 .header {

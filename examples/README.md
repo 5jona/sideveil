@@ -1,6 +1,6 @@
 # SideVeil Reference Example Plugins
 
-This directory contains two bundled reference plugins demonstrating the two complementary Vello / Linebender tracks in SideVeil. Their frontends are authored in `webui/src/plugins/` using React 19 + TypeScript + Tailwind CSS v4 + `@gojona/ui` + `@gojona/sideveil-sdk` and compiled via Vite (`mise run webui:check` / `bash build.sh`) into each plugin's `web/` directory:
+This directory contains three bundled reference plugins demonstrating SideVeil's plugin tracks. The first two React frontends are authored in `webui/src/plugins/` using React 19 + TypeScript + Tailwind CSS v4 + `@gojona/ui` + `@gojona/sideveil-sdk` and compiled via Vite (`mise run webui:check` / `bash build.sh`) into each plugin's `web/` directory:
 
 1. **`vello-vector-scope/`** (`example.vello-scope`):
    - Demonstrates **WebGPU + COOP/COEP (`crossOriginIsolated: true`) + live `native-glass` / `transparent` backdrop switching** inside SideVeil's isolated plugin WebView (`https://example.vello-scope.plugins.sideveil.local/`).
@@ -11,3 +11,7 @@ This directory contains two bundled reference plugins demonstrating the two comp
    - Demonstrates **zero-WebView native vector HUD rendering** powered by a standalone Rust `uds-native` daemon connecting over `/data/system/sideveil/run/hub.sock`.
    - Samples Linux `/proc/stat`, `/proc/meminfo`, and `/sys/class/thermal/` and pushes theme-aware declarative `NativeHudScene` frames (Bezier `Sparkline` + `ProgressBar` + `RadialGauge` + HWUI `tnum` text) directly to `libsideveil_hud.so` (`vello_cpu` NEON + `libjnigraphics.so`) over the ephemeral WS channel.
    - Frontend sources live in `webui/src/plugins/native-perf-hud/` and build to `examples/native-perf-hud/web/` via `pnpm build:native-perf-hud`; build the arm64 daemon binary via `mise run examples:build`.
+
+3. **`vanilla-hello/`** (`example.vanilla-hello`):
+   - Demonstrates a **zero-framework HTML/CSS/JS third-party reference plugin** communicating over SideVeil's raw `WebMessageListener` JSON-RPC 2.0 handshake without any build step.
+   - Exercises Oklch theme synchronization, jailed plugin storage (`storage`), and host toast notifications (`toast`) directly from `examples/vanilla-hello/web/`.

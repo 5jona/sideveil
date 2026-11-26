@@ -44,6 +44,7 @@ pub struct HubState {
     audit: Arc<AuditRing>,
     ws_port: AtomicU16,
     ws_token: String,
+    ws_auth_header: String,
     pub(super) next_session_id: AtomicU64,
     pub(super) next_host_rpc_id: AtomicU64,
     pub(super) pending_host_rpcs: Mutex<HashMap<String, oneshot::Sender<RpcResponse>>>,
@@ -65,6 +66,8 @@ impl HubState {
         let cache_dir = data_dir
             .parent()
             .map_or_else(|| data_dir.join("cache"), |p| p.join("cache"));
+        let ws_token = generate_hex_token();
+        let ws_auth_header = format!("Bearer {ws_token}");
         Arc::new(Self {
             started_at: Instant::now(),
             host_package,
@@ -78,7 +81,8 @@ impl HubState {
             logs,
             audit: Arc::new(AuditRing::new()),
             ws_port: AtomicU16::new(0),
-            ws_token: generate_hex_token(),
+            ws_token,
+            ws_auth_header,
             next_session_id: AtomicU64::new(1),
             next_host_rpc_id: AtomicU64::new(1),
             pending_host_rpcs: Mutex::new(HashMap::new()),
@@ -186,6 +190,11 @@ impl HubState {
     #[must_use]
     pub fn ws_token(&self) -> &str {
         &self.ws_token
+    }
+
+    #[must_use]
+    pub fn ws_auth_header(&self) -> &str {
+        &self.ws_auth_header
     }
 
     pub fn set_ws_port(&self, port: u16) {
