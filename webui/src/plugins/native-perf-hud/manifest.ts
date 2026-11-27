@@ -5,7 +5,7 @@ export const NATIVE_PERF_HUD_PLUGIN_ID = 'example.native-perf-hud';
 export const NATIVE_PERF_HUD_MANIFEST: PluginManifest = definePluginManifest({
   id: NATIVE_PERF_HUD_PLUGIN_ID,
   name: '性能监控',
-  version: '0.2.0',
+  version: '0.3.0',
   icon: 'web/icon.svg',
   entry: 'web/index.html',
   backend: 'uds-native',

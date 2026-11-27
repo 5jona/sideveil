@@ -3,7 +3,7 @@
   "apiVersion": 1,
   "id": "example.native-perf-hud",
   "name": "性能监控",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Bundled reference uds-native plugin pushing zero-WebView Native HUD telemetry scenes.",
   "icon": "web/icon.svg",
   "defaultEnabled": false,

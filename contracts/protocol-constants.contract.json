@@ -10,9 +10,18 @@
       "kotlinObject": "SideVeilProtocolVersions",
       "tsName": "SIDEVEIL_PROTOCOL_VERSIONS",
       "items": {
-        "PROTOCOL_VERSION": { "value": 1, "type": "u32" },
-        "PLUGIN_API_VERSION": { "value": 1, "type": "u32" },
-        "MANIFEST_SCHEMA_VERSION": { "value": 1, "type": "u32" }
+        "PROTOCOL_VERSION": {
+          "value": 1,
+          "type": "u32"
+        },
+        "PLUGIN_API_VERSION": {
+          "value": 1,
+          "type": "u32"
+        },
+        "MANIFEST_SCHEMA_VERSION": {
+          "value": 1,
+          "type": "u32"
+        }
       }
     },
     "protocol_events": {
@@ -21,28 +30,94 @@
       "kotlinObject": "SideVeilEvents",
       "tsName": "SIDEVEIL_EVENTS",
       "items": {
-        "CONFIG_UPDATED": { "value": "config.updated", "type": "string" },
-        "SCOPE_CHANGED": { "value": "scope.changed", "type": "string" },
-        "GESTURE_DRAG_START": { "value": "gesture.dragStart", "type": "string" },
-        "GESTURE_DRAG_MOVE": { "value": "gesture.dragMove", "type": "string" },
-        "GESTURE_DRAG_END": { "value": "gesture.dragEnd", "type": "string" },
-        "GESTURE_FULLSCREEN_HINT": { "value": "gesture.fullscreenHint", "type": "string" },
-        "EDGE_REPOSITION": { "value": "edge.reposition", "type": "string" },
-        "PANEL_COMMAND": { "value": "panel.command", "type": "string" },
-        "HOST_HELLO": { "value": "host.hello", "type": "string" },
-        "HOST_READY": { "value": "host.ready", "type": "string" },
-        "HOST_LOCAL_AUDIT": { "value": "host.localAudit", "type": "string" },
-        "HOST_FULLSCREEN_CHANGED": { "value": "host.fullscreenChanged", "type": "string" },
-        "HOST_DYNAMIC_COLORS": { "value": "host.dynamicColors", "type": "string" },
-        "HOST_DIAGNOSTICS": { "value": "host.diagnostics", "type": "string" },
-        "HOST_WEBVIEW_CONSOLE": { "value": "host.webviewConsole", "type": "string" },
-        "HOST_WEBVIEW_ERROR": { "value": "host.webviewError", "type": "string" },
-        "HOST_WEBVIEW_CRASH": { "value": "host.webviewCrash", "type": "string" },
-        "HOST_SELECT_PLUGIN": { "value": "host.selectPlugin", "type": "string" },
-        "PANEL_STATE_CHANGED": { "value": "panel.stateChanged", "type": "string" },
-        "PANEL_VISIBILITY": { "value": "panel.visibility", "type": "string" },
-        "PANEL_VISIBILITY_CHANGED": { "value": "panel.visibilityChanged", "type": "string" },
-        "PANEL_BACK_PRESSED": { "value": "panel.backPressed", "type": "string" },
+        "CONFIG_UPDATED": {
+          "value": "config.updated",
+          "type": "string"
+        },
+        "SCOPE_CHANGED": {
+          "value": "scope.changed",
+          "type": "string"
+        },
+        "GESTURE_DRAG_START": {
+          "value": "gesture.dragStart",
+          "type": "string"
+        },
+        "GESTURE_DRAG_MOVE": {
+          "value": "gesture.dragMove",
+          "type": "string"
+        },
+        "GESTURE_DRAG_END": {
+          "value": "gesture.dragEnd",
+          "type": "string"
+        },
+        "GESTURE_FULLSCREEN_HINT": {
+          "value": "gesture.fullscreenHint",
+          "type": "string"
+        },
+        "EDGE_REPOSITION": {
+          "value": "edge.reposition",
+          "type": "string"
+        },
+        "PANEL_COMMAND": {
+          "value": "panel.command",
+          "type": "string"
+        },
+        "HOST_HELLO": {
+          "value": "host.hello",
+          "type": "string"
+        },
+        "HOST_READY": {
+          "value": "host.ready",
+          "type": "string"
+        },
+        "HOST_LOCAL_AUDIT": {
+          "value": "host.localAudit",
+          "type": "string"
+        },
+        "HOST_FULLSCREEN_CHANGED": {
+          "value": "host.fullscreenChanged",
+          "type": "string"
+        },
+        "HOST_DYNAMIC_COLORS": {
+          "value": "host.dynamicColors",
+          "type": "string"
+        },
+        "HOST_DIAGNOSTICS": {
+          "value": "host.diagnostics",
+          "type": "string"
+        },
+        "HOST_WEBVIEW_CONSOLE": {
+          "value": "host.webviewConsole",
+          "type": "string"
+        },
+        "HOST_WEBVIEW_ERROR": {
+          "value": "host.webviewError",
+          "type": "string"
+        },
+        "HOST_WEBVIEW_CRASH": {
+          "value": "host.webviewCrash",
+          "type": "string"
+        },
+        "HOST_SELECT_PLUGIN": {
+          "value": "host.selectPlugin",
+          "type": "string"
+        },
+        "PANEL_STATE_CHANGED": {
+          "value": "panel.stateChanged",
+          "type": "string"
+        },
+        "PANEL_VISIBILITY": {
+          "value": "panel.visibility",
+          "type": "string"
+        },
+        "PANEL_VISIBILITY_CHANGED": {
+          "value": "panel.visibilityChanged",
+          "type": "string"
+        },
+        "PANEL_BACK_PRESSED": {
+          "value": "panel.backPressed",
+          "type": "string"
+        },
         "CONTAINER_PRESENTATION_CHANGED": {
           "value": "container.presentationChanged",
           "type": "string"
@@ -51,16 +126,46 @@
           "value": "container.clickThroughChanged",
           "type": "string"
         },
-        "PLUGINS_UPDATED": { "value": "plugins.updated", "type": "string" },
-        "PLUGINS_ACTIVE_CHANGED": { "value": "plugins.activeChanged", "type": "string" },
-        "PLUGIN_BACKEND_STATE": { "value": "plugin.backendState", "type": "string" },
-        "PLUGIN_EVENT": { "value": "plugin.event", "type": "string" },
-        "PLUGIN_BUS_MESSAGE": { "value": "plugin.busMessage", "type": "string" },
-        "THEME_PALETTE_UPDATED": { "value": "theme.paletteUpdated", "type": "string" },
-        "HUD_SCENE_UPDATED": { "value": "hud.sceneUpdated", "type": "string" },
-        "HUD_DISMISSED": { "value": "hud.dismissed", "type": "string" },
-        "NETWORK_CONTEXT_CHANGED": { "value": "network.contextChanged", "type": "string" },
-        "APPEARANCE_CHANGED": { "value": "appearance.changed", "type": "string" }
+        "PLUGINS_UPDATED": {
+          "value": "plugins.updated",
+          "type": "string"
+        },
+        "PLUGINS_ACTIVE_CHANGED": {
+          "value": "plugins.activeChanged",
+          "type": "string"
+        },
+        "PLUGIN_BACKEND_STATE": {
+          "value": "plugin.backendState",
+          "type": "string"
+        },
+        "PLUGIN_EVENT": {
+          "value": "plugin.event",
+          "type": "string"
+        },
+        "PLUGIN_BUS_MESSAGE": {
+          "value": "plugin.busMessage",
+          "type": "string"
+        },
+        "THEME_PALETTE_UPDATED": {
+          "value": "theme.paletteUpdated",
+          "type": "string"
+        },
+        "HUD_SCENE_UPDATED": {
+          "value": "hud.sceneUpdated",
+          "type": "string"
+        },
+        "HUD_DISMISSED": {
+          "value": "hud.dismissed",
+          "type": "string"
+        },
+        "NETWORK_CONTEXT_CHANGED": {
+          "value": "network.contextChanged",
+          "type": "string"
+        },
+        "APPEARANCE_CHANGED": {
+          "value": "appearance.changed",
+          "type": "string"
+        }
       }
     },
     "protocol_methods": {
@@ -69,53 +174,194 @@
       "kotlinObject": "SideVeilMethods",
       "tsName": "SIDEVEIL_METHODS",
       "items": {
-        "DAEMON_PING": { "value": "daemon.ping", "type": "string" },
-        "DAEMON_STATUS": { "value": "daemon.status", "type": "string" },
-        "DAEMON_HEALTH": { "value": "daemon.health", "type": "string" },
-        "DAEMON_LOGS": { "value": "daemon.logs", "type": "string" },
-        "DAEMON_LOGS_CLEAR": { "value": "daemon.logsClear", "type": "string" },
-        "CONFIG_GET": { "value": "config.get", "type": "string" },
-        "CONFIG_PATCH_APPEARANCE": { "value": "config.patchAppearance", "type": "string" },
-        "CONFIG_PATCH_EDGE": { "value": "config.patchEdge", "type": "string" },
-        "CONFIG_RELOAD": { "value": "config.reload", "type": "string" },
-        "PANEL_OPEN": { "value": "panel.open", "type": "string" },
-        "PANEL_CLOSE": { "value": "panel.close", "type": "string" },
-        "PANEL_TOGGLE": { "value": "panel.toggle", "type": "string" },
-        "HOST_RESTART": { "value": "host.restart", "type": "string" },
-        "CONTAINER_ACTION": { "value": "container.action", "type": "string" },
-        "PLUGINS_LIST": { "value": "plugins.list", "type": "string" },
-        "PLUGINS_RELOAD": { "value": "plugins.reload", "type": "string" },
-        "PLUGINS_INSTALL": { "value": "plugins.install", "type": "string" },
-        "PLUGINS_SET_ENABLED": { "value": "plugins.setEnabled", "type": "string" },
-        "PLUGINS_SET_PRIORITY": { "value": "plugins.setPriority", "type": "string" },
-        "PLUGINS_SET_SCOPE_OVERRIDE": { "value": "plugins.setScopeOverride", "type": "string" },
-        "PLUGINS_SET_DEV_URL": { "value": "plugins.setDevUrl", "type": "string" },
-        "PLUGINS_SET_EMBED_CONFIG": { "value": "plugins.setEmbedConfig", "type": "string" },
-        "PLUGINS_CREATE_WEB_EMBED": { "value": "plugins.createWebEmbed", "type": "string" },
-        "PLUGINS_UNINSTALL": { "value": "plugins.uninstall", "type": "string" },
-        "PLUGINS_AUDIT": { "value": "plugins.audit", "type": "string" },
-        "PLUGINS_SELECT": { "value": "plugins.select", "type": "string" },
-        "PLUGINS_GRANT_CAPABILITIES": { "value": "plugins.grantCapabilities", "type": "string" },
-        "PLUGINS_INSPECT_ARCHIVE": { "value": "plugins.inspectArchive", "type": "string" },
-        "PLUGINS_DAEMON_LOGS": { "value": "plugins.daemonLogs", "type": "string" },
-        "PLUGINS_RELOAD_WEBVIEW": { "value": "plugins.reloadWebView", "type": "string" },
-        "NETWORK_CONTEXT": { "value": "network.context", "type": "string" },
-        "PLUGIN_INVOKE": { "value": "plugin.invoke", "type": "string" },
-        "PLUGIN_BUS_PUBLISH": { "value": "plugin.busPublish", "type": "string" },
-        "FS_READ": { "value": "fs.read", "type": "string" },
-        "FS_WRITE_ATOMIC": { "value": "fs.writeAtomic", "type": "string" },
-        "SYSTEM_EXEC": { "value": "system.exec", "type": "string" },
-        "TELEMETRY_SNAPSHOT": { "value": "telemetry.snapshot", "type": "string" },
-        "CLIPBOARD_GET": { "value": "clipboard.get", "type": "string" },
-        "CLIPBOARD_SET": { "value": "clipboard.set", "type": "string" },
-        "HAPTICS_TRIGGER": { "value": "haptics.trigger", "type": "string" },
-        "UI_TOAST": { "value": "ui.toast", "type": "string" },
-        "HUD_UPDATE_SCENE": { "value": "hud.updateScene", "type": "string" },
-        "HUD_DISMISS": { "value": "hud.dismiss", "type": "string" },
-        "DEBUG_INSPECT_UI": { "value": "debug.inspectUi", "type": "string" },
-        "DEBUG_SET_WEBVIEW_DEBUGGING": { "value": "debug.setWebViewDebugging", "type": "string" },
-        "DEBUG_CDP_STATUS": { "value": "debug.cdpStatus", "type": "string" },
-        "DEBUG_RESET_FRAME_METRICS": { "value": "debug.resetFrameMetrics", "type": "string" }
+        "DAEMON_PING": {
+          "value": "daemon.ping",
+          "type": "string"
+        },
+        "DAEMON_STATUS": {
+          "value": "daemon.status",
+          "type": "string"
+        },
+        "DAEMON_HEALTH": {
+          "value": "daemon.health",
+          "type": "string"
+        },
+        "DAEMON_LOGS": {
+          "value": "daemon.logs",
+          "type": "string"
+        },
+        "DAEMON_LOGS_CLEAR": {
+          "value": "daemon.logsClear",
+          "type": "string"
+        },
+        "CONFIG_GET": {
+          "value": "config.get",
+          "type": "string"
+        },
+        "CONFIG_PATCH_APPEARANCE": {
+          "value": "config.patchAppearance",
+          "type": "string"
+        },
+        "CONFIG_PATCH_EDGE": {
+          "value": "config.patchEdge",
+          "type": "string"
+        },
+        "CONFIG_RELOAD": {
+          "value": "config.reload",
+          "type": "string"
+        },
+        "PANEL_OPEN": {
+          "value": "panel.open",
+          "type": "string"
+        },
+        "PANEL_CLOSE": {
+          "value": "panel.close",
+          "type": "string"
+        },
+        "PANEL_TOGGLE": {
+          "value": "panel.toggle",
+          "type": "string"
+        },
+        "HOST_RESTART": {
+          "value": "host.restart",
+          "type": "string"
+        },
+        "CONTAINER_ACTION": {
+          "value": "container.action",
+          "type": "string"
+        },
+        "PLUGINS_LIST": {
+          "value": "plugins.list",
+          "type": "string"
+        },
+        "PLUGINS_RELOAD": {
+          "value": "plugins.reload",
+          "type": "string"
+        },
+        "PLUGINS_INSTALL": {
+          "value": "plugins.install",
+          "type": "string"
+        },
+        "PLUGINS_SET_ENABLED": {
+          "value": "plugins.setEnabled",
+          "type": "string"
+        },
+        "PLUGINS_SET_PRIORITY": {
+          "value": "plugins.setPriority",
+          "type": "string"
+        },
+        "PLUGINS_SET_SCOPE_OVERRIDE": {
+          "value": "plugins.setScopeOverride",
+          "type": "string"
+        },
+        "PLUGINS_SET_DEV_URL": {
+          "value": "plugins.setDevUrl",
+          "type": "string"
+        },
+        "PLUGINS_SET_EMBED_CONFIG": {
+          "value": "plugins.setEmbedConfig",
+          "type": "string"
+        },
+        "PLUGINS_CREATE_WEB_EMBED": {
+          "value": "plugins.createWebEmbed",
+          "type": "string"
+        },
+        "PLUGINS_UNINSTALL": {
+          "value": "plugins.uninstall",
+          "type": "string"
+        },
+        "PLUGINS_AUDIT": {
+          "value": "plugins.audit",
+          "type": "string"
+        },
+        "PLUGINS_SELECT": {
+          "value": "plugins.select",
+          "type": "string"
+        },
+        "PLUGINS_GRANT_CAPABILITIES": {
+          "value": "plugins.grantCapabilities",
+          "type": "string"
+        },
+        "PLUGINS_INSPECT_ARCHIVE": {
+          "value": "plugins.inspectArchive",
+          "type": "string"
+        },
+        "PLUGINS_DAEMON_LOGS": {
+          "value": "plugins.daemonLogs",
+          "type": "string"
+        },
+        "PLUGINS_RELOAD_WEBVIEW": {
+          "value": "plugins.reloadWebView",
+          "type": "string"
+        },
+        "NETWORK_CONTEXT": {
+          "value": "network.context",
+          "type": "string"
+        },
+        "PLUGIN_INVOKE": {
+          "value": "plugin.invoke",
+          "type": "string"
+        },
+        "PLUGIN_BUS_PUBLISH": {
+          "value": "plugin.busPublish",
+          "type": "string"
+        },
+        "FS_READ": {
+          "value": "fs.read",
+          "type": "string"
+        },
+        "FS_WRITE_ATOMIC": {
+          "value": "fs.writeAtomic",
+          "type": "string"
+        },
+        "SYSTEM_EXEC": {
+          "value": "system.exec",
+          "type": "string"
+        },
+        "TELEMETRY_SNAPSHOT": {
+          "value": "telemetry.snapshot",
+          "type": "string"
+        },
+        "CLIPBOARD_GET": {
+          "value": "clipboard.get",
+          "type": "string"
+        },
+        "CLIPBOARD_SET": {
+          "value": "clipboard.set",
+          "type": "string"
+        },
+        "HAPTICS_TRIGGER": {
+          "value": "haptics.trigger",
+          "type": "string"
+        },
+        "UI_TOAST": {
+          "value": "ui.toast",
+          "type": "string"
+        },
+        "HUD_UPDATE_SCENE": {
+          "value": "hud.updateScene",
+          "type": "string"
+        },
+        "HUD_DISMISS": {
+          "value": "hud.dismiss",
+          "type": "string"
+        },
+        "DEBUG_INSPECT_UI": {
+          "value": "debug.inspectUi",
+          "type": "string"
+        },
+        "DEBUG_SET_WEBVIEW_DEBUGGING": {
+          "value": "debug.setWebViewDebugging",
+          "type": "string"
+        },
+        "DEBUG_CDP_STATUS": {
+          "value": "debug.cdpStatus",
+          "type": "string"
+        },
+        "DEBUG_RESET_FRAME_METRICS": {
+          "value": "debug.resetFrameMetrics",
+          "type": "string"
+        }
       }
     },
     "error_codes": {
@@ -124,19 +370,58 @@
       "kotlinObject": "SideVeilErrorCodes",
       "tsName": "SIDEVEIL_ERROR_CODES",
       "items": {
-        "PARSE_ERROR": { "value": -32700, "type": "i32" },
-        "INVALID_REQUEST": { "value": -32600, "type": "i32" },
-        "METHOD_NOT_FOUND": { "value": -32601, "type": "i32" },
-        "INVALID_PARAMS": { "value": -32602, "type": "i32" },
-        "INTERNAL_ERROR": { "value": -32000, "type": "i32" },
-        "DAEMON_DISCONNECTED": { "value": -32001, "type": "i32" },
-        "RPC_TIMEOUT": { "value": -32002, "type": "i32" },
-        "PERMISSION_DENIED": { "value": -32003, "type": "i32" },
-        "RATE_LIMITED": { "value": -32004, "type": "i32" },
-        "VERSION_MISMATCH": { "value": -32005, "type": "i32" },
-        "QUOTA_EXCEEDED": { "value": -32006, "type": "i32" },
-        "BACKEND_OFFLINE": { "value": -32010, "type": "i32" },
-        "BACKEND_TIMEOUT": { "value": -32011, "type": "i32" }
+        "PARSE_ERROR": {
+          "value": -32700,
+          "type": "i32"
+        },
+        "INVALID_REQUEST": {
+          "value": -32600,
+          "type": "i32"
+        },
+        "METHOD_NOT_FOUND": {
+          "value": -32601,
+          "type": "i32"
+        },
+        "INVALID_PARAMS": {
+          "value": -32602,
+          "type": "i32"
+        },
+        "INTERNAL_ERROR": {
+          "value": -32000,
+          "type": "i32"
+        },
+        "DAEMON_DISCONNECTED": {
+          "value": -32001,
+          "type": "i32"
+        },
+        "RPC_TIMEOUT": {
+          "value": -32002,
+          "type": "i32"
+        },
+        "PERMISSION_DENIED": {
+          "value": -32003,
+          "type": "i32"
+        },
+        "RATE_LIMITED": {
+          "value": -32004,
+          "type": "i32"
+        },
+        "VERSION_MISMATCH": {
+          "value": -32005,
+          "type": "i32"
+        },
+        "QUOTA_EXCEEDED": {
+          "value": -32006,
+          "type": "i32"
+        },
+        "BACKEND_OFFLINE": {
+          "value": -32010,
+          "type": "i32"
+        },
+        "BACKEND_TIMEOUT": {
+          "value": -32011,
+          "type": "i32"
+        }
       }
     },
     "themes": {
@@ -145,8 +430,14 @@
       "kotlinObject": "SideVeilThemes",
       "tsName": "SIDEVEIL_THEMES",
       "items": {
-        "COLOROS_GLASS": { "value": "coloros-glass", "type": "string" },
-        "MODERN_SAAS_DARK": { "value": "modern-saas-dark", "type": "string" }
+        "COLOROS_GLASS": {
+          "value": "coloros-glass",
+          "type": "string"
+        },
+        "MODERN_SAAS_DARK": {
+          "value": "modern-saas-dark",
+          "type": "string"
+        }
       }
     },
     "builtin_diagnostic": {
@@ -155,16 +446,46 @@
       "kotlinObject": "SideVeilBuiltinDiagnostic",
       "tsName": "SIDEVEIL_BUILTIN_DIAGNOSTIC",
       "items": {
-        "ID": { "value": "sideveil.diagnostic", "type": "string" },
-        "NAME": { "value": "内置诊断", "type": "string" },
-        "VERSION": { "value": "0.2.0", "type": "string" },
-        "ENTRY": { "value": "index.html", "type": "string" },
-        "PRIORITY": { "value": 20, "type": "i32" },
-        "GLOBAL": { "value": false, "type": "bool" },
-        "BACKEND": { "value": "none", "type": "string" },
-        "SURFACE_BACKDROP": { "value": "native-glass", "type": "string" },
-        "CAPABILITY_STORAGE": { "value": "storage", "type": "string" },
-        "CAPABILITY_TOAST": { "value": "toast", "type": "string" }
+        "ID": {
+          "value": "sideveil.diagnostic",
+          "type": "string"
+        },
+        "NAME": {
+          "value": "内置诊断",
+          "type": "string"
+        },
+        "VERSION": {
+          "value": "0.3.0",
+          "type": "string"
+        },
+        "ENTRY": {
+          "value": "index.html",
+          "type": "string"
+        },
+        "PRIORITY": {
+          "value": 20,
+          "type": "i32"
+        },
+        "GLOBAL": {
+          "value": false,
+          "type": "bool"
+        },
+        "BACKEND": {
+          "value": "none",
+          "type": "string"
+        },
+        "SURFACE_BACKDROP": {
+          "value": "native-glass",
+          "type": "string"
+        },
+        "CAPABILITY_STORAGE": {
+          "value": "storage",
+          "type": "string"
+        },
+        "CAPABILITY_TOAST": {
+          "value": "toast",
+          "type": "string"
+        }
       }
     },
     "timeouts": {
@@ -173,13 +494,34 @@
       "kotlinObject": "SideVeilTimeoutBounds",
       "tsName": "SIDEVEIL_TIMEOUT_BOUNDS",
       "items": {
-        "MIN_PLUGIN_INVOKE_MS": { "value": 1000, "type": "u64" },
-        "DEFAULT_PLUGIN_INVOKE_MS": { "value": 8000, "type": "u64" },
-        "MAX_PLUGIN_INVOKE_MS": { "value": 60000, "type": "u64" },
-        "MIN_INSPECT_UI_MS": { "value": 1000, "type": "u64" },
-        "DEFAULT_INSPECT_UI_MS": { "value": 5000, "type": "u64" },
-        "MAX_INSPECT_UI_MS": { "value": 60000, "type": "u64" },
-        "PLUGIN_EVENT_LAGGED_SUBEVENT": { "value": "plugin.eventLagged", "type": "string" }
+        "MIN_PLUGIN_INVOKE_MS": {
+          "value": 1000,
+          "type": "u64"
+        },
+        "DEFAULT_PLUGIN_INVOKE_MS": {
+          "value": 8000,
+          "type": "u64"
+        },
+        "MAX_PLUGIN_INVOKE_MS": {
+          "value": 60000,
+          "type": "u64"
+        },
+        "MIN_INSPECT_UI_MS": {
+          "value": 1000,
+          "type": "u64"
+        },
+        "DEFAULT_INSPECT_UI_MS": {
+          "value": 5000,
+          "type": "u64"
+        },
+        "MAX_INSPECT_UI_MS": {
+          "value": 60000,
+          "type": "u64"
+        },
+        "PLUGIN_EVENT_LAGGED_SUBEVENT": {
+          "value": "plugin.eventLagged",
+          "type": "string"
+        }
       }
     },
     "hud_defaults": {
@@ -188,18 +530,54 @@
       "kotlinObject": "SideVeilHudDefaults",
       "tsName": "SIDEVEIL_HUD_DEFAULTS",
       "items": {
-        "DEFAULT_TEXT_SIZE_SP": { "value": 12.0, "type": "f32" },
-        "DEFAULT_TEXT_COLOR_ARGB": { "value": 4294047225, "type": "u32" },
-        "DEFAULT_WIDTH_DP": { "value": 200.0, "type": "f32" },
-        "DEFAULT_HEIGHT_DP": { "value": 88.0, "type": "f32" },
-        "DEFAULT_CORNER_RADIUS_DP": { "value": 18.0, "type": "f32" },
-        "DEFAULT_ANCHOR_X_PERCENT": { "value": 4.0, "type": "f32" },
-        "DEFAULT_ANCHOR_Y_PERCENT": { "value": 12.0, "type": "f32" },
-        "DEFAULT_STROKE_WIDTH": { "value": 1.5, "type": "f32" },
-        "DEFAULT_GAUGE_START_DEG": { "value": 135.0, "type": "f32" },
-        "DEFAULT_GAUGE_SWEEP_DEG": { "value": 270.0, "type": "f32" },
-        "MAX_PRIMITIVES": { "value": 64, "type": "usize" },
-        "MAX_TEXTS": { "value": 32, "type": "usize" }
+        "DEFAULT_TEXT_SIZE_SP": {
+          "value": 12,
+          "type": "f32"
+        },
+        "DEFAULT_TEXT_COLOR_ARGB": {
+          "value": 4294047225,
+          "type": "u32"
+        },
+        "DEFAULT_WIDTH_DP": {
+          "value": 200,
+          "type": "f32"
+        },
+        "DEFAULT_HEIGHT_DP": {
+          "value": 88,
+          "type": "f32"
+        },
+        "DEFAULT_CORNER_RADIUS_DP": {
+          "value": 18,
+          "type": "f32"
+        },
+        "DEFAULT_ANCHOR_X_PERCENT": {
+          "value": 4,
+          "type": "f32"
+        },
+        "DEFAULT_ANCHOR_Y_PERCENT": {
+          "value": 12,
+          "type": "f32"
+        },
+        "DEFAULT_STROKE_WIDTH": {
+          "value": 1.5,
+          "type": "f32"
+        },
+        "DEFAULT_GAUGE_START_DEG": {
+          "value": 135,
+          "type": "f32"
+        },
+        "DEFAULT_GAUGE_SWEEP_DEG": {
+          "value": 270,
+          "type": "f32"
+        },
+        "MAX_PRIMITIVES": {
+          "value": 64,
+          "type": "usize"
+        },
+        "MAX_TEXTS": {
+          "value": 32,
+          "type": "usize"
+        }
       }
     }
   },

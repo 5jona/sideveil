@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-11-27
+
+### Changed
+
+- Unified module (`v0.3.0`, `versionCode=300`), Rust hub crates, Kotlin sensor, SideVeilHost APK, built-in diagnostic contract, WebUI, and bundled example plugins to `v0.3.0`.
+- Upgraded `@gojona/*` dependencies to `^0.3.1`, redesigned the Control Plane layout with full-screen bottom navigation, and split control header, daemon status, and panel shell components.
+- Optimized hub UDS framing, bounded LRU asset memory cache (`AssetMemoryCache`), JNI HUD rendering, edge gesture tracking, and host window blur/layout commit deduplication (`WindowCommitTrackers`).
+
+### Fixed
+
+- Hardened SideVeilHost background keep-alive (AppOps, sysconfig allowlist, foreground promotion), `/data/system/sideveil/data/*` permissions, endpoint token permissions, loopback `Host` header validation, and `PR_SET_PDEATHSIG` ordering after `setuid`.
+- Guarded `libsideveil_hud.so` allocation bounds with `catch_unwind`, deferred boot-time host wake until user-0 CE storage unlocks, eliminated `SideVeilEdgeIndicator` resize churn, and purged orphaned `plugins.json` overrides on uninstall.
+
 ## [0.2.0] - 2026-11-25
 
 ### Changed

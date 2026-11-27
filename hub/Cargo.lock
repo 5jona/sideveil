@@ -621,7 +621,7 @@ dependencies = [
 
 [[package]]
 name = "sideveil-ctl"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde_json",
  "sideveil-protocol",
@@ -629,7 +629,7 @@ dependencies = [
 
 [[package]]
 name = "sideveil-gfx"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "sideveil-protocol",
  "thiserror",
@@ -639,7 +639,7 @@ dependencies = [
 
 [[package]]
 name = "sideveil-hud-jni"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "jni-sys",
  "serde_json",
@@ -649,7 +649,7 @@ dependencies = [
 
 [[package]]
 name = "sideveil-plugin-sdk"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "futures-util",
  "serde",
@@ -662,7 +662,7 @@ dependencies = [
 
 [[package]]
 name = "sideveil-protocol"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "crc32fast",
  "data-encoding",
@@ -674,7 +674,7 @@ dependencies = [
 
 [[package]]
 name = "sideveild"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "futures-util",
  "libc",
