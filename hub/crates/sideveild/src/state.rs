@@ -20,6 +20,7 @@ use tokio::sync::{mpsc, oneshot};
 pub use self::runtime::HostWakeSignal;
 use self::runtime::generate_hex_token;
 pub(crate) use self::runtime::{HostSessionHandle, RuntimeSnapshot, SensorSessionHandle};
+use crate::asset_server::AssetMemoryCache;
 use crate::audit_ring::AuditRing;
 use crate::config_store::ConfigStore;
 use crate::log_ring::LogRing;
@@ -42,6 +43,7 @@ pub struct HubState {
     cache_dir: PathBuf,
     pub(super) logs: Arc<LogRing>,
     audit: Arc<AuditRing>,
+    asset_cache: AssetMemoryCache,
     ws_port: AtomicU16,
     ws_token: String,
     ws_auth_header: String,
@@ -80,6 +82,7 @@ impl HubState {
             cache_dir,
             logs,
             audit: Arc::new(AuditRing::new()),
+            asset_cache: AssetMemoryCache::new(),
             ws_port: AtomicU16::new(0),
             ws_token,
             ws_auth_header,
@@ -131,6 +134,11 @@ impl HubState {
     #[must_use]
     pub fn audit(&self) -> &Arc<AuditRing> {
         &self.audit
+    }
+
+    #[must_use]
+    pub(crate) fn asset_cache(&self) -> &AssetMemoryCache {
+        &self.asset_cache
     }
 
     #[must_use]

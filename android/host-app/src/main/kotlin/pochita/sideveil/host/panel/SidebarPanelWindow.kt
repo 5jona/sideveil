@@ -259,6 +259,7 @@ class SidebarPanelWindow(
             attached = false
         }
         windowLayout.resetAppliedLayoutSnapshot()
+        backdropController.resetAppliedBlur()
     }
 
     private fun handleDragWatchdogTimeout() {

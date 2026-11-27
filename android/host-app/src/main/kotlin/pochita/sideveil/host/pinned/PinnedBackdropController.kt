@@ -5,6 +5,7 @@ import android.view.View
 import android.view.Window
 import android.view.WindowManager
 import pochita.sideveil.host.overlay.BlurMaskDrawable
+import pochita.sideveil.host.overlay.BlurRadiusCommitTracker
 import pochita.sideveil.host.overlay.GlassBackdropDrawable
 import pochita.sideveil.host.overlay.GlassBackdropStyle
 import pochita.sideveil.host.overlay.OverlayWindowFlags
@@ -37,7 +38,7 @@ internal class PinnedBackdropController(
     private var isDark = true
     private var dynamicTint: GlassTintOverride? = null
     private var systemBlurSupported = runCatching { windowManager.isCrossWindowBlurEnabled }.getOrDefault(false)
-    private var lastAppliedBlur = -1
+    private val blurCommitTracker = BlurRadiusCommitTracker()
     private var lastAppliedCornerPx = -1f
 
     private val blurEnabledListener =
@@ -111,14 +112,18 @@ internal class PinnedBackdropController(
                 panelConfig.nativeBlurEnabled
         val radius = if (blurAllowed) panelConfig.blurRadiusPx.coerceIn(0, 180) else 0
         backdropDrawable.updateStyle(
-            GlassBackdropStyle(themeId, isDark, blurActive = radius > 0, cornerRadiusPx = corner, dynamicOverride = dynamicTint),
+            themeId = themeId,
+            isDark = isDark,
+            blurActive = radius > 0,
+            cornerRadiusPx = corner,
+            dynamicOverride = dynamicTint,
         )
         applyBlur(window, radius)
     }
 
     fun clearBlur(window: Window) = applyBlur(window, 0)
 
-    fun appliedBlurRadiusPx(): Int = lastAppliedBlur.coerceAtLeast(0)
+    fun appliedBlurRadiusPx(): Int = blurCommitTracker.appliedRadiusPx
 
     fun agslDebugState(): DebugAgslSnapshot = backdropDrawable.debugState()
 
@@ -126,9 +131,8 @@ internal class PinnedBackdropController(
         window: Window,
         radius: Int,
     ) {
-        if (lastAppliedBlur != radius) {
-            lastAppliedBlur = radius
-            window.setBackgroundBlurRadius(radius)
+        blurCommitTracker.commitIfChanged(radius) { committed ->
+            window.setBackgroundBlurRadius(committed)
         }
     }
 }

@@ -2,6 +2,7 @@ package pochita.sideveil.host.overlay
 
 import pochita.sideveil.protocol.GlassTintOverride
 import pochita.sideveil.protocol.SideVeilConfig
+import kotlin.math.abs
 
 /**
  * Immutable rendering configuration for [GlassBackdropDrawable].
@@ -13,6 +14,24 @@ data class GlassBackdropStyle(
     val cornerRadiusPx: Float = 56f,
     val dynamicOverride: GlassTintOverride? = null,
 ) {
+    /**
+     * Zero-allocation equality check against individual style fields with epsilon tolerance
+     * for [cornerRadiusPx].
+     */
+    fun matches(
+        themeId: String,
+        isDark: Boolean,
+        blurActive: Boolean,
+        cornerRadiusPx: Float,
+        dynamicOverride: GlassTintOverride?,
+        cornerEpsilon: Float = 0.001f,
+    ): Boolean =
+        this.themeId == themeId &&
+            this.isDark == isDark &&
+            this.blurActive == blurActive &&
+            abs(this.cornerRadiusPx - cornerRadiusPx) < cornerEpsilon &&
+            this.dynamicOverride == dynamicOverride
+
     companion object {
         /** Canonical theme identifier for the translucent ColorOS-style glass preset. */
         val THEME_COLOROS_GLASS: String = SideVeilConfig.DEFAULT.panel.themeId

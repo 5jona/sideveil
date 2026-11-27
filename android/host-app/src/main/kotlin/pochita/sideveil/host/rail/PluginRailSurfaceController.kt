@@ -8,10 +8,10 @@ import android.view.View
 import android.view.Window
 import android.view.WindowManager
 import pochita.sideveil.host.overlay.BlurMaskDrawable
+import pochita.sideveil.host.overlay.BlurRadiusCommitTracker
 import pochita.sideveil.host.overlay.GlassBackdropDrawable
 import pochita.sideveil.host.overlay.GlassBackdropStyle
 import pochita.sideveil.host.overlay.OverlayWindowFlags
-import pochita.sideveil.host.overlay.OverlayWindowLayoutSnapshot
 import pochita.sideveil.host.overlay.WindowLayoutCommitTracker
 import pochita.sideveil.host.panel.OverlayHorizontalMetrics
 import pochita.sideveil.host.panel.PanelInsetsCoordinator
@@ -65,11 +65,14 @@ internal class PluginRailSurfaceController(
     private var syncedThemeId = GlassBackdropStyle.THEME_COLOROS_GLASS
     private var dynamicTint: GlassTintOverride? = null
     private var systemBlurSupported = runCatching { windowManager.isCrossWindowBlurEnabled }.getOrDefault(false)
-    private var lastAppliedBlurRadius = -1
+    private val blurCommitTracker = BlurRadiusCommitTracker()
     private var highFrameRateApplied = false
     private val layoutCommitTracker = WindowLayoutCommitTracker()
 
-    fun resetAppliedLayoutSnapshot() = layoutCommitTracker.reset()
+    fun resetAppliedLayoutSnapshot() {
+        layoutCommitTracker.reset()
+        blurCommitTracker.reset()
+    }
 
     private val blurEnabledListener =
         Consumer<Boolean> { enabled ->
@@ -251,14 +254,14 @@ internal class PluginRailSurfaceController(
         window: Window,
         lp: WindowManager.LayoutParams,
     ) {
-        layoutCommitTracker.commitIfChanged(OverlayWindowLayoutSnapshot.from(lp)) {
+        layoutCommitTracker.commitIfChanged(lp) {
             window.attributes = lp
         }
     }
 
     fun cornerPx(): Float = dp(if (lastHorizontalMetrics.compact) 16f else 20f).toFloat()
 
-    fun appliedBlurRadiusPx(): Int = lastAppliedBlurRadius.coerceAtLeast(0)
+    fun appliedBlurRadiusPx(): Int = blurCommitTracker.appliedRadiusPx
 
     fun agslDebugState(): DebugAgslSnapshot = backdropDrawable.debugState()
 
@@ -269,18 +272,15 @@ internal class PluginRailSurfaceController(
         val configBlur = if (panelConfig.nativeBlurEnabled && systemBlurSupported) panelConfig.blurRadiusPx else 0
         val radius = PanelMotionChoreographer.computeProgressiveBlur(progress, configBlur)
         backdropDrawable.updateStyle(
-            GlassBackdropStyle(
-                themeId = syncedThemeId,
-                isDark = isDark,
-                blurActive = radius > 0,
-                cornerRadiusPx = cornerPx(),
-                dynamicOverride = dynamicTint,
-            ),
+            themeId = syncedThemeId,
+            isDark = isDark,
+            blurActive = radius > 0,
+            cornerRadiusPx = cornerPx(),
+            dynamicOverride = dynamicTint,
         )
         backdropDrawable.updateMotion(progress, 0f)
-        if (lastAppliedBlurRadius != radius) {
-            lastAppliedBlurRadius = radius
-            window.setBackgroundBlurRadius(radius)
+        blurCommitTracker.commitIfChanged(radius) { committed ->
+            window.setBackgroundBlurRadius(committed)
         }
     }
 

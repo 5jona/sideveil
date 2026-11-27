@@ -12,6 +12,7 @@ import android.graphics.drawable.GradientDrawable
 import android.view.View
 import android.view.ViewOutlineProvider
 import pochita.sideveil.protocol.DebugAgslSnapshot
+import pochita.sideveil.protocol.GlassTintOverride
 import kotlin.math.abs
 
 /**
@@ -29,6 +30,9 @@ class GlassBackdropDrawable(
     private var drawableAlpha: Int = 255
     private var motionProgress: Float = 1f
     private var velocityShift: Float = 0f
+    private var lastBoundsWidthPx: Int = -1
+    private var lastBoundsHeightPx: Int = -1
+    private var lastBoundsCornerPx: Float = -1f
 
     private val shaderPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val runtimeShader: RuntimeShader? = GlassBackdropShader.create()
@@ -47,11 +51,27 @@ class GlassBackdropDrawable(
     /** Updates display density for dp-scaled rim and glow shader uniforms. */
     fun updateDensity(nextDensity: Float): Boolean {
         val clamped = nextDensity.coerceAtLeast(1f)
-        if (density == clamped) return false
+        if (abs(density - clamped) < UNIFORM_EPSILON) return false
         density = clamped
         syncVisuals()
         invalidateSelf()
         return true
+    }
+
+    /**
+     * Zero-allocation style update checking field equality before constructing a [GlassBackdropStyle].
+     */
+    fun updateStyle(
+        themeId: String,
+        isDark: Boolean,
+        blurActive: Boolean,
+        cornerRadiusPx: Float,
+        dynamicOverride: GlassTintOverride?,
+    ): Boolean {
+        if (style.matches(themeId, isDark, blurActive, cornerRadiusPx, dynamicOverride, UNIFORM_EPSILON)) {
+            return false
+        }
+        return updateStyle(GlassBackdropStyle(themeId, isDark, blurActive, cornerRadiusPx, dynamicOverride))
     }
 
     /**
@@ -70,35 +90,63 @@ class GlassBackdropDrawable(
     }
 
     /**
+     * Coalesces drawable alpha and AGSL specular motion uniform updates into a single
+     * [invalidateSelf] call when either value exceeds its delta threshold.
+     */
+    fun applyMotion(
+        nextAlpha: Int,
+        nextMotionProgress: Float,
+        nextVelocityShift: Float,
+    ): Boolean {
+        val clampedAlpha = nextAlpha.coerceIn(0, 255)
+        val alphaChanged = drawableAlpha != clampedAlpha
+        if (alphaChanged) {
+            drawableAlpha = clampedAlpha
+        }
+        val clampedProgress = nextMotionProgress.coerceIn(0f, 1.15f)
+        val clampedShift = nextVelocityShift.coerceIn(-1f, 1f)
+        val motionChanged =
+            abs(clampedProgress - motionProgress) >= MOTION_EPSILON ||
+                abs(clampedShift - velocityShift) >= MOTION_EPSILON
+        if (motionChanged) {
+            motionProgress = clampedProgress
+            velocityShift = clampedShift
+            runtimeShader?.let { shader ->
+                GlassBackdropShader.applyMotionUniforms(shader, motionProgress, velocityShift)
+                rebindShader(shader)
+            }
+        }
+        if (!alphaChanged && !motionChanged) {
+            return false
+        }
+        invalidateSelf()
+        return true
+    }
+
+    /**
      * Updates AGSL specular motion flow uniforms during drag/spring transitions without
      * reallocating paints or redrawing idle frames.
      */
     fun updateMotion(
         nextMotionProgress: Float,
         nextVelocityShift: Float,
-    ): Boolean {
-        val clampedProgress = nextMotionProgress.coerceIn(0f, 1.15f)
-        val clampedShift = nextVelocityShift.coerceIn(-1f, 1f)
-        if (abs(clampedProgress - motionProgress) < MOTION_EPSILON &&
-            abs(clampedShift - velocityShift) < MOTION_EPSILON
-        ) {
-            return false
-        }
-        motionProgress = clampedProgress
-        velocityShift = clampedShift
-        val shader = runtimeShader ?: return false
-        GlassBackdropShader.applyMotionUniforms(shader, motionProgress, velocityShift)
-        rebindShader(shader)
-        invalidateSelf()
-        return true
-    }
+    ): Boolean = applyMotion(drawableAlpha, nextMotionProgress, nextVelocityShift)
 
     override fun onBoundsChange(bounds: Rect) {
         super.onBoundsChange(bounds)
         fallbackDrawable.bounds = bounds
-        if (runtimeShader != null) {
-            GlassBackdropShader.applyBoundsUniforms(runtimeShader, style, bounds)
-            rebindShader(runtimeShader)
+        val shader = runtimeShader ?: return
+        val w = bounds.width()
+        val h = bounds.height()
+        val corner = style.cornerRadiusPx
+        val sizeChanged = w != lastBoundsWidthPx || h != lastBoundsHeightPx
+        val cornerChanged = abs(corner - lastBoundsCornerPx) >= UNIFORM_EPSILON
+        if (sizeChanged || cornerChanged) {
+            lastBoundsWidthPx = w
+            lastBoundsHeightPx = h
+            lastBoundsCornerPx = corner
+            GlassBackdropShader.applyBoundsUniforms(shader, style, bounds)
+            rebindShader(shader)
         }
     }
 
@@ -129,6 +177,7 @@ class GlassBackdropDrawable(
     }
 
     override fun setColorFilter(colorFilter: ColorFilter?) {
+        if (shaderPaint.colorFilter == colorFilter) return
         shaderPaint.colorFilter = colorFilter
         fallbackDrawable.colorFilter = colorFilter
         invalidateSelf()
@@ -159,6 +208,9 @@ class GlassBackdropDrawable(
         if (shader != null) {
             GlassBackdropShader.applyStyleUniforms(shader, style, palette, density)
             GlassBackdropShader.applyBoundsUniforms(shader, style, bounds)
+            lastBoundsWidthPx = bounds.width()
+            lastBoundsHeightPx = bounds.height()
+            lastBoundsCornerPx = style.cornerRadiusPx
             GlassBackdropShader.applyMotionUniforms(shader, motionProgress, velocityShift)
             rebindShader(shader)
         } else {
@@ -179,6 +231,7 @@ class GlassBackdropDrawable(
 
     companion object {
         private const val MOTION_EPSILON = 0.005f
+        private const val UNIFORM_EPSILON = 0.001f
 
         /**
          * Creates a [ViewOutlineProvider] synchronized with the exact round-rect corner radius

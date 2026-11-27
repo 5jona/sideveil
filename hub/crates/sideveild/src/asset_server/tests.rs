@@ -227,3 +227,85 @@ async fn serves_spa_fallback_and_immutable_asset_cache_headers() {
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[tokio::test]
+async fn memory_cache_hits_invalidates_on_change_and_skips_oversized_assets() {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!(
+        "sideveil-asset-cache-{}-{nanos}",
+        std::process::id()
+    ));
+    let plugin_dir = dir.join("plugins/com.cache.demo");
+    fs::create_dir_all(plugin_dir.join("web/assets")).expect("mkdir");
+    let small_path = plugin_dir.join("web/index.html");
+    let large_path = plugin_dir.join("web/assets/large.bin");
+    fs::write(&small_path, "<html>v1</html>").expect("write small v1");
+    fs::write(&large_path, vec![b'x'; 512 * 1024 + 1]).expect("write large");
+    fs::write(
+        plugin_dir.join("manifest.json"),
+        r#"{
+            "id": "com.cache.demo",
+            "name": "Cache Demo",
+            "version": "1.0.0",
+            "entry": "web/index.html"
+        }"#,
+    )
+    .expect("write manifest");
+
+    let logs = Arc::new(LogRing::new());
+    let store = ConfigStore::open(dir.join("config.json"), Arc::clone(&logs));
+    let registry = PluginRegistry::open(
+        dir.join("plugins"),
+        dir.join("plugins.json"),
+        Arc::clone(&logs),
+    );
+    let (wake_tx, _wake_rx) = mpsc::unbounded_channel();
+    let state = HubState::new(
+        DEFAULT_HOST_PACKAGE.to_owned(),
+        store,
+        registry,
+        dir.join("data"),
+        logs,
+        wake_tx,
+    );
+
+    // 1. First GET populates memory cache.
+    assert_eq!(state.asset_cache().stats(), (0, 0));
+    let resp1 =
+        send_asset_request(Arc::clone(&state), "/plugins/com.cache.demo/web/index.html").await;
+    assert!(resp1.ends_with("<html>v1</html>"));
+    assert_eq!(state.asset_cache().stats(), (1, "<html>v1</html>".len()));
+
+    // 2. Second GET hits cache cleanly.
+    let resp2 =
+        send_asset_request(Arc::clone(&state), "/plugins/com.cache.demo/web/index.html").await;
+    assert!(resp2.ends_with("<html>v1</html>"));
+    assert_eq!(state.asset_cache().stats(), (1, "<html>v1</html>".len()));
+
+    // 3. Modifying the file on disk invalidates the cached entry and serves fresh bytes.
+    fs::write(&small_path, "<html>v2-updated</html>").expect("write small v2");
+    let resp3 =
+        send_asset_request(Arc::clone(&state), "/plugins/com.cache.demo/web/index.html").await;
+    assert!(resp3.ends_with("<html>v2-updated</html>"));
+    assert_eq!(
+        state.asset_cache().stats(),
+        (1, "<html>v2-updated</html>".len())
+    );
+
+    // 4. Files > 512 KiB are served normally but bypassed by the memory cache.
+    let large_resp = send_asset_request(
+        Arc::clone(&state),
+        "/plugins/com.cache.demo/web/assets/large.bin",
+    )
+    .await;
+    assert!(large_resp.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert_eq!(
+        state.asset_cache().stats(),
+        (1, "<html>v2-updated</html>".len())
+    );
+
+    let _ = fs::remove_dir_all(&dir);
+}

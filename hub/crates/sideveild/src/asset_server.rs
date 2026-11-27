@@ -2,6 +2,7 @@
 
 mod http;
 mod icon_cache;
+mod memory_cache;
 mod path;
 
 use std::sync::Arc;
@@ -17,6 +18,8 @@ use self::http::{
     write_not_modified,
 };
 pub(crate) use self::http::{cache_headers_for, mime_type_for};
+pub(crate) use self::memory_cache::AssetMemoryCache;
+use self::memory_cache::{AssetStamp, MAX_CACHED_ASSET_BYTES};
 pub use self::path::{
     ResolveAssetError, is_spa_route_path, resolve_asset_file, resolve_asset_file_checked,
 };
@@ -199,12 +202,39 @@ async fn serve_single_asset_request(
             && keep_alive;
     }
 
-    let Ok(bytes) = fs::read(&file_path).await else {
-        let _ = write_error(write_half, 500, "Internal Server Error").await;
-        return false;
+    let mime = mime_type_for(&file_path);
+    if req.method == "HEAD" {
+        let header = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: {mime}\r\nContent-Length: {}\r\n{cache_headers}X-Content-Type-Options: nosniff\r\n{coi_headers}Connection: {conn_hdr}\r\n\r\n",
+            meta.len()
+        );
+        if write_half.write_all(header.as_bytes()).await.is_err() {
+            return false;
+        }
+        return write_half.flush().await.is_ok() && keep_alive;
+    }
+
+    let stamp = AssetStamp::from_metadata(&meta);
+    let bytes = if let Some(s) = stamp
+        && let Some(cached) = state.asset_cache().get(&file_path, s)
+    {
+        cached
+    } else {
+        let Ok(raw) = fs::read(&file_path).await else {
+            let _ = write_error(write_half, 500, "Internal Server Error").await;
+            return false;
+        };
+        let payload = Arc::new(raw);
+        if let Some(s) = stamp
+            && payload.len() <= MAX_CACHED_ASSET_BYTES
+        {
+            state
+                .asset_cache()
+                .insert(file_path, s, Arc::clone(&payload));
+        }
+        payload
     };
 
-    let mime = mime_type_for(&file_path);
     let header = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: {mime}\r\nContent-Length: {}\r\n{cache_headers}X-Content-Type-Options: nosniff\r\n{coi_headers}Connection: {conn_hdr}\r\n\r\n",
         bytes.len()
@@ -212,7 +242,7 @@ async fn serve_single_asset_request(
     if write_half.write_all(header.as_bytes()).await.is_err() {
         return false;
     }
-    if req.method == "GET" && write_half.write_all(&bytes).await.is_err() {
+    if write_half.write_all(&bytes).await.is_err() {
         return false;
     }
     write_half.flush().await.is_ok() && keep_alive

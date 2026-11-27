@@ -8,6 +8,7 @@ import android.view.WindowManager
 import androidx.core.view.isVisible
 import pochita.sideveil.host.debug.PanelBackdropDebugState
 import pochita.sideveil.host.overlay.BlurMaskDrawable
+import pochita.sideveil.host.overlay.BlurRadiusCommitTracker
 import pochita.sideveil.host.overlay.GlassBackdropDrawable
 import pochita.sideveil.host.overlay.GlassBackdropStyle
 import pochita.sideveil.protocol.GlassTintOverride
@@ -41,7 +42,7 @@ internal class PanelBackdropController(
     private var panelConfig: PanelConfig = PanelConfig()
     private var pluginBackdrop: PluginSurfaceBackdrop = PluginSurfaceBackdrop.NATIVE_GLASS
     private var dynamicTint: GlassTintOverride? = null
-    private var lastAppliedBlurRadius: Int = -1
+    private val blurCommitTracker = BlurRadiusCommitTracker()
     private var lastAppliedCornerPx: Float = -1f
 
     private val blurEnabledListener =
@@ -72,6 +73,10 @@ internal class PanelBackdropController(
         runCatching {
             windowManager.removeCrossWindowBlurEnabledListener(blurEnabledListener)
         }
+    }
+
+    fun resetAppliedBlur() {
+        blurCommitTracker.reset()
     }
 
     fun updateConfig(config: PanelConfig) {
@@ -120,8 +125,7 @@ internal class PanelBackdropController(
     }
 
     fun clearWindowBlur(window: Window) {
-        backdropDrawable.alpha = 255
-        backdropDrawable.updateMotion(1f, 0f)
+        backdropDrawable.applyMotion(255, 1f, 0f)
         applyBlurRadius(window, 0)
     }
 
@@ -138,7 +142,7 @@ internal class PanelBackdropController(
             colorScheme = colorScheme,
             pluginBackdrop = pluginBackdrop,
             systemBlurSupported = systemBlurSupported,
-            appliedBlurRadiusPx = lastAppliedBlurRadius.coerceAtLeast(0),
+            appliedBlurRadiusPx = blurCommitTracker.appliedRadiusPx,
             targetBlurRadiusPx = targetBlurRadiusPx(),
             agsl = backdropDrawable.debugState(),
         )
@@ -165,8 +169,8 @@ internal class PanelBackdropController(
         }
         val clampedBlur = blurRadiusPx.coerceIn(0, targetBlurRadiusPx())
         applyBlurRadius(window, clampedBlur)
-        backdropDrawable.alpha = (backdropAlpha.coerceIn(0f, 1f) * 255f).toInt().coerceIn(0, 255)
-        backdropDrawable.updateMotion(motionProgress, velocityShift)
+        val alphaInt = (backdropAlpha.coerceIn(0f, 1f) * 255f).toInt().coerceIn(0, 255)
+        backdropDrawable.applyMotion(alphaInt, motionProgress, velocityShift)
     }
 
     fun apply(overrideBlurRadiusPx: Int? = null) {
@@ -195,13 +199,11 @@ internal class PanelBackdropController(
 
         val cornerRadiusPx = cornerRadiusProvider()
         backdropDrawable.updateStyle(
-            GlassBackdropStyle(
-                themeId = themeId,
-                isDark = colorScheme != "light",
-                blurActive = effectiveBlurRadius > 0,
-                cornerRadiusPx = cornerRadiusPx,
-                dynamicOverride = dynamicTint,
-            ),
+            themeId = themeId,
+            isDark = colorScheme != "light",
+            blurActive = effectiveBlurRadius > 0,
+            cornerRadiusPx = cornerRadiusPx,
+            dynamicOverride = dynamicTint,
         )
         applyBlurRadius(window, effectiveBlurRadius)
         if (lastAppliedCornerPx != cornerRadiusPx) {
@@ -215,9 +217,8 @@ internal class PanelBackdropController(
         window: Window,
         radiusPx: Int,
     ) {
-        if (lastAppliedBlurRadius != radiusPx) {
-            lastAppliedBlurRadius = radiusPx
-            window.setBackgroundBlurRadius(radiusPx)
+        blurCommitTracker.commitIfChanged(radiusPx) { committed ->
+            window.setBackgroundBlurRadius(committed)
         }
     }
 

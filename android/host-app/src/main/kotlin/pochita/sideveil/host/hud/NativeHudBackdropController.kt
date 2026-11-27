@@ -8,6 +8,7 @@ import android.view.View
 import android.view.Window
 import android.view.WindowManager
 import pochita.sideveil.host.overlay.BlurMaskDrawable
+import pochita.sideveil.host.overlay.BlurRadiusCommitTracker
 import pochita.sideveil.host.overlay.GlassBackdropDrawable
 import pochita.sideveil.host.overlay.GlassBackdropStyle
 import pochita.sideveil.host.overlay.OverlayWindowFlags
@@ -36,7 +37,7 @@ internal class NativeHudBackdropController(
     private var isDark = true
     private var systemBlurSupported = runCatching { windowManager.isCrossWindowBlurEnabled }.getOrDefault(false)
     private var dynamicTint: GlassTintOverride? = null
-    private var lastAppliedBlur = -1
+    private val blurCommitTracker = BlurRadiusCommitTracker()
     private var lastCornerPx = -1f
 
     private val blurEnabledListener =
@@ -142,20 +143,18 @@ internal class NativeHudBackdropController(
                 panelConfig.nativeBlurEnabled
         val radius = if (blurAllowed) panelConfig.blurRadiusPx.coerceIn(0, MAX_HUD_BLUR_PX) else 0
         backdropDrawable.updateStyle(
-            GlassBackdropStyle(
-                themeId = themeId,
-                isDark = isDark,
-                blurActive = radius > 0,
-                cornerRadiusPx = cornerPx,
-                dynamicOverride = dynamicTint,
-            ),
+            themeId = themeId,
+            isDark = isDark,
+            blurActive = radius > 0,
+            cornerRadiusPx = cornerPx,
+            dynamicOverride = dynamicTint,
         )
         applyBlur(window, radius)
     }
 
     fun clearBlur(window: Window) = applyBlur(window, 0)
 
-    fun appliedBlurRadiusPx(): Int = lastAppliedBlur.coerceAtLeast(0)
+    fun appliedBlurRadiusPx(): Int = blurCommitTracker.appliedRadiusPx
 
     fun agslDebugState(): DebugAgslSnapshot = backdropDrawable.debugState()
 
@@ -163,9 +162,8 @@ internal class NativeHudBackdropController(
         window: Window,
         radius: Int,
     ) {
-        if (lastAppliedBlur != radius) {
-            lastAppliedBlur = radius
-            window.setBackgroundBlurRadius(radius)
+        blurCommitTracker.commitIfChanged(radius) { committed ->
+            window.setBackgroundBlurRadius(committed)
         }
     }
 

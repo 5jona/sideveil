@@ -13,7 +13,6 @@ import android.view.inputmethod.InputMethodManager
 import android.webkit.WebView
 import android.widget.FrameLayout
 import pochita.sideveil.host.overlay.OverlayWindowFlags
-import pochita.sideveil.host.overlay.OverlayWindowLayoutSnapshot
 import pochita.sideveil.host.overlay.WindowLayoutCommitTracker
 import pochita.sideveil.host.plugin.EmbedQuickBarView
 import pochita.sideveil.host.plugin.PluginSizeOverride
@@ -259,7 +258,7 @@ internal class PanelWindowLayout(
         window: Window,
         lp: WindowManager.LayoutParams,
     ) {
-        layoutCommitTracker.commitIfChanged(OverlayWindowLayoutSnapshot.from(lp)) {
+        layoutCommitTracker.commitIfChanged(lp) {
             window.attributes = lp
         }
     }
